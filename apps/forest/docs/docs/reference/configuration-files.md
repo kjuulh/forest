@@ -34,7 +34,7 @@ commands: sdk.#ForestProjectCommands & {
 
 ### `forest.lock`
 
-Lock file for resolved binary dependencies and local paths, refreshed by `forest update`. A binary download records its version and digest; unreleased source after v0.3.16 also records a binary already present in the shared cache when the project first resolves it. File/template-only registry components have no version/digest lock. Do not edit manually.
+Lock file for resolved binary dependencies and local paths, refreshed by `forest update`. A binary download records its version and digest; since v0.3.17, forest also records a binary already present in the shared cache when the project first resolves it. File/template-only registry components have no version/digest lock. Do not edit manually.
 
 ```
 # forest.lock — do not edit manually

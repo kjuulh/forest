@@ -2,7 +2,7 @@
 
 Policies are guardrails on releases to an environment. The server enforces them on every path that can deploy there: an explicit release by environment or by destination, a trigger, and each stage of a pipeline.
 
-**Version boundary:** the enforcement below is in unreleased server source after **v0.3.16**. Released v0.3.16 checks branch restrictions only for environment-targeted direct releases, not destination-only releases or pipeline stages; its scheduler counts any artifact's success for soak, pipeline soak includes plans, missing source success passes, and policy-evaluation errors can be treated as no policies. Updating the CLI alone does not update the server. Confirm the server revision and independently review branch and same-artifact source exposure before approval.
+**Version boundary:** the enforcement below is in server source since **v0.3.17**. Released v0.3.16 checks branch restrictions only for environment-targeted direct releases, not destination-only releases or pipeline stages; its scheduler counts any artifact's success for soak, pipeline soak includes plans, missing source success passes, and policy-evaluation errors can be treated as no policies. Updating the CLI alone does not update the server. Confirm the server revision and independently review branch and same-artifact source exposure before approval.
 
 ## Policy types
 

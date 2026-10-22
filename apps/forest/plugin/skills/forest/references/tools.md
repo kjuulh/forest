@@ -54,7 +54,7 @@ forest global add --help | grep -- --prerelease
 - `add` without the flag, `update` and the background update;
 - catalogue tools in `list`, `run`, `which` and `warm`.
 
-It is read at resolution time and never written to `forest.cue`. Unset it to stop: per-tool entries return to stable on the next `update`, and catalogue tools resolve to stable straight away. Catalogue pins, bans and `@<version>` pins still win. A tool with only prereleases is not in the org catalogue, so it still has to be added per tool. Set it in `~/.zshenv` (or your shell's equivalent), not only in `~/.zshrc`, so that shims run from scripts and the background update see it too. It is not an agent default: set it only when the user wants every tool on prereleases. After v0.3.16 it also makes `forest self update`, `self check` and the update notice consider forest's own prereleases; see [setup-and-context.md](setup-and-context.md).
+It is read at resolution time and never written to `forest.cue`. Unset it to stop: per-tool entries return to stable on the next `update`, and catalogue tools resolve to stable straight away. Catalogue pins, bans and `@<version>` pins still win. A tool with only prereleases is not in the org catalogue, so it still has to be added per tool. Set it in `~/.zshenv` (or your shell's equivalent), not only in `~/.zshrc`, so that shims run from scripts and the background update see it too. It is not an agent default: set it only when the user wants every tool on prereleases. Since v0.3.17 it also makes `forest self update`, `self check` and the update notice consider forest's own prereleases; see [setup-and-context.md](setup-and-context.md).
 
 **Released v0.3.14 and older:**
 

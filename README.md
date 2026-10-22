@@ -119,7 +119,7 @@ forest self update    # upgrade to latest
 A one-line nag also prints at the end of every command when a newer release
 exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 
-**After v0.3.16** (check: `forest self update --help` lists `--prerelease`),
+**Since v0.3.17** (check: `forest self update --help` lists `--prerelease`),
 forest itself has prereleases:
 
 ```bash

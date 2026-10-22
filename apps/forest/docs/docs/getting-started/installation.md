@@ -23,8 +23,8 @@ The installer verifies the tarball's SHA-256 and refuses a binary whose
 ## Updating
 
 `forest self update` installs the latest release and `forest self check` exits
-1 when one is newer. The rest of this section describes forest **after
-v0.3.16**; check that `forest self update --help` lists `--prerelease`. On
+1 when one is newer. The rest of this section describes forest **since
+v0.3.17**; check that `forest self update --help` lists `--prerelease`. On
 v0.3.16 and older, plain `self update` installs GitHub's latest release even
 over a newer binary, and `forest self update <tag>` installs an exact release.
 

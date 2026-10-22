@@ -12,7 +12,7 @@ The skill only adds instructions. It runs nothing by itself, and it tells the ag
 
 ## Install
 
-The plugin files were added after v0.3.16. For an unpublished checkout, use the local marketplace path below. The GitHub route requires a published revision containing those files; it has not been verified for this candidate. Strict plugin validation and a local marketplace install are separate from model invocation, reference selection and agent choice, which remain **unverified**.
+The plugin files ship in v0.3.17 and on `main`. Installing from GitHub was verified from `main` (`b5175bd`) in an isolated config on 2026-10-21; for an unpublished checkout, use the local marketplace path below. Strict plugin validation and a local marketplace install are separate from model invocation, reference selection and agent choice, which remain **unverified**.
 
 In Claude Code:
 

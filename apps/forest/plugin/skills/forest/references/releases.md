@@ -32,7 +32,7 @@ An unanchored pattern matches more than intended: `prod` matches `preprod-eu`. A
 | annotate | `forest release annotate --context-title "<t>" [--source-type ci] [--detect]` | Uploads `.forest/deployment/` from the current directory plus the spec, and records an immutable annotation with git context. Prints a **slug** (e.g. `deadly-amusing-asp`). **Evaluates triggers** unless `--annotation-only` is passed. |
 | release | `forest release release <slug> -e <env> \| -d <dest>… [--pipeline]` | Creates a release intent for that artifact. Only one release can be in flight per project and destination; `--force` cancels queued ones (it does not bypass policies). |
 
-`forest release create -e <env>` does all three for one environment, with triggers skipped (unless `--skip-commit` is supplied). With `--pipeline` it instead runs the whole pipeline. After v0.3.16, `--environment` is optional: a no-target `create` prepares and annotates with triggers enabled, **which may deploy prod**. Check `create --help`, not a local build's version string. Commit first: the annotation records git context, not proof of the running code.
+`forest release create -e <env>` does all three for one environment, with triggers skipped (unless `--skip-commit` is supplied). With `--pipeline` it instead runs the whole pipeline. Since v0.3.17, `--environment` is optional: a no-target `create` prepares and annotates with triggers enabled, **which may deploy prod**. Check `create --help`, not a local build's version string. Commit first: the annotation records git context, not proof of the running code.
 
 Useful flags:
 
@@ -52,14 +52,14 @@ forest release release <slug> -o <org> -p <project> -e prod
 
 - Prefer pipeline promotion: an artifact that passed `deploy-dev` proceeds through the plan approval to `deploy-prod`. Review same-artifact dev success, elapsed time and branch before approval; runtime policy gaps are in [pipelines-and-policies.md](pipelines-and-policies.md). A manual `-e prod` skips pipeline ordering and plan approval.
 - A rollback is the same command with the **previous good** slug. Find it in CI logs or the Forage UI, or with `forest release` on a terminal, whose picker marks the latest succeeded release per destination. There is no rollback command, and component `rollback` hooks are not invoked by the CLI.
-- After v0.3.16, `release release` and its `release` shorthand reject `--ref` / `-r` during argument parsing, before release side effects. Older CLIs accepted but ignored them. Select an existing artifact by its annotation slug or `--artifact-id <artifact-uuid>`; a git branch is not an artifact identity.
-- `-d <destination>` releases to named destinations. A server with the post-v0.3.16 change checks branch restriction for their environments; an older one does not. Never use `-d` to get around a policy.
+- Since v0.3.17, `release release` and its `release` shorthand reject `--ref` / `-r` during argument parsing, before release side effects. Older CLIs accepted but ignored them. Select an existing artifact by its annotation slug or `--artifact-id <artifact-uuid>`; a git branch is not an artifact identity.
+- `-d <destination>` releases to named destinations. A server with the v0.3.17 change checks branch restriction for their environments; an older one does not. Never use `-d` to get around a policy.
 
 ## Observing a release
 
 Use a snapshot to read a parked plan; `--follow` intentionally waits through approval until the release is terminal.
 
-After v0.3.16, a follower reads the final intent state before rendering its body, so a completed release does not retain its initial queued blocker. Follow stream errors or a stream ending before a terminal outcome exit nonzero; they are not deployment success. Snapshot mode retains its existing persisted-history fallback.
+Since v0.3.17, a follower reads the final intent state before rendering its body, so a completed release does not retain its initial queued blocker. Follow stream errors or a stream ending before a terminal outcome exit nonzero; they are not deployment success. Snapshot mode retains its existing persisted-history fallback.
 
 ```bash
 forest release show <slug|intent-uuid> -o <org> -p <project>
@@ -74,7 +74,7 @@ How to read `release show`:
 - **`destinations:`** lists one row per step, and a plan step counts. During an approval wait you can see `✓ [prod] prod/eu [SUCCEEDED]` while `deploy-prod` is still `PENDING`; that row is the plan. After the deploy, `prod/eu` appears twice. Decide "deployed" from the **deploy** stage.
 - Steps go `QUEUED → ASSIGNED → RUNNING → SUCCEEDED | FAILED | TIMED_OUT | CANCELLED | SUPERSEDED`. A step left `QUEUED` is usually held by a soak-time policy or by another in-flight release for that destination.
 - `no release intent found for slug '<slug>'`: the annotation exists but nothing was released. No trigger matched (often a laptop annotation without `--source-type ci`), or it was a `create --skip-commit` on a CLI without the annotate-for-triggers change.
-- Exit codes: `show` exits 1 if a step failed, timed out or was cancelled. After v0.3.16 it also exits 1 when a pipeline stage failed or was cancelled, for example blocked by a branch policy; on v0.3.16 and older such a release exits 0, so read the stage lines. It exits 0 while queued, running or awaiting approval. `release`/`create` exit 0 when parked for approval or with `--no-wait`, and 1 when a destination failed.
+- Exit codes: `show` exits 1 if a step failed, timed out or was cancelled. Since v0.3.17 it also exits 1 when a pipeline stage failed or was cancelled, for example blocked by a branch policy; on v0.3.16 and older such a release exits 0, so read the stage lines. It exits 0 while queued, running or awaiting approval. `release`/`create` exit 0 when parked for approval or with `--no-wait`, and 1 when a destination failed.
 
 `forest project releases` renders a plan stage as `deploy(<env>)`; trust `release show` for stage types. Neither command shows the image or SHA running in the service.
 
@@ -96,8 +96,8 @@ A green release says the destination provider reported success. That is good evi
 |---|---|---|
 | `the 'forest/deployment' contract is not in your dependencies` | prepare needs the deployment contract | add `"forest/deployment": version: "<published>"` (`forest components show forest/deployment`) |
 | `blocked by policy '<name>': branch '…' does not match …` | branch_restriction on the target environment | release a build from an allowed branch; don't route around it with `-d` |
-| `branch metadata is absent or empty` (after v0.3.16) | target branch restriction requires recorded provenance | produce a fresh annotation with the actual source branch; do not invent it from a default/current branch or edit historical annotations |
-| step stays `QUEUED` | soak_time not met, or another release in flight | after v0.3.16, read the artifact-specific `blocked:` reason in `release show`; inspect its successful source deploy and elapsed time. `policy evaluate` remains partial any-artifact diagnostics, not approval |
+| `branch metadata is absent or empty` (since v0.3.17) | target branch restriction requires recorded provenance | produce a fresh annotation with the actual source branch; do not invent it from a default/current branch or edit historical annotations |
+| step stays `QUEUED` | soak_time not met, or another release in flight | since v0.3.17, read the artifact-specific `blocked:` reason in `release show`; inspect its successful source deploy and elapsed time. `policy evaluate` remains partial any-artifact diagnostics, not approval |
 | `no release intent found for slug` | annotation with no release | check triggers and `--source-type`; see [pipelines-and-policies.md](pipelines-and-policies.md) |
 | `The input device is not a TTY` | a picker or prompt needs `-o`/`-p`, a slug or other flags | pass them explicitly |
 | `failed to find upstream component` during prepare | a dependency version is a range or unpublished | pin an exact published version ([components.md](components.md)) |

@@ -17,7 +17,7 @@ This automatically:
 3. **Releases** to all destinations in the target environment
 4. **Streams** progress until the release completes or fails
 
-This is a direct dev release, not the normal pipeline-first flow. For the project's configured rollout, use `prepare` then `annotate --source-type ci` and let its trigger run the pipeline. Inspect all stages first: `--pipeline`, or post-v0.3.16 `--skip-commit`, can reach prod even with `-e dev`.
+This is a direct dev release, not the normal pipeline-first flow. For the project's configured rollout, use `prepare` then `annotate --source-type ci` and let its trigger run the pipeline. Inspect all stages first: `--pipeline`, or `--skip-commit` on v0.3.17 and newer, can reach prod even with `-e dev`.
 
 ## Step by Step
 

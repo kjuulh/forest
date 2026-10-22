@@ -10,12 +10,10 @@ checksums and `install.sh`.
 A prerelease goes through the same workflow. Publishing it needs write access to
 `understory-io/forest`.
 
-First ship and install a stable release containing this feature. The already
-published `v0.3.16` does not contain it. Choose an untagged core after the actual
-feature-containing stable: if that stable is `v0.3.17`, an available next core
-could be `0.3.18`, giving `0.3.18-rc.1`. Do not reuse the bootstrap stable's
-core. The examples below assume main declares `0.3.17`, that stable tag exists,
-and `v0.3.18` does not; adjust them to the versions actually released.
+v0.3.17 (2026-10-22) is the first stable release that supports this, and
+`v0.3.18-rc.1` the first prerelease cut with it. In the commands below,
+`<version>` is the prerelease you are cutting, e.g. `0.3.18-rc.2`, or
+`0.3.19-rc.1` once `v0.3.18` is released.
 
 1. Pick a version a release-candidate is meant to precede: the next release's
    core plus a numbered suffix, e.g. `0.3.18-rc.1` after stable `0.3.17`.
@@ -27,19 +25,19 @@ and `v0.3.18` does not; adjust them to the versions actually released.
 2. Create the GitHub release marked prerelease, on a commit on main:
 
    ```bash
-   gh release create v0.3.18-rc.1 --repo understory-io/forest \
+   gh release create v<version> --repo understory-io/forest \
      --target <commit-sha> --prerelease --latest=false \
-     --title v0.3.18-rc.1 --generate-notes
+     --title v<version> --generate-notes
    ```
 
-3. `release.yml` runs on `release: published`. It stamps `0.3.18-rc.1` into the
+3. `release.yml` runs on `release: published`. It stamps `<version>` into the
    build, checks the binary reports it with the commit, and uploads
-   `forest-v0.3.18-rc.1-<target>.tar.gz` plus `.sha256` for each platform, then
+   `forest-v<version>-<target>.tar.gz` plus `.sha256` for each platform, then
    `install.sh`.
 
 **Done** when all six assets and `install.sh` are attached and
-`forest self update v0.3.18-rc.1` on a test machine prints
-`forest 0.3.18-rc.1 (commit <commit-sha>) installed`.
+`forest self update v<version>` on a test machine prints
+`forest <version> (commit <commit-sha>) installed`.
 
 Uploads never overwrite existing assets. Platform jobs publish independently,
 not transactionally, so a failed run can leave a partial release and a rerun

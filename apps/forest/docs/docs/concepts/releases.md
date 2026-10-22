@@ -87,7 +87,7 @@ The wait stream includes:
 
 `forest release create` prepares and annotates, auto-detecting organisation, project and git context:
 
-The no-target form below is in unreleased source after **v0.3.16**. Released v0.3.16 requires an environment and skips triggers; use `prepare` + `annotate --source-type ci` for a version-independent trigger flow. A local build may still print `0.3.16`, so check `create --help`.
+The no-target form below is in **v0.3.17** and newer. Released v0.3.16 requires an environment and skips triggers; use `prepare` + `annotate --source-type ci` for a version-independent trigger flow. A build from source may print an older number, so check `create --help`.
 
 ```bash
 forest release create --source-type ci       # triggers decide; usually the project's pipeline

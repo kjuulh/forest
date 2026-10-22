@@ -5,7 +5,7 @@ description: Use Forest CLI for forest.cue, forest.component.cue and forest.lock
 
 # Forest
 
-Forest codifies project workflows as CUE and distributes shared tools. Guidance matches released **v0.3.16** (2026-10-20). Behaviour that changed after it is labelled "after v0.3.16". Users may run an older CLI, and a local build reports the last released version, so check flag help rather than the version string.
+Forest codifies project workflows as CUE and distributes shared tools. Guidance matches released **v0.3.17** (2026-10-22). Behaviour that differs on older CLIs is labelled by version ("since v0.3.17", "v0.3.16 and older"). Users may run an older CLI, so check flag help rather than the version string; a build from source prints `(local build)` since v0.3.17, and only the last released number before.
 
 ## Pick the reference
 
@@ -26,7 +26,7 @@ Read only the task's reference, relative to this skill's directory (not the user
 - **Project/component commands:** `forest run <cmd>` in a project with `forest.cue`; build is `forest run build`, not `forest build`.
 - **Shared tools:** `forest global run <tool> -- <args>` anywhere, or its installed shim. `global` is hidden from top-level help; use `forest global --help`.
 - **Producer releases:** use the pipeline-first flow below, not a tool update or component publish.
-- Currently published versions, including RCs, reject overwrite; an admin unpublish permits version reuse. An exact pin selects a version, not a lifetime content identity: binary digest locks detect replacement, while warm caches are not an online revocation check. Pin project dependencies to exact published versions: that works on every CLI, while ranges only resolve after v0.3.16. CUE module imports and tool selectors have different rules in their references.
+- Currently published versions, including RCs, reject overwrite; an admin unpublish permits version reuse. An exact pin selects a version, not a lifetime content identity: binary digest locks detect replacement, while warm caches are not an online revocation check. Pin project dependencies to exact published versions: that works on every CLI, while ranges resolve only on v0.3.17 and newer. CUE module imports and tool selectors have different rules in their references.
   Only registry binary dependencies get version/digest lock entries. File/template-only components have no such lock; use exact versions for reproducible selection rather than assuming a range is pinned.
 
 ## Before anything that changes shared state
@@ -47,7 +47,7 @@ forest release prepare
 forest release annotate --context-title "<what changed>" --source-type ci
 ```
 
-After v0.3.16, `forest release create --source-type ci` without a target is shorthand for both steps. **It can deploy through triggers, including prod**; it is not a no-deployment mode. Check `create --help` for an optional `--environment` before using it. In CI use the `release` composite action with no `environment`, or `service-release.yml`. If no trigger matches, inspect the whole configured pipeline before requesting `create -e <env> --pipeline`; it is not limited to `<env>`. Direct environment releases require an explicit user request, never recovery from policy denial. Version-specific `--skip-commit` behavior is in [references/pipelines-and-policies.md](references/pipelines-and-policies.md).
+Since v0.3.17, `forest release create --source-type ci` without a target is shorthand for both steps. **It can deploy through triggers, including prod**; it is not a no-deployment mode. Check `create --help` for an optional `--environment` before using it. In CI use the `release` composite action with no `environment`, or `service-release.yml`. If no trigger matches, inspect the whole configured pipeline before requesting `create -e <env> --pipeline`; it is not limited to `<env>`. Direct environment releases require an explicit user request, never recovery from policy denial. Version-specific `--skip-commit` behavior is in [references/pipelines-and-policies.md](references/pipelines-and-policies.md).
 
 ## What counts as done
 

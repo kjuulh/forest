@@ -43,7 +43,7 @@ A prerelease is just a SemVer version with a pre-release suffix: `0.4.0-rc.1`, `
 
 | Consumer | Default (no version given) | Exact version | Range |
 |---|---|---|---|
-| Project dependency (`forest.cue`) | n/a: a version is required | `version: "0.4.0-rc.1"` works | after v0.3.16, resolves to a matching binary lock entry or newest **stable** match (an RC only if nothing stable matches); file/template-only components have no version lock; v0.3.16 and older fail at runtime |
+| Project dependency (`forest.cue`) | n/a: a version is required | `version: "0.4.0-rc.1"` works | since v0.3.17, resolves to a matching binary lock entry or newest **stable** match (an RC only if nothing stable matches); file/template-only components have no version lock; v0.3.16 and older fail at runtime |
 | `forest add <org>/<name>` | highest **stable** | `@0.4.0-rc.1` written verbatim | n/a |
 | Tool (`forest global add`) | highest stable; v0.3.15+ refuses an RC-only tool unless `--prerelease` ([tools.md](tools.md)) | `@0.4.0-rc.1` pins it | not supported |
 | Org tool catalogue | stable only | n/a | n/a |
@@ -75,9 +75,9 @@ Run a real command that this component exports:
 forest run greeter:hello --name kasper
 ```
 
-Check its RC behavior, then run again to confirm reuse, and inspect the RC's `sha256:` entry in `forest.lock`. On v0.3.16 and older, don't run `forest update` here: it rejects dotted RCs (`invalid version spec`). After v0.3.16 it accepts them. Commit the consumer manifest and generated lock. Registry listing proves publication; actual output proves consumption/execution.
+Check its RC behavior, then run again to confirm reuse, and inspect the RC's `sha256:` entry in `forest.lock`. On v0.3.16 and older, don't run `forest update` here: it rejects dotted RCs (`invalid version spec`). Since v0.3.17 it accepts them. Commit the consumer manifest and generated lock. Registry listing proves publication; actual output proves consumption/execution.
 
-Publishing an RC only through `FOREST_COMPONENT_VERSION`/`--version` while `forest.cue` still says `0.3.0` uploads a `forest.cue` that claims `0.3.0`. A **consumer on v0.3.16 or older** that depends on `0.4.0-rc.1` re-downloads it on every command and never registers its commands; for example, `forest run greeter:hello` fails as an unknown subcommand. Consumers after v0.3.16 identify the cached component by its registry version, so they work. Because you can't know every consumer's CLI version, commit the matching manifest before publishing a component that others consume. Tools are unaffected either way, since they are resolved from the manifest.
+Publishing an RC only through `FOREST_COMPONENT_VERSION`/`--version` while `forest.cue` still says `0.3.0` uploads a `forest.cue` that claims `0.3.0`. A **consumer on v0.3.16 or older** that depends on `0.4.0-rc.1` re-downloads it on every command and never registers its commands; for example, `forest run greeter:hello` fails as an unknown subcommand. Consumers on v0.3.17 and newer identify the cached component by its registry version, so they work. Because you can't know every consumer's CLI version, commit the matching manifest before publishing a component that others consume. Tools are unaffected either way, since they are resolved from the manifest.
 
 Return to stable by pinning its exact published version and running the consumer command again. Use a new number for each rebuilt RC, even if the previous one was broken; unpublishing and reusing its number does not update existing binary digest locks.
 

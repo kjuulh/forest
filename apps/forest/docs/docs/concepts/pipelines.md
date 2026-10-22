@@ -34,7 +34,7 @@ PENDING → ACTIVE → SUCCEEDED
 plan:     ACTIVE → AWAITING_APPROVAL → SUCCEEDED | FAILED (rejected)
 ```
 
-On a server with the unreleased post-v0.3.16 [policy enforcement changes](policies.md), a stage for an environment with a branch restriction **fails** for a disallowed branch before a plan is offered for approval, and an unmet same-artifact deploy soak waits and is re-checked. Released v0.3.16 servers do not enforce pipeline branch restrictions and can count plans toward soak; confirm the server revision before relying on these checks.
+On a server with the v0.3.17 [policy enforcement changes](policies.md), a stage for an environment with a branch restriction **fails** for a disallowed branch before a plan is offered for approval, and an unmet same-artifact deploy soak waits and is re-checked. Released v0.3.16 servers do not enforce pipeline branch restrictions and can count plans toward soak; confirm the server revision before relying on these checks.
 
 ## Plan stages and approval
 
@@ -54,7 +54,7 @@ A plan stage with `"destroy": true` plans the removal of everything the project 
 - **From an annotation (preferred):** a trigger with `--use-pipeline` ([triggers](triggers.md)), for example `--branch '^main$' --source-type '^ci$' --use-pipeline`. CI then only annotates: `forest release prepare` + `forest release annotate --source-type ci`, or `forest release create --source-type ci` without a target.
 - **Explicitly:** `forest release release <slug> -e <env> --pipeline` or `forest release create -e <env> --pipeline`.
 
-The no-target `create` shorthand is unreleased after v0.3.16. On released v0.3.16 use `prepare` + `annotate`; `create` requires an environment and skips triggers. Check `create --help`, not a local build's version string.
+The no-target `create` shorthand is in v0.3.17 and newer. On released v0.3.16 use `prepare` + `annotate`; `create` requires an environment and skips triggers. Check `create --help`, not a local build's version string.
 
 Either way the **whole pipeline** runs: `-e` and the trigger's environments do not limit which stages run. When a project has several pipelines, the first enabled one by name is used.
 

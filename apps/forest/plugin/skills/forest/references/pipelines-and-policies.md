@@ -2,7 +2,7 @@
 
 ## Prefer pipelines
 
-Release by **annotating** and let an anchored trigger start the pipeline. The pipeline encodes dev-before-prod ordering, plan approval and destroy safety. Policies are enforced by the **server**, so what you can rely on depends on the server's version, not your CLI's. Servers running the post-v0.3.16 change check branch restriction on pipeline stages and `-d` releases, and count only this artifact's dev deploys toward soak. Older servers do neither (see the table below). Unless you know the server has the change, keep the branch check in CI and confirm same-artifact dev exposure at approval. A direct `release -e prod` skips ordering and plan approval; never use it or `-d` to recover from a policy denial.
+Release by **annotating** and let an anchored trigger start the pipeline. The pipeline encodes dev-before-prod ordering, plan approval and destroy safety. Policies are enforced by the **server**, so what you can rely on depends on the server's version, not your CLI's. Servers running the v0.3.17 change check branch restriction on pipeline stages and `-d` releases, and count only this artifact's dev deploys toward soak. Older servers do neither (see the table below). Unless you know the server has the change, keep the branch check in CI and confirm same-artifact dev exposure at approval. A direct `release -e prod` skips ordering and plan approval; never use it or `-d` to recover from a policy denial.
 
 | Situation | Do this |
 |---|---|
@@ -11,7 +11,7 @@ Release by **annotating** and let an anchored trigger start the pipeline. The pi
 | No trigger matches, but the pipeline should run | `forest release create -e <env> --pipeline` (or `forest release release <slug> -e <env> --pipeline`) |
 | User asked for exactly one environment | `forest release create -e <env>`. Say that it bypasses the pipeline. |
 
-Version boundary: v0.3.16 and older have the old `create` behaviour; the new routing comes after v0.3.16. A local build may still print `0.3.16`, so check `forest release create --help` for an optional `--environment`.
+Version boundary: v0.3.16 and older have the old `create` behaviour; the new routing is in v0.3.17 and newer. A build from source may print an older number, so check `forest release create --help` for an optional `--environment`.
 
 - **Old `create`:** `--environment` is required; annotation skips triggers. `--skip-commit` releases nothing (`show` reports no release intent). Use `prepare` + `annotate` for pipelines.
 - **New `create`:** without `-e`/`-d`, or with `--skip-commit`, it prepares and annotates **with triggers**. It makes no direct release call, but a trigger can start the whole pipeline and deploy prod. Explicit `-e`/`-d` without `--skip-commit` preserves direct release with triggers skipped. `--pipeline`/`--force`/`--no-wait`/`--no-health` need a target; they are not trigger controls.
@@ -86,7 +86,7 @@ forest project policy create -o <org> -p <project> --name soak \
   --type soak_time --source-environment dev --target-environment prod --duration 3600
 ```
 
-| Type | Server with the post-v0.3.16 change | Older server (v0.3.16 and before) |
+| Type | Server with the v0.3.17 change | Older server (v0.3.16 and before) |
 |---|---|---|
 | `branch_restriction` | `-e` and `-d` releases refused with `blocked by policy`; pipeline plan/deploy stages fail for that env; queued work rechecks its annotation branch at dispatch and fails if policy changed to disallow it | only `-e` releases checked; `-d` releases and pipeline stages are not |
 | `soak_time` | only a successful **deploy** of the **same artifact** to the source env counts; never deployed there means not soaked; direct releases wait `QUEUED`, stages wait | the scheduler counts any artifact's success; pipelines count this artifact but include plan steps; no source success at all passes |
@@ -94,11 +94,11 @@ forest project policy create -o <org> -p <project> --name soak \
 | `supersede_pending` | newer pending releases replace older ones for the target (`--same-branch-only` to narrow) | same |
 | approval (server-side; the CLI can't create it) | pipelines only | same |
 
-After v0.3.16, an applicable branch restriction also rejects absent, empty or whitespace-only branch metadata, even with a permissive pattern. This is a compatibility change from older servers that skipped restrictions when no branch was recorded. The server does not invent provenance from a checkout or default branch, or rewrite historical annotations; projects without an applicable restriction are unchanged.
+Since v0.3.17, an applicable branch restriction also rejects absent, empty or whitespace-only branch metadata, even with a permissive pattern. This is a compatibility change from older servers that skipped restrictions when no branch was recorded. The server does not invent provenance from a checkout or default branch, or rewrite historical annotations; projects without an applicable restriction are unchanged.
 
-The post-v0.3.16 `create` detection also leaves a detached checkout's branch unset instead of recording Git's `HEAD` sentinel. Actual CI branch metadata or an explicit source branch still takes precedence. Older `create` annotations may contain `HEAD`; inspect their recorded provenance rather than treating it as a real branch or rewriting it.
+The v0.3.17 `create` detection also leaves a detached checkout's branch unset instead of recording Git's `HEAD` sentinel. Actual CI branch metadata or an explicit source branch still takes precedence. Older `create` annotations may contain `HEAD`; inspect their recorded provenance rather than treating it as a real branch or rewriting it.
 
-Missing same-artifact source deployment remains a `QUEUED` prerequisite, not approval and not a deadline. After v0.3.16, `release show` and project release status expose the current artifact-specific blocker on queued steps and ready pending plan/deploy stages. A plan or another artifact's source deploy does not clear it; source success, policy changes and assignment are reflected on the next status read, without storing stale policy errors. A blocker alone is not a failed release. If evaluation fails, status reports that it cannot evaluate policies rather than implying approval. Soak measures time since the deploy succeeded, not whether the service stayed healthy, so review dev health at approval.
+Missing same-artifact source deployment remains a `QUEUED` prerequisite, not approval and not a deadline. Since v0.3.17, `release show` and project release status expose the current artifact-specific blocker on queued steps and ready pending plan/deploy stages. A plan or another artifact's source deploy does not clear it; source success, policy changes and assignment are reflected on the next status read, without storing stale policy errors. A blocker alone is not a failed release. If evaluation fails, status reports that it cannot evaluate policies rather than implying approval. Soak measures time since the deploy succeeded, not whether the service stayed healthy, so review dev health at approval.
 
 `--force` never bypasses a policy. A forced release behind an unmet soak simply stays `QUEUED`. Older docs show `--branch` and `--environment` on these commands, and an `external_approval` type with `--required-approvals`; the real flags are `--branch-pattern` and `--target-environment`.
 
@@ -106,7 +106,7 @@ Missing same-artifact source deployment remains a `QUEUED` prerequisite, not app
 
 1. Compare anchored destination selectors in `forest.cue` with `forest destination list -o <org>`.
 2. Inspect the whole pipeline and create one anchored trigger (`--branch '^main$' --source-type '^ci$' --use-pipeline`). Trigger environment labels do not limit stages.
-3. Configure branch/soak policies. On a server with the post-v0.3.16 change they guard every path to the environment. On an older one they are additional checks only, so retain CI's allowed-branch condition there; explicit pipeline starts bypass the trigger filter either way.
+3. Configure branch/soak policies. On a server with the v0.3.17 change they guard every path to the environment. On an older one they are additional checks only, so retain CI's allowed-branch condition there; explicit pipeline starts bypass the trigger filter either way.
 4. CI builds and pushes the immutable artifact, then `prepare` + `annotate --source-type ci --detect`, with no direct-release `environment` input.
 5. Before approving prod, check the annotation's branch/SHA, the exact artifact's successful dev deploy and elapsed time, and the saved plan. Missing evidence means stop, not `--force` or `-d`. Follow the **deploy** stage and verify the running revision ([releases.md](releases.md#proving-a-deployment)).
 

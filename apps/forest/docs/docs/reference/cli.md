@@ -39,7 +39,7 @@ forest add <COMPONENT> [--path <PATH>]
 | `COMPONENT` | Component reference: `org/name` or `org/name@version` |
 | `--path` | Use a local path instead of registry version |
 
-Without `@version` it writes the highest stable published version. `@version` is written as given and checked only when a command next loads the project. `forest add` writes `forest.cue` (and a `cue.mod/module.cue` entry), not the lock. A binary download records its version/digest in `forest.lock`; unreleased source after v0.3.16 also records an already-cached binary when the project first resolves it. File/template-only registry dependencies have no version/digest lock.
+Without `@version` it writes the highest stable published version. `@version` is written as given and checked only when a command next loads the project. `forest add` writes `forest.cue` (and a `cue.mod/module.cue` entry), not the lock. A binary download records its version/digest in `forest.lock`; since v0.3.17, forest also records an already-cached binary when the project first resolves it. File/template-only registry dependencies have no version/digest lock.
 
 **Examples:**
 
@@ -80,7 +80,7 @@ Publish the component to the Forest registry.
 forest publish [--dry-run] [--version <v>]
 ```
 
-Uploads the built binaries (every platform staged under `.forest/component/output/`), the component's files and its manifest to the effective target registry. It prints `→ Publishing <org>/<name> to <context> (<server>)` (or the server override) before upload. Run `forest run build` before it for built types. Prebuilt dryruns print the target only in unreleased source after v0.3.16; on released v0.3.16 check the context and server overrides yourself.
+Uploads the built binaries (every platform staged under `.forest/component/output/`), the component's files and its manifest to the effective target registry. It prints `→ Publishing <org>/<name> to <context> (<server>)` (or the server override) before upload. Run `forest run build` before it for built types. Prebuilt dryruns print the target only since v0.3.17; on released v0.3.16 check the context and server overrides yourself.
 
 - `--dry-run` builds the publish manifest without uploading and still needs a login or `FOREST_TOKEN`. Built binary preflight can execute `_meta/describe`, copy the binary into the cache and write `.forest/component/meta.json`; a cached descriptor can be reused. Prebuilt/external shapes skip that probe and those writes.
 - The version is `--version` > `FOREST_COMPONENT_VERSION` > `forest.component.version`. `forest components version` prints the result.
@@ -104,7 +104,7 @@ Checks that project config matches component schemas and verifies contract cover
 
 Refresh binary entries in `forest.lock` to the newest published version matching each dependency's `version:` (`"1.2.3"` exact, `"1.2"`, `"1"` or `"latest"`). Stable versions are preferred; a prerelease is picked only when no stable version matches, or when it is named exactly. `forest.cue` is not rewritten. Other commands resolve a range to a matching binary version lock when present, so a locked binary range moves only when you run `forest update`.
 
-Runtime range resolution and dotted prerelease specs in `forest update` are unreleased changes after **v0.3.16**. Released v0.3.16 fails to load project dependency ranges during ordinary commands and rejects dotted RC specs in `update`; exact published versions still work for consumption without `update`.
+Runtime range resolution and dotted prerelease specs in `forest update` arrived in **v0.3.17**. Released v0.3.16 fails to load project dependency ranges during ordinary commands and rejects dotted RC specs in `update`; exact published versions still work for consumption without `update`.
 
 Lock-first selection applies to registry binary lock entries. File/template-only components have no registry version/digest lock, so their ranges resolve again; choose exact versions for reproducible selection and do not infer binary digest protection for component files.
 
@@ -224,7 +224,7 @@ forest release release [SLUG] [OPTIONS]
 ```
 
 Select an existing artifact by its annotation slug or `--artifact-id <artifact-uuid>`.
-After v0.3.16, `--ref` / `-r` are rejected during argument parsing, before release
+Since v0.3.17, `--ref` / `-r` are rejected during argument parsing, before release
 side effects; older CLIs accepted but ignored them. A git branch is not an
 artifact identity. This also applies to the `forest release` shorthand.
 
@@ -246,7 +246,7 @@ does not change `create`'s target-only flag contract below.
 
 ### `forest release create`
 
-**Unreleased source behavior after v0.3.16.** Released v0.3.16 does not have
+**Since v0.3.17.** Released v0.3.16 does not have
 this routing. Check `forest release create --help`: newer source makes
 `--environment` optional. A local build may still report `0.3.16`.
 
@@ -270,7 +270,7 @@ forest release create --environment <ENV> [OPTIONS]
 Prefer trigger-to-pipeline release for environment ordering and plan approval.
 Inspect triggers, the whole pipeline and policies first. Released v0.3.16
 servers lack pipeline branch-restriction checks, and their soak can count plans
-or pass with missing source success. Unreleased server source closes those gaps
+or pass with missing source success. Server source since v0.3.17 closes those gaps
 ([Policies](../concepts/policies.md)); updating only the CLI does not.
 Review branch, artifact and dev elapsed time before approving prod.
 Anchored trigger filters are not authorization for
@@ -623,7 +623,7 @@ forest self update [--prerelease]       # latest stable, or highest including pr
 forest self update <version>            # exactly that release, older ones included
 ```
 
-After v0.3.16 (check: `forest self update --help` lists `--prerelease`):
+Since v0.3.17 (check: `forest self update --help` lists `--prerelease`):
 
 - Without a version, `update` never replaces a newer binary with an older
   release. `--prerelease` applies to one run; `FOREST_PRERELEASE=1` applies it
@@ -685,7 +685,7 @@ Behaviour:
   content identity. The lockfile keeps the digest first fetched and refuses
   replacement bytes on a later fetch. A warm cached binary can continue running
   without an online revocation check.
-  After v0.3.16 it also covers forest itself; see [`forest self`](#forest-self).
+  Since v0.3.17 it also covers forest itself; see [`forest self`](#forest-self).
 
 ---
 

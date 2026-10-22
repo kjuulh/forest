@@ -8,7 +8,7 @@ Triggers turn release annotations into releases. When an annotation matches a tr
 2. Forest evaluates every enabled trigger of the project against the annotation.
 3. Each matching trigger releases the annotated artifact.
 
-`forest release annotate --annotation-only` skips trigger evaluation. In unreleased source after v0.3.16, `forest release create` with `--environment` or `--destination` also skips triggers **unless `--skip-commit` is supplied**. With `--skip-commit`, even `-e dev` enables triggers and can deploy prod. Released v0.3.16 requires an environment for `create`, skips triggers, and `--skip-commit` releases nothing; use `prepare` + `annotate` for its trigger flow.
+`forest release annotate --annotation-only` skips trigger evaluation. Since v0.3.17, `forest release create` with `--environment` or `--destination` also skips triggers **unless `--skip-commit` is supplied**. With `--skip-commit`, even `-e dev` enables triggers and can deploy prod. Released v0.3.16 requires an environment for `create`, skips triggers, and `--skip-commit` releases nothing; use `prepare` + `annotate` for its trigger flow.
 
 ## Pattern matching
 
@@ -52,7 +52,7 @@ forest project trigger create -o my-org -p my-service \
 
 ## Interaction with policies
 
-Triggers create releases; [policies](policies.md) still apply to them. With the unreleased post-v0.3.16 server enforcement changes, a trigger-created release to an environment with a branch restriction is refused for a disallowed branch, and in a pipeline the stage for that environment fails. Released v0.3.16 does not enforce pipeline branch restrictions; updating only the CLI does not close that gap. `--force` never bypasses a policy.
+Triggers create releases; [policies](policies.md) still apply to them. With the server enforcement changes in v0.3.17, a trigger-created release to an environment with a branch restriction is refused for a disallowed branch, and in a pipeline the stage for that environment fails. Released v0.3.16 does not enforce pipeline branch restrictions; updating only the CLI does not close that gap. `--force` never bypasses a policy.
 
 ## CLI commands
 
