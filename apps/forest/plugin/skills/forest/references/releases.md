@@ -36,7 +36,7 @@ An unanchored pattern matches more than intended: `prod` matches `preprod-eu`. A
 
 Useful flags:
 
-- `--set <org>/<component>.<key>=<v>` sets a component's config, and `--set config.<key>=<v>` sets a generic destination's block. Use it for values only CI knows, such as an image tag. Overrides are recorded on the annotation.
+- `--set <org>/<component>.<key>=<v>` sets a component's config, and `--set config.<key>=<v>` sets a generic destination's block. Use it for values only CI knows, such as an image tag. Overrides are recorded on the annotation. `--set config.<key>` reaches every environment's block. Once its `stable` branch includes it, `service-release.yml` takes a `set` input: one `--set` value per line, trimmed and passed as one argument (not for secrets: values are logged and recorded on the annotation); detect it by that input in the workflow. Its older `image-tag` input sets only a component's `image.tag`, so a generic destination's ECS `pin_image` needs `set: config.image_tag=<tag>`. A provider gets no commit SHA from a generic destination, so `image_tag_template` with `{sha}` fails there.
 - `--source-type ci` matches triggers configured for `^ci$`. Without it, CI may be detected or `local` used; inspect the actual filters rather than assuming a laptop annotation cannot deploy.
 - `--detect` attributes the release to the commit author in CI rather than the token's owner.
 - `--no-wait` returns once the intent is staged. `--no-health` skips the post-release health watch, and "Health watch timed out" still exits 0.

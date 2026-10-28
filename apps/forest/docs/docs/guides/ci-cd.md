@@ -378,6 +378,30 @@ project: env: "prod": {
 it over the destination's metadata before the release runs, with the project
 winning. One destination per place then serves every service in it.
 
+A value only CI knows, such as the image tag the build pushed, goes in through
+`set`. Each line is trimmed and passed to `forest release prepare` as one
+`--set` value, never evaluated by the shell. It is not for secrets: values are
+echoed to the log and recorded on the annotation. `config.<key>=<value>` sets a generic destination's block on every
+environment, which is how the ECS provider's `pin_image` strategy learns the
+exact tag to deploy:
+
+```yaml
+jobs:
+  release:
+    needs: [test, build-and-push]
+    uses: understory-io/forest/.github/workflows/service-release.yml@stable
+    secrets: inherit
+    with:
+      set: |
+        config.image_tag=${{ needs.build-and-push.outputs.image-tag }}
+```
+
+Pass the tag the build job pushed, not one re-derived from the commit. A
+generic destination does not hand the provider the release's commit SHA, so an
+`image_tag_template` containing `{sha}` cannot resolve there. Because the
+override reaches every environment, each one needs `strategy: "pin_image"`:
+the provider rejects pin-only keys under its default strategy.
+
 ### Why CI does not wait
 
 Because the destination does. An ECS provider, for instance, holds a rollout to

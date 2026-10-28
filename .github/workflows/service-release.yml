@@ -69,6 +69,18 @@ on:
         type: string
         required: false
         default: understory/service
+      set:
+        description: >-
+          Extra `forest release prepare --set` values, one per line. Each
+          line is trimmed and passed as one argument, never evaluated by the
+          shell: `config.<key>=<value>` for a generic destination's block (on
+          every environment), `<org>/<component>.<key>=<value>` for a
+          component. For the ECS provider's `pin_image`, pass
+          `config.image_tag=<the tag the build job pushed>`. Not for secrets:
+          each value is echoed to the log and recorded on the annotation.
+        type: string
+        required: false
+        default: ""
       runs-on:
         description: >-
           Runner label. Defaults to a hosted runner: this job builds nothing, so
@@ -130,14 +142,26 @@ jobs:
         env:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_COMPONENT: ${{ inputs.image-component }}
+          SET_VALUES: ${{ inputs.set }}
         run: |
           set -euo pipefail
+          args=()
           if [ -n "${IMAGE_TAG}" ]; then
             echo "pinning ${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
-            forest release prepare --set "${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
-          else
-            forest release prepare
+            args+=(--set "${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}")
           fi
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -z "${line}" ] && continue
+            case "${line}" in
+              *=*) ;;
+              *) echo "::error::set line '${line}' is not key=value" >&2; exit 1 ;;
+            esac
+            echo "setting ${line}"
+            args+=(--set "${line}")
+          done <<< "${SET_VALUES}"
+          forest release prepare ${args[@]+"${args[@]}"}
 
       - name: Annotate the release
         id: annotate
