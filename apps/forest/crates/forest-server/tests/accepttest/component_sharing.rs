@@ -969,3 +969,144 @@ async fn search_shows_a_public_organisations_components_and_hides_other_private_
         assert_eq!(detail.is_ok(), expected, "anonymous detail for {org}");
     }
 }
+
+async fn get_visibility(
+    fixture: &Fixture,
+    token: &str,
+    organisation: &str,
+    project: Option<&str>,
+) -> Result<GetVisibilityResponse, tonic::Status> {
+    fixture
+        .organisations()
+        .get_visibility(authed_request(
+            token,
+            GetVisibilityRequest {
+                organisation: organisation.into(),
+                project: project.map(Into::into),
+            },
+        ))
+        .await
+        .map(|r| r.into_inner())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_visibility_reports_both_settings_and_who_may_change_them() {
+    use forest_grpc_interface::app_service_client::AppServiceClient;
+
+    let fixture = fixture().await.unwrap();
+    let owner = register_user(&fixture).await;
+    let org = create_org(&fixture, &owner).await;
+    publish(&fixture, &owner, &org, "widget", &test_version()).await;
+    let member = register_user(&fixture).await;
+    add_member(&fixture, &org, &member).await;
+    let outsider = register_user(&fixture).await;
+
+    let v = get_visibility(&fixture, &owner.token, &org, Some("widget"))
+        .await
+        .unwrap();
+    assert_eq!(v.organisation_visibility, "private");
+    assert_eq!(v.project_visibility.as_deref(), Some("private"));
+    assert!(v.can_change, "an org admin may change it");
+
+    set_org_visibility(&fixture, &owner.token, &org, "public")
+        .await
+        .unwrap();
+    let v = get_visibility(&fixture, &member.token, &org, Some("widget"))
+        .await
+        .unwrap();
+    assert_eq!(v.organisation_visibility, "public");
+    assert_eq!(
+        v.project_visibility.as_deref(),
+        Some("private"),
+        "the component's own setting is reported separately from the organisation's"
+    );
+    assert!(!v.can_change, "a plain member may not");
+
+    let v = get_visibility(&fixture, &owner.token, &org, None)
+        .await
+        .unwrap();
+    assert_eq!(v.project_visibility, None);
+
+    let refused = get_visibility(&fixture, &outsider.token, &org, None)
+        .await
+        .expect_err("a non-member does not read an organisation's settings");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+
+    let refused = get_visibility(&fixture, &owner.token, &org, Some("missing"))
+        .await
+        .expect_err("an unknown project");
+    assert_eq!(refused.code(), tonic::Code::NotFound);
+
+    let org_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM organisations WHERE name = $1")
+        .bind(&org)
+        .fetch_one(&fixture.db)
+        .await
+        .unwrap();
+    let mut apps = AppServiceClient::new(fixture.channel.clone());
+    let app_id = apps
+        .create_app(authed_request(
+            &owner.token,
+            CreateAppRequest {
+                organisation_id: org_id.to_string(),
+                name: format!("ci-{}", uuid::Uuid::now_v7().simple()),
+                description: String::new(),
+                permissions: vec![],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .app
+        .unwrap()
+        .app_id;
+    let app_token = apps
+        .create_app_token(authed_request(
+            &owner.token,
+            CreateAppTokenRequest {
+                app_id,
+                name: "ci".into(),
+                expires_in_seconds: 0,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .raw_token;
+    let v = get_visibility(&fixture, &app_token, &org, None)
+        .await
+        .unwrap();
+    assert!(!v.can_change, "an app token never may");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admin_of_one_organisation_cannot_read_or_change_anothers_visibility() {
+    let fixture = fixture().await.unwrap();
+    let owner_a = register_user(&fixture).await;
+    let org_a = create_org(&fixture, &owner_a).await;
+    let owner_b = register_user(&fixture).await;
+    let org_b = create_org(&fixture, &owner_b).await;
+    publish(&fixture, &owner_b, &org_b, "widget", &test_version()).await;
+
+    assert!(
+        get_visibility(&fixture, &owner_a.token, &org_a, None)
+            .await
+            .unwrap()
+            .can_change
+    );
+
+    let refused = get_visibility(&fixture, &owner_a.token, &org_b, Some("widget"))
+        .await
+        .expect_err("org A's admin is not a member of org B");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(
+        set_org_visibility(&fixture, &owner_a.token, &org_b, "public")
+            .await
+            .is_err()
+    );
+    assert!(
+        set_visibility(&fixture, &owner_a.token, &org_b, "widget", "public")
+            .await
+            .is_err()
+    );
+    assert_eq!(org_visibility(&fixture, &org_b).await, "private");
+}

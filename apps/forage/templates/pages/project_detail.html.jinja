@@ -19,7 +19,7 @@
             {% endif %}
             {% if summary and summary.visibility %}
             <div class="mt-2 flex items-center gap-2 flex-wrap">
-                {{ visibility_badge(summary.visibility) }}
+                <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/settings/visibility" title="Who outside {{ org_name }} can read this component" aria-label="Visibility: {{ summary.visibility }}. Change who outside {{ org_name }} can read this component" class="hover:opacity-80">{{ visibility_badge(summary.visibility) }}</a>
             </div>
             {% endif %}
         </div>

@@ -301,6 +301,63 @@ impl OrganisationService for OrganisationsServer {
         Ok(tonic::Response::new(SetOrganisationVisibilityResponse {}))
     }
 
+    async fn get_visibility(
+        &self,
+        request: tonic::Request<GetVisibilityRequest>,
+    ) -> std::result::Result<tonic::Response<GetVisibilityResponse>, tonic::Status> {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        crate::grpc::authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            crate::grpc::authorize::OrgRole::Member,
+        )
+        .await?;
+
+        let organisation_visibility: String =
+            sqlx::query_scalar("SELECT visibility FROM organisations WHERE name = $1")
+                .bind(&req.organisation)
+                .fetch_one(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get organisation visibility: {e}");
+                    tonic::Status::internal("failed to read organisation visibility")
+                })?;
+
+        let project_visibility = match &req.project {
+            Some(project) => Some(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT visibility FROM projects WHERE organisation = $1 AND project = $2",
+                )
+                .bind(&req.organisation)
+                .bind(project)
+                .fetch_optional(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get project visibility: {e}");
+                    tonic::Status::internal("failed to read project visibility")
+                })?
+                .ok_or_else(|| tonic::Status::not_found("project not found"))?,
+            ),
+            None => None,
+        };
+
+        let can_change = crate::grpc::authorize::can_change_visibility(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+        )
+        .await?;
+
+        Ok(tonic::Response::new(GetVisibilityResponse {
+            organisation_visibility,
+            project_visibility,
+            can_change,
+        }))
+    }
+
     async fn list_members(
         &self,
         request: tonic::Request<ListMembersRequest>,

@@ -3157,6 +3157,80 @@ impl ForestPlatform for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn get_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+    ) -> Result<forage_core::platform::Visibility, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::GetVisibilityRequest {
+                organisation: organisation.into(),
+                project: project.map(Into::into),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .get_visibility(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(forage_core::platform::Visibility {
+            organisation: resp.organisation_visibility,
+            project: resp.project_visibility,
+            can_change: resp.can_change,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn set_organisation_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::SetOrganisationVisibilityRequest {
+                organisation: organisation.into(),
+                visibility: visibility.into(),
+            },
+        )?;
+        self.org_client()
+            .set_organisation_visibility(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn set_project_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::UpdateProjectRequest {
+                organisation: organisation.into(),
+                project: project.into(),
+                readme: None,
+                description: None,
+                metadata: None,
+                visibility: Some(visibility.into()),
+            },
+        )?;
+        self.release_client()
+            .update_project(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn list_allowed_domains(
         &self,
         access_token: &str,

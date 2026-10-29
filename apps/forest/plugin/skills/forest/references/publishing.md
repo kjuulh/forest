@@ -39,13 +39,14 @@ Precedence: `--version` > `FOREST_COMPONENT_VERSION` > `forest.component.version
 
 ## Sharing with other organisations
 
-A published component is **private** by default: only members of its organisation can resolve, download or list it through the registry. To let any signed-in user depend on it, a **human admin** of that organisation makes it public, one component at a time or the whole organisation:
+A published component is **private** by default: only members of its organisation can resolve, download or list it through the registry. To let any signed-in user depend on it (and anyone, signed in or not, see it on the public registry pages), a **human admin** of that organisation makes it public, one component at a time or the whole organisation:
 
 ```bash
 forest components visibility <org>/<name> public    # one component; or: private
 forest organisation visibility <org> public         # every component the org publishes, now and later
 ```
 
+- Or in Forage: **Settings → Visibility** for the organisation (`/orgs/<org>/settings/visibility`) and a project's **Settings → Visibility** for one component (`/orgs/<org>/projects/<name>/settings/visibility`). Members see the state read-only; only an admin gets the form. The project page also shows when the component is public through its organisation.
 - Both commands are in CLIs after v0.3.17 (`forest components --help` / `forest organisation --help` list `visibility`). The server enforces visibility, so consumers on any CLI version benefit.
 - Public is **read-only**. Publishing, unpublishing and uploads still need membership. Changing visibility needs an org admin's own login or a service account; app tokens (including CI publish tokens) are refused. Publish from CI with an app token, not an admin's personal access token, which could also change visibility. The server logs each change with the actor.
 - A public organisation exposes its components only. Its projects, releases, destinations and members stay members-only.

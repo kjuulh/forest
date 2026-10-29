@@ -2,6 +2,7 @@
     {"slug": "triggers",  "label": "Triggers"},
     {"slug": "policies",  "label": "Policies"},
     {"slug": "pipelines", "label": "Pipelines"},
+    {"slug": "visibility", "label": "Visibility"},
 ] %}
 
 {% macro project_settings_nav(org_name, project_name, active_section) %}
@@ -61,7 +62,7 @@
         <h1 class="font-mono text-2xl tracking-tight leading-tight">
             <span class="text-gray-500">{{ org_name }}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{{ project_name }}</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
         </h1>
-        <p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines.</p>
+        <p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
     </div>
 
     {{ project_settings_nav_mobile(org_name, project_name, active_section) }}

@@ -103,6 +103,9 @@ pub(crate) struct MockPlatformBehavior {
         Option<Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError>>,
     pub list_artifacts_by_project: Option<std::collections::HashMap<String, Vec<Artifact>>>,
     pub get_plan_output_result: Option<Result<forage_core::platform::PlanOutput, PlatformError>>,
+    pub get_visibility_result: Option<Result<forage_core::platform::Visibility, PlatformError>>,
+    pub set_visibility_result: Option<Result<(), PlatformError>>,
+    pub visibility_calls: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -1126,6 +1129,55 @@ impl ForestPlatform for MockPlatformClient {
                 outputs: vec![],
             })
         })
+    }
+
+    async fn get_visibility(
+        &self,
+        _access_token: &str,
+        _organisation: &str,
+        project: Option<&str>,
+    ) -> Result<forage_core::platform::Visibility, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.get_visibility_result.clone().unwrap_or_else(|| {
+            Ok(forage_core::platform::Visibility {
+                organisation: "private".into(),
+                project: project.map(|_| "private".into()),
+                can_change: true,
+            })
+        })
+    }
+
+    async fn set_organisation_visibility(
+        &self,
+        _access_token: &str,
+        organisation: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.visibility_calls {
+            calls
+                .lock()
+                .unwrap()
+                .push(format!("org:{organisation}={visibility}"));
+        }
+        b.set_visibility_result.clone().unwrap_or(Ok(()))
+    }
+
+    async fn set_project_visibility(
+        &self,
+        _access_token: &str,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.visibility_calls {
+            calls
+                .lock()
+                .unwrap()
+                .push(format!("project:{organisation}/{project}={visibility}"));
+        }
+        b.set_visibility_result.clone().unwrap_or(Ok(()))
     }
 
     async fn list_allowed_domains(

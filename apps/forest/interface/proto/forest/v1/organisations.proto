@@ -84,6 +84,19 @@ message SetOrganisationVisibilityRequest {
 }
 message SetOrganisationVisibilityResponse {}
 
+message GetVisibilityRequest {
+  string organisation = 1;
+  optional string project = 2;
+}
+message GetVisibilityResponse {
+  // "public" or "private".
+  string organisation_visibility = 1;
+  // The project's own setting; set when a project was named. A component is
+  // public when this or the organisation is.
+  optional string project_visibility = 2;
+  bool can_change = 3;
+}
+
 message ListMembersRequest {
   string organisation_id = 1;
   int32 page_size = 2;
@@ -155,9 +168,13 @@ service OrganisationService {
   rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
   rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
-  // "public" lets anyone signed in read every component the organisation
+  // "public" lets anyone signed in read, and anyone see on the public pages, every component the organisation
   // publishes. It grants no write and exposes nothing else. Needs an org admin.
   rpc SetOrganisationVisibility(SetOrganisationVisibilityRequest) returns (SetOrganisationVisibilityResponse);
+  // What non-members can read of the organisation and, when named, one of its
+  // projects. Needs membership. `can_change` is whether the caller may change
+  // either, by the same rule that guards the writes.
+  rpc GetVisibility(GetVisibilityRequest) returns (GetVisibilityResponse);
 
   rpc AddAllowedDomain(AddAllowedDomainRequest) returns (AddAllowedDomainResponse);
   rpc ListAllowedDomains(ListAllowedDomainsRequest) returns (ListAllowedDomainsResponse);

@@ -215,6 +215,32 @@ pub struct OrgMember {
     pub joined_at: Option<String>,
 }
 
+/// `can_change` is Forest's own admin decision; render the form only when it is true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Visibility {
+    pub organisation: String,
+    pub project: Option<String>,
+    pub can_change: bool,
+}
+
+impl Visibility {
+    pub fn organisation_is_public(&self) -> bool {
+        self.organisation == "public"
+    }
+
+    pub fn project_is_public(&self) -> bool {
+        self.project.as_deref() == Some("public")
+    }
+
+    pub fn component_is_public(&self) -> bool {
+        self.organisation_is_public() || self.project_is_public()
+    }
+}
+
+pub fn validate_visibility(value: &str) -> bool {
+    matches!(value, "public" | "private")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowedDomain {
     pub domain: String,
@@ -997,6 +1023,28 @@ pub trait ForestPlatform: Send + Sync {
         stage_id: &str,
     ) -> Result<PlanOutput, PlatformError>;
 
+    async fn get_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+    ) -> Result<Visibility, PlatformError>;
+
+    async fn set_organisation_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn set_project_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError>;
+
     async fn list_allowed_domains(
         &self,
         access_token: &str,
@@ -1355,6 +1403,33 @@ pub trait ForestOAuthApps: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use super::{Visibility, validate_visibility};
+
+    fn vis(organisation: &str, project: Option<&str>) -> Visibility {
+        Visibility {
+            organisation: organisation.into(),
+            project: project.map(Into::into),
+            can_change: false,
+        }
+    }
+
+    #[test]
+    fn a_component_is_public_through_its_own_setting_or_its_organisation() {
+        assert!(!vis("private", Some("private")).component_is_public());
+        assert!(vis("private", Some("public")).component_is_public());
+        assert!(vis("public", Some("private")).component_is_public());
+        assert!(vis("public", None).component_is_public());
+    }
+
+    #[test]
+    fn only_public_and_private_are_visibilities() {
+        assert!(validate_visibility("public"));
+        assert!(validate_visibility("private"));
+        assert!(!validate_visibility("internal"));
+        assert!(!validate_visibility("PUBLIC"));
+        assert!(!validate_visibility(""));
+    }
+
     use super::*;
 
     #[test]

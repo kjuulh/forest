@@ -11631,6 +11631,61 @@ pub mod organisation_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn set_organisation_visibility(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SetOrganisationVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetOrganisationVisibilityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/SetOrganisationVisibility",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "SetOrganisationVisibility",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_visibility(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetVisibilityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/GetVisibility",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "GetVisibility"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         ///
         pub async fn list_members(
             &mut self,

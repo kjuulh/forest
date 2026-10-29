@@ -9,6 +9,7 @@ pub(crate) mod oauth;
 mod pages;
 mod platform;
 mod registry;
+mod visibility;
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -28,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .merge(events::router())
         .merge(integrations::router())
         .merge(developers::router())
+        .merge(visibility::router())
         .merge(directory::routes())
         .merge(introspect::routes())
         .merge(oauth::router())

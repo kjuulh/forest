@@ -3785,6 +3785,25 @@ pub struct SetOrganisationVisibilityRequest {
 pub struct SetOrganisationVisibilityResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVisibilityRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub project: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVisibilityResponse {
+    /// "public" or "private".
+    #[prost(string, tag="1")]
+    pub organisation_visibility: ::prost::alloc::string::String,
+    /// The project's own setting; set when a project was named. A component is
+    /// public when this or the organisation is.
+    #[prost(string, optional, tag="2")]
+    pub project_visibility: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bool, tag="3")]
+    pub can_change: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListMembersRequest {
     #[prost(string, tag="1")]
     pub organisation_id: ::prost::alloc::string::String,

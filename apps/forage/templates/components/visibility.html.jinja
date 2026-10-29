@@ -1,0 +1,39 @@
+{% macro visibility_state(public) %}
+{% if public %}
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Public</span>
+{% else %}
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">Private</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro read_only_note() %}
+<p class="text-sm text-gray-600">
+    <strong>Public is read-only.</strong> A public component is listed on the public registry
+    pages, with its readme, versions and manifest, for anyone to see, <em>including people who are
+    not signed in</em>. Anyone signed in to Forest can also resolve and download it. Publishing,
+    unpublishing and every other change still need membership of the organisation. The
+    organisation's releases, destinations, members and settings are not shared.
+</p>
+{%- endmacro %}
+
+{% macro visibility_form(org_name, project_name, csrf_token, public) %}
+<form method="POST" action="/orgs/{{ org_name }}{% if project_name %}/projects/{{ project_name }}{% endif %}/settings/visibility" class="space-y-3">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <fieldset class="space-y-2">
+        <legend class="sr-only">Visibility of {{ org_name }}{% if project_name %}/{{ project_name }}{% endif %}</legend>
+        <label class="flex items-start gap-2 text-sm">
+            <input type="radio" name="visibility" value="private"{% if not public %} checked{% endif %} class="mt-0.5">
+            <span><span class="font-medium">Private</span> — only members of the organisation can read it.</span>
+        </label>
+        <label class="flex items-start gap-2 text-sm">
+            <input type="radio" name="visibility" value="public"{% if public %} checked{% endif %} class="mt-0.5">
+            <span><span class="font-medium">Public</span> — anyone can see it, even without signing in, and anyone signed in can use it. Read-only.</span>
+        </label>
+    </fieldset>
+    <button type="submit" class="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">Save visibility</button>
+</form>
+{%- endmacro %}
+
+{% macro admin_only_note() %}
+<p class="text-sm text-gray-500">Only an organisation admin can change this.</p>
+{%- endmacro %}

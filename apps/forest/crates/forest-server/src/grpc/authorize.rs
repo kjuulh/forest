@@ -186,6 +186,18 @@ pub async fn require_visibility_admin(
     Ok(())
 }
 
+pub async fn can_change_visibility(
+    db: &PgPool,
+    actor: &Actor,
+    organisation: &str,
+) -> Result<bool, tonic::Status> {
+    match require_visibility_admin(db, actor, organisation).await {
+        Ok(()) => Ok(true),
+        Err(status) if status.code() == tonic::Code::PermissionDenied => Ok(false),
+        Err(status) => Err(status),
+    }
+}
+
 pub fn audit_visibility_change(actor: &Actor, organisation: &str, target: &str, visibility: &str) {
     tracing::info!(
         actor = ?actor,

@@ -27,4 +27,5 @@ mod project_settings_tests;
 mod registry_tests;
 mod slack_tests;
 mod token_tests;
+mod visibility_tests;
 mod webhook_delivery_tests;
