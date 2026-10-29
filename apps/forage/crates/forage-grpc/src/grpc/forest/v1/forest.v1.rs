@@ -2805,6 +2805,10 @@ pub struct UpdateProjectRequest {
     /// server-side. To clear all metadata, send an empty ProjectMetadata.
     #[prost(message, optional, tag="5")]
     pub metadata: ::core::option::Option<ProjectMetadata>,
+    /// "public" or "private". Unset leaves it unchanged. Public lets anyone signed
+    /// in resolve the project's components; changing it needs an org admin.
+    #[prost(string, optional, tag="6")]
+    pub visibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectResponse {

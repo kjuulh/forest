@@ -130,6 +130,9 @@ message UpdateProjectRequest {
   // Unset leaves it unchanged; empty clears it. Max 4096 chars.
   optional string description = 4;
   optional ProjectMetadata metadata = 5;
+  // "public" or "private". Unset leaves it unchanged. Public lets anyone signed
+  // in resolve the project's components; changing it needs an org admin.
+  optional string visibility = 6;
 }
 message UpdateProjectResponse {
   Project project = 1;

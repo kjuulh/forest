@@ -267,6 +267,40 @@ impl OrganisationService for OrganisationsServer {
         }))
     }
 
+    async fn set_organisation_visibility(
+        &self,
+        request: tonic::Request<SetOrganisationVisibilityRequest>,
+    ) -> std::result::Result<tonic::Response<SetOrganisationVisibilityResponse>, tonic::Status>
+    {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        let visibility =
+            crate::services::release_registry::ProjectVisibility::parse(&req.visibility)?;
+
+        crate::grpc::authorize::require_visibility_admin(&self.state.db, &actor, &req.organisation)
+            .await?;
+
+        sqlx::query("UPDATE organisations SET visibility = $2, updated_at = now() WHERE name = $1")
+            .bind(&req.organisation)
+            .bind(visibility.as_str())
+            .execute(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("set organisation visibility: {e}");
+                tonic::Status::internal("failed to set organisation visibility")
+            })?;
+
+        crate::grpc::authorize::audit_visibility_change(
+            &actor,
+            &req.organisation,
+            "organisation",
+            visibility.as_str(),
+        );
+
+        Ok(tonic::Response::new(SetOrganisationVisibilityResponse {}))
+    }
+
     async fn list_members(
         &self,
         request: tonic::Request<ListMembersRequest>,

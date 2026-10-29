@@ -1291,6 +1291,12 @@ impl ReleaseService for ReleaseServer {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
+        let visibility = req
+            .visibility
+            .as_deref()
+            .map(release_registry::ProjectVisibility::parse)
+            .transpose()?;
+
         authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -1298,6 +1304,9 @@ impl ReleaseService for ReleaseServer {
             authorize::OrgRole::Member,
         )
         .await?;
+        if visibility.is_some() {
+            authorize::require_visibility_admin(&self.state.db, &actor, &req.organisation).await?;
+        }
 
         let metadata = req.metadata.map(proto_metadata_to_record);
         let rec = self
@@ -1309,6 +1318,7 @@ impl ReleaseService for ReleaseServer {
                 req.readme.as_deref(),
                 req.description.as_deref(),
                 metadata,
+                visibility,
             )
             .await
             .map_err(|e| {
@@ -1321,6 +1331,15 @@ impl ReleaseService for ReleaseServer {
                     tonic::Status::internal(msg)
                 }
             })?;
+
+        if let Some(visibility) = visibility {
+            authorize::audit_visibility_change(
+                &actor,
+                &req.organisation,
+                &req.project,
+                visibility.as_str(),
+            );
+        }
 
         self.state
             .org_rule_set_registry()

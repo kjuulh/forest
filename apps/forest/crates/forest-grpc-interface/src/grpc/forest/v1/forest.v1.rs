@@ -2425,6 +2425,10 @@ pub struct UpdateProjectRequest {
     pub description: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag="5")]
     pub metadata: ::core::option::Option<ProjectMetadata>,
+    /// "public" or "private". Unset leaves it unchanged. Public lets anyone signed
+    /// in resolve the project's components; changing it needs an org admin.
+    #[prost(string, optional, tag="6")]
+    pub visibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectResponse {
@@ -3768,6 +3772,17 @@ pub struct UpdateMemberRoleRequest {
 pub struct UpdateMemberRoleResponse {
     #[prost(message, optional, tag="1")]
     pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOrganisationVisibilityRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    /// "public" or "private".
+    #[prost(string, tag="2")]
+    pub visibility: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOrganisationVisibilityResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListMembersRequest {

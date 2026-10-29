@@ -1755,10 +1755,54 @@ impl GrpcClient {
                 readme,
                 description,
                 metadata,
+                visibility: None,
             })
             .await
             .map_err(grpc_err)
             .context("update project (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn set_organisation_visibility(
+        &self,
+        organisation: &str,
+        visibility: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.organisation_client().await?;
+
+        client
+            .set_organisation_visibility(SetOrganisationVisibilityRequest {
+                organisation: organisation.to_string(),
+                visibility: visibility.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("set organisation visibility (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn set_project_visibility(
+        &self,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .update_project(UpdateProjectRequest {
+                organisation: organisation.to_string(),
+                project: project.to_string(),
+                readme: None,
+                description: None,
+                metadata: None,
+                visibility: Some(visibility.to_string()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("set project visibility (grpc)")?;
 
         Ok(())
     }

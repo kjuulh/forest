@@ -22,6 +22,7 @@ dependencies: {
 - **A usage block is required.** A dependency without a `"<org>": "<name>": {…}` block contributes no commands.
 - `forest add <org>/<name>` writes the highest **stable** version, plus a `cue.mod/module.cue` entry so the component's CUE types can be imported. `forest add <org>/<name>@<v>` writes `<v>` without checking that it exists; the next command then fails. `forest add` refuses a dependency that is already listed, so edit `forest.cue` to change a version.
 - `forest add <org>/<name> --path <dir>` develops a component against a real consumer before publishing.
+- **Who can resolve it.** Members of the component's organisation always can. Anyone else signed in can only when the component, or its organisation, is **public** (read-only); a private one fails every command that loads the project with `not a member of this organisation`. This is checked by the server, so it applies to every CLI version. See [publishing.md](publishing.md#sharing-with-other-organisations).
 - Components called by other components are not resolved transitively. List every component the project's components call.
 
 ## Running commands: `forest run`

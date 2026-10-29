@@ -1082,7 +1082,8 @@ impl ComponentService {
             "SELECT c.organisation, c.name, c.version, c.kind, c.shape, c.created, c.updated,
                     COALESCE((SELECT cm.manifest_json::text FROM component_manifests cm WHERE cm.component_id = c.id LIMIT 1), '') as manifest_json,
                     (SELECT count(*) FROM components c2 WHERE c2.organisation = c.organisation AND c2.name = c.name) as version_count,
-                    COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = c.organisation AND p.project = c.name LIMIT 1), 'private') as visibility
+                    CASE WHEN EXISTS (SELECT 1 FROM organisations o WHERE o.name = c.organisation AND o.visibility = 'public') THEN 'public'
+                         ELSE COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = c.organisation AND p.project = c.name LIMIT 1), 'private') END as visibility
              FROM components c
              WHERE ($1 = false OR c.name ILIKE $2 OR c.organisation ILIKE $2)
                AND ($3 = false OR c.organisation = $4)
@@ -1090,6 +1091,9 @@ impl ComponentService {
                    SELECT 1 FROM projects p
                    WHERE p.organisation = c.organisation AND p.project = c.name
                      AND p.visibility = 'public'
+               ) OR EXISTS (
+                   SELECT 1 FROM organisations o
+                   WHERE o.name = c.organisation AND o.visibility = 'public'
                ))
              ORDER BY c.updated DESC
              LIMIT $5 OFFSET $6",
@@ -1114,6 +1118,9 @@ impl ComponentService {
                    SELECT 1 FROM projects p
                    WHERE p.organisation = c.organisation AND p.project = c.name
                      AND p.visibility = 'public'
+               ) OR EXISTS (
+                   SELECT 1 FROM organisations o
+                   WHERE o.name = c.organisation AND o.visibility = 'public'
                ))",
         )
         .bind(is_search)
@@ -1224,7 +1231,8 @@ impl ComponentService {
             .await?;
 
         let visibility: String = sqlx::query_scalar::<_, String>(
-            "SELECT COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private')",
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM organisations o WHERE o.name = $1 AND o.visibility = 'public') THEN 'public'
+                    ELSE COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private') END",
         )
         .bind(organisation)
         .bind(name)

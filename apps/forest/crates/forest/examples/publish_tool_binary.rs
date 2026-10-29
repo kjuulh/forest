@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
             readme: None,
             description: Some(project_description),
             metadata: Some(metadata),
+            visibility: None,
         })
         .await?;
 

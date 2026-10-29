@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
             readme: None,
             description: Some(description.clone()),
             metadata: Some(metadata.clone()),
+            visibility: None,
         })
         .await?
         .into_inner();

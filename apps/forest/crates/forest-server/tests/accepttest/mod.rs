@@ -2,6 +2,7 @@ mod authz_coverage;
 mod authz_flow;
 mod auto_join_flow;
 mod component_flow;
+mod component_sharing;
 mod destination_sensitive_metadata;
 mod destination_widening;
 mod device_login;

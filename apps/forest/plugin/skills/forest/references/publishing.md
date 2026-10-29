@@ -37,6 +37,22 @@ Precedence: `--version` > `FOREST_COMPONENT_VERSION` > `forest.component.version
 - Republishing a currently published version fails cleanly (`version X is already published`), so re-running a CI tag does not overwrite it. An interrupted upload is aborted, which frees the version for a retry.
 - There is no yank. An org admin's hidden `forest admin unpublish` frees a version number for reuse. Existing binary digest locks retain the first digest and reject changed bytes when resolved or fetched; a warm cached binary may continue running without an online revocation check. File/template-only components have no binary digest lock. Ship a new number instead of reusing one.
 
+## Sharing with other organisations
+
+A published component is **private** by default: only members of its organisation can resolve, download or list it through the registry. To let any signed-in user depend on it, a **human admin** of that organisation makes it public, one component at a time or the whole organisation:
+
+```bash
+forest components visibility <org>/<name> public    # one component; or: private
+forest organisation visibility <org> public         # every component the org publishes, now and later
+```
+
+- Both commands are in CLIs after v0.3.17 (`forest components --help` / `forest organisation --help` list `visibility`). The server enforces visibility, so consumers on any CLI version benefit.
+- Public is **read-only**. Publishing, unpublishing and uploads still need membership. Changing visibility needs an org admin's own login or a service account; app tokens (including CI publish tokens) are refused. Publish from CI with an app token, not an admin's personal access token, which could also change visibility. The server logs each change with the actor.
+- A public organisation exposes its components only. Its projects, releases, destinations and members stay members-only.
+- Visibility applies to every version, past and future, and republishing does not reset it. A component is public when its own setting or its organisation's is.
+- Public components are also listed on the registry's public pages.
+- Separately from this setting, the CUE module registry (`/v2/…`, used by `cue` to import a component's CUE package) serves component CUE files without authentication. Never put secrets in a component's CUE.
+
 ## Component prereleases
 
 A prerelease is just a SemVer version with a pre-release suffix: `0.4.0-rc.1`, `0.4.0-alpha.2`. What reaches whom:
@@ -102,4 +118,5 @@ The current inputs are in that repo's `apps/forest/docs/docs/guides/ci-cd.md`. R
 | `does not implement the _meta/describe subcommand` | the binary doesn't speak the protocol | implement it (the SDK does), or publish as prebuilt/external with `#Tool` |
 | `! publishing a tool for linux_amd64 only` | one platform staged | build or add the other platforms; users elsewhere get `not available for <os>/<arch>` |
 | `Version overridden: X (forest.cue) → Y` | an override is active | expected in CI; for consumed components see the prerelease caveat |
+| `admin access required` / `changing visibility needs an organisation admin, not an app token` from `visibility` | a member who is not an admin, or an app token | a human org admin runs it |
 | not logged in / unauthenticated | no login and no `FOREST_TOKEN` | `forest auth login`, or set the token in CI |

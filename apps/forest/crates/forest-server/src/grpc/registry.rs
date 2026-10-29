@@ -126,11 +126,11 @@ impl RegistryService for RegistryServer {
         tracing::info!("get component");
         let actor = authorize::extract_actor(&request)?;
         let request = request.into_inner();
-        authorize::require_org_access(
+        authorize::require_component_read(
             &self.state.db,
             &actor,
             &request.organisation,
-            OrgRole::Member,
+            &request.name,
         )
         .await?;
 
@@ -153,7 +153,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentVersionResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let component = self
@@ -329,7 +329,7 @@ impl RegistryService for RegistryServer {
             .parse()
             .context("failed to parse uuid")
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-        authorize_component(&self.state, &actor, component_id).await?;
+        authorize_component_files(&self.state, &actor, component_id).await?;
 
         let mut stream = FileStream::new();
         let take_stream = stream.take_stream();
@@ -429,7 +429,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::DownloadBinaryStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let range = match (req.offset, req.length) {
@@ -508,7 +508,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentManifestResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let manifest_json = self
@@ -535,7 +535,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<ListComponentVersionsResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let versions = self
@@ -568,8 +568,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::ListOrgToolsStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
-            .await?;
+        authorize::require_org_read(&self.state.db, &actor, &req.organisation).await?;
 
         let rows = self
             .state
@@ -658,13 +657,8 @@ impl RegistryService for RegistryServer {
 
         let is_authenticated = actor.is_some();
         if let Some(ref actor) = actor {
-            authorize::require_org_access(
-                &self.state.db,
-                actor,
-                &req.organisation,
-                OrgRole::Member,
-            )
-            .await?;
+            authorize::require_component_read(&self.state.db, actor, &req.organisation, &req.name)
+                .await?;
         }
 
         let detail = self
@@ -681,18 +675,9 @@ impl RegistryService for RegistryServer {
             })?;
 
         if !is_authenticated {
-            let is_public: Option<bool> = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                    SELECT 1 FROM projects p
-                    WHERE p.organisation = $1 AND p.project = $2 AND p.visibility = 'public'
-                )",
-            )
-            .bind(&req.organisation)
-            .bind(&req.name)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
-            let is_public = is_public.unwrap_or(false);
+            let is_public =
+                authorize::component_is_public(&self.state.db, &req.organisation, &req.name)
+                    .await?;
 
             if !is_public {
                 return Err(tonic::Status::not_found(format!(
@@ -734,7 +719,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetPublicComponentDetailResponse>, tonic::Status> {
         let req = request.into_inner();
 
-        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        let is_public =
+            authorize::component_is_public(&self.state.db, &req.organisation, &req.name).await?;
         if !is_public {
             return Err(tonic::Status::not_found(format!(
                 "component not found: {}/{}",
@@ -771,7 +757,8 @@ impl RegistryService for RegistryServer {
     {
         let req = request.into_inner();
 
-        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        let is_public =
+            authorize::component_is_public(&self.state.db, &req.organisation, &req.name).await?;
         if !is_public {
             return Err(tonic::Status::not_found(format!(
                 "manifest not found for {}/{}@{}",
@@ -796,24 +783,6 @@ impl RegistryService for RegistryServer {
             manifest_json,
         }))
     }
-}
-
-async fn is_public_project(
-    db: &sqlx::PgPool,
-    organisation: &str,
-    name: &str,
-) -> Result<bool, tonic::Status> {
-    sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(
-            SELECT 1 FROM projects p
-            WHERE p.organisation = $1 AND p.project = $2 AND p.visibility = 'public'
-        )",
-    )
-    .bind(organisation)
-    .bind(name)
-    .fetch_one(db)
-    .await
-    .map_err(|e| tonic::Status::internal(e.to_string()))
 }
 
 const MAX_BINARY_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
@@ -851,20 +820,20 @@ fn require_component_publish_scope(actor: &Actor) -> Result<(), tonic::Status> {
     Ok(())
 }
 
-async fn authorize_component(
+async fn authorize_component_files(
     state: &State,
     actor: &crate::actor::Actor,
     component_id: Uuid,
 ) -> Result<(), tonic::Status> {
-    let org: String = sqlx::query_scalar("SELECT organisation FROM components WHERE id = $1")
-        .bind(component_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
-        .ok_or_else(|| tonic::Status::not_found("component not found"))?;
+    let (org, name): (String, String) =
+        sqlx::query_as("SELECT organisation, name FROM components WHERE id = $1")
+            .bind(component_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
+            .ok_or_else(|| tonic::Status::not_found("component not found"))?;
 
-    authorize::require_org_access(&state.db, actor, &org, OrgRole::Member).await?;
-    Ok(())
+    authorize::require_component_read(&state.db, actor, &org, &name).await
 }
 
 impl From<ComponentVersion> for Component {

@@ -1001,6 +1001,7 @@ impl ReleaseRegistry {
         readme: Option<&str>,
         description: Option<&str>,
         metadata: Option<ProjectMetadata>,
+        visibility: Option<ProjectVisibility>,
     ) -> anyhow::Result<ProjectRecord> {
         const MAX_README_BYTES: usize = 64 * 1024;
         const MAX_DESCRIPTION_CHARS: usize = 4096;
@@ -1032,6 +1033,7 @@ impl ReleaseRegistry {
                SET readme = COALESCE($3, readme),
                    description = COALESCE($4, description),
                    metadata = COALESCE($5, metadata),
+                   visibility = COALESCE($6, visibility),
                    updated = now()
                WHERE organisation = $1 AND project = $2
                RETURNING id, organisation, project, readme, description,
@@ -1041,6 +1043,7 @@ impl ReleaseRegistry {
             readme,
             description,
             metadata_json as _,
+            visibility.map(ProjectVisibility::as_str),
         )
         .fetch_optional(&self.db)
         .await
@@ -1495,5 +1498,30 @@ mod project_metadata_tests {
         assert_eq!(json, r#"{"git_url":"https://x"}"#);
         let back: ProjectMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(back, m);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectVisibility {
+    Public,
+    Private,
+}
+
+impl ProjectVisibility {
+    pub fn parse(value: &str) -> Result<Self, tonic::Status> {
+        match value {
+            "public" => Ok(Self::Public),
+            "private" => Ok(Self::Private),
+            other => Err(tonic::Status::invalid_argument(format!(
+                "visibility must be \"public\" or \"private\", got {other:?}"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Private => "private",
+        }
     }
 }

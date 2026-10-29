@@ -230,13 +230,13 @@ fn is_server_mutation(command: &Commands) -> bool {
         Commands::Environment(cmd) => cmd.is_mutation(),
         Commands::Organisation(cmd) => cmd.is_mutation(),
         Commands::Notifications(cmd) => cmd.is_mutation(),
+        Commands::Components(cmd) => cmd.is_mutation(),
         Commands::Init(_)
         | Commands::Add(_)
         | Commands::Generate(_)
         | Commands::Validate(_)
         | Commands::Update(_)
         | Commands::Run(_)
-        | Commands::Components(_)
         | Commands::Docs(_)
         | Commands::Admin(_)
         | Commands::Context(_)

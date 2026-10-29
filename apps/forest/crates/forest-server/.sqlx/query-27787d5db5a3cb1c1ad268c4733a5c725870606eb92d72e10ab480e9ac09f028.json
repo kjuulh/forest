@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE projects\n               SET readme = COALESCE($3, readme),\n                   description = COALESCE($4, description),\n                   metadata = COALESCE($5, metadata),\n                   updated = now()\n               WHERE organisation = $1 AND project = $2\n               RETURNING id, organisation, project, readme, description,\n                         metadata as \"metadata: sqlx::types::Json<ProjectMetadata>\"",
+  "query": "UPDATE projects\n               SET readme = COALESCE($3, readme),\n                   description = COALESCE($4, description),\n                   metadata = COALESCE($5, metadata),\n                   visibility = COALESCE($6, visibility),\n                   updated = now()\n               WHERE organisation = $1 AND project = $2\n               RETURNING id, organisation, project, readme, description,\n                         metadata as \"metadata: sqlx::types::Json<ProjectMetadata>\"",
   "describe": {
     "columns": [
       {
@@ -76,7 +76,8 @@
         "Text",
         "Text",
         "Text",
-        "Jsonb"
+        "Jsonb",
+        "Text"
       ]
     },
     "nullable": [
@@ -88,5 +89,5 @@
       false
     ]
   },
-  "hash": "6ad8fbf15c3b1b26ed879f884f4f2ea7d840cb657923cdd86601491544eccf88"
+  "hash": "27787d5db5a3cb1c1ad268c4733a5c725870606eb92d72e10ab480e9ac09f028"
 }

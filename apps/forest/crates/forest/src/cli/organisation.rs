@@ -3,6 +3,7 @@ mod get;
 mod member;
 mod oauth_app;
 mod search;
+mod visibility;
 
 use crate::state::State;
 
@@ -26,12 +27,15 @@ enum Commands {
     /// Manage OAuth applications ("Sign in with Forest")
     #[command(alias = "oauth-apps", alias = "oauth")]
     OauthApp(oauth_app::OAuthAppCommand),
+    /// Make every component the organisation publishes public (read-only to
+    /// anyone signed in) or private. Needs an admin of the organisation.
+    Visibility(visibility::VisibilityCommand),
 }
 
 impl OrganisationCommand {
     pub fn is_mutation(&self) -> bool {
         match &self.commands {
-            Commands::Create(_) => true,
+            Commands::Create(_) | Commands::Visibility(_) => true,
             Commands::Show(_) | Commands::Search(_) => false,
             Commands::Member(c) => c.is_mutation(),
             Commands::OauthApp(c) => c.is_mutation(),
@@ -46,6 +50,7 @@ impl OrganisationCommand {
             Commands::Search(cmd) => cmd.execute(state, &format).await,
             Commands::Member(cmd) => cmd.execute(state, &format).await,
             Commands::OauthApp(cmd) => cmd.execute(state, &format).await,
+            Commands::Visibility(cmd) => cmd.execute(state).await,
         }
     }
 }

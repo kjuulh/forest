@@ -8064,7 +8064,6 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "UpdateProject"));
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn get_destination_states(
             &mut self,
             request: impl tonic::IntoRequest<super::GetDestinationStatesRequest>,
@@ -8327,7 +8326,6 @@ pub mod release_service_server {
             tonic::Response<super::UpdateProjectResponse>,
             tonic::Status,
         >;
-        ///
         async fn get_destination_states(
             &self,
             request: tonic::Request<super::GetDestinationStatesRequest>,
@@ -11656,6 +11654,38 @@ pub mod organisation_service_client {
                 .insert(GrpcMethod::new("forest.v1.OrganisationService", "ListMembers"));
             self.inner.unary(req, path, codec).await
         }
+        /** "public" lets anyone signed in read every component the organisation
+ publishes. It grants no write and exposes nothing else. Needs an org admin.
+*/
+        pub async fn set_organisation_visibility(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SetOrganisationVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetOrganisationVisibilityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/SetOrganisationVisibility",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "SetOrganisationVisibility",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         ///
         pub async fn add_allowed_domain(
             &mut self,
@@ -11904,6 +11934,16 @@ pub mod organisation_service_server {
             request: tonic::Request<super::ListMembersRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListMembersResponse>,
+            tonic::Status,
+        >;
+        /** "public" lets anyone signed in read every component the organisation
+ publishes. It grants no write and exposes nothing else. Needs an org admin.
+*/
+        async fn set_organisation_visibility(
+            &self,
+            request: tonic::Request<super::SetOrganisationVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetOrganisationVisibilityResponse>,
             tonic::Status,
         >;
         ///
@@ -12400,6 +12440,60 @@ pub mod organisation_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListMembersSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/SetOrganisationVisibility" => {
+                    #[allow(non_camel_case_types)]
+                    struct SetOrganisationVisibilitySvc<T: OrganisationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<
+                        super::SetOrganisationVisibilityRequest,
+                    > for SetOrganisationVisibilitySvc<T> {
+                        type Response = super::SetOrganisationVisibilityResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::SetOrganisationVisibilityRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::set_organisation_visibility(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SetOrganisationVisibilitySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
