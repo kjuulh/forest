@@ -133,7 +133,7 @@ async fn run_cue_def_openapi(cue_files: &[&str]) -> anyhow::Result<String> {
 }
 
 /// Run `cue def --out openapi` on the given files in a specific directory.
-async fn run_cue_def_openapi_in_dir(
+pub(crate) async fn run_cue_def_openapi_in_dir(
     cue_files: &[&str],
     dir: &std::path::Path,
 ) -> anyhow::Result<String> {

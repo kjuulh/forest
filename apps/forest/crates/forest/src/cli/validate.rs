@@ -8,9 +8,9 @@ use crate::{
 
 /// Validate project configuration against component specs.
 ///
-/// For each v2 component dependency, validates that the project's config
-/// matches the component's spec schema. Also checks contract coverage:
-/// which contracts are enabled and which components implement them.
+/// Validates local and registry component configs against CUE #Spec, merging
+/// environment overrides as release preparation does. Custom commands/validate
+/// runs only when declared. Also reports available contracts and implementations.
 ///
 /// Run from a project directory (where forest.cue lives).
 #[derive(clap::Parser)]
@@ -103,16 +103,32 @@ impl ValidateCommand {
                 continue;
             }
 
-            let spec_json = match project.get_component_config(&comp_ref) {
-                Some(config) => serde_json::to_value(config).unwrap_or_default(),
-                None => {
-                    errors.push(format!(
-                        "{}/{}: no config found in forest.cue",
-                        dep.organisation, dep.name
-                    ));
+            let configs = match effective_configs(&project, &comp_ref) {
+                Ok(configs) => configs,
+                Err(e) => {
+                    errors.push(format!("{dep_key}: {e}"));
                     continue;
                 }
             };
+            let mut schema_files = vec!["./forest.component.cue"];
+            if path.join("spec.cue").exists() {
+                schema_files.push("./spec.cue");
+            }
+            let schema =
+                match super::components::generate::run_cue_def_openapi_in_dir(&schema_files, &path)
+                    .await
+                    .and_then(|json| {
+                        serde_json::from_str::<serde_json::Value>(&json).map_err(Into::into)
+                    }) {
+                    Ok(schema) => schema,
+                    Err(e) => {
+                        errors.push(format!("{dep_key}: cannot load component schema: {e}"));
+                        continue;
+                    }
+                };
+            let custom_validation = schema
+                .pointer("/components/schemas/Commands")
+                .is_some_and(|commands| declares_validate(commands, &schema));
 
             // Check which contracts this component implements (before validation)
             let descriptor = component_binary::load_cached_descriptor_with_meta(
@@ -139,102 +155,28 @@ impl ValidateCommand {
                 }
             }
 
-            // Invoke commands/validate — try binary first, then deno
-            let validate_result = if let Some(binary_path) =
-                component_binary::resolve_binary_with_meta(
+            let mut component_valid = true;
+            for (scope, config) in configs {
+                let result = validate_config(
                     &path,
-                    &dep.name,
-                    Some(&dep.organisation),
-                    Some(&dep.name),
+                    &schema_files,
+                    dep,
                     version,
-                ) {
-                let input = serde_json::json!({});
-                component_binary::invoke_component(
-                    &binary_path,
-                    "commands/validate",
-                    &spec_json,
-                    &input,
+                    custom_validation,
+                    &serde_json::to_value(config)?,
                 )
-                .await
-            } else if crate::services::component_deno::is_deno_component_with_meta(
-                &path,
-                Some(&dep.organisation),
-                Some(&dep.name),
-                version,
-            ) {
-                if let Some(entrypoint) =
-                    crate::services::component_deno::resolve_entrypoint_with_meta(
-                        &path,
-                        Some(&dep.organisation),
-                        Some(&dep.name),
-                        version,
-                    )
-                {
-                    crate::services::component_deno::invoke_deno_component(
-                        &path,
-                        &entrypoint,
-                        "commands/validate",
-                        &spec_json,
-                        &serde_json::json!({}),
-                        None,
-                        None,
-                    )
-                    .await
-                } else {
-                    errors.push(format!("{dep_key}: no deno entrypoint found"));
-                    continue;
-                }
-            } else {
-                errors.push(format!(
-                    "{}/{}: no binary or deno entrypoint found",
-                    dep.organisation, dep.name
-                ));
-                continue;
-            };
-
-            match validate_result {
-                Ok(result) => {
-                    let response = match serde_json::from_value::<ValidationResponse>(result) {
-                        Ok(response) => response,
-                        Err(_) => {
-                            errors.push(format!(
-                                "{dep_key}: validator did not return a boolean valid and string errors"
-                            ));
-                            continue;
-                        }
-                    };
-                    let valid = response.valid && response.errors.is_empty();
-                    let spec_errors = response.errors;
-
-                    if valid {
-                        eprintln!("  {} {}/{}  config valid", "✓", dep.organisation, dep.name);
-                    } else {
-                        if spec_errors.is_empty() {
-                            errors.push(format!("{dep_key}: validator rejected config"));
-                        }
-                        for err in &spec_errors {
-                            errors.push(format!("{}/{}: {}", dep.organisation, dep.name, err));
-                        }
-                        eprintln!(
-                            "  {} {}/{}  {} error(s)",
-                            "✗",
-                            dep.organisation,
-                            dep.name,
-                            spec_errors.len()
-                        );
-                    }
-                    validated += 1;
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    errors.push(format!("{}/{}: {}", dep.organisation, dep.name, msg));
-                    eprintln!(
-                        "  {} {}/{}  invalid config",
-                        "✗", dep.organisation, dep.name
-                    );
-                    validated += 1;
+                .await;
+                if let Err(e) = result {
+                    errors.push(format!("{dep_key} ({scope}): {e}"));
+                    component_valid = false;
                 }
             }
+            if component_valid {
+                eprintln!("  ✓ {dep_key}  config valid");
+            } else {
+                eprintln!("  ✗ {dep_key}  invalid config");
+            }
+            validated += 1;
         }
 
         // Contract coverage check
@@ -282,4 +224,138 @@ struct ValidationResponse {
     valid: bool,
     #[serde(default)]
     errors: Vec<String>,
+}
+
+fn declares_validate(commands: &serde_json::Value, document: &serde_json::Value) -> bool {
+    if commands.pointer("/properties/validate").is_some() {
+        return true;
+    }
+    if let Some(reference) = commands.get("$ref").and_then(|value| value.as_str())
+        && let Some(target) = reference
+            .strip_prefix('#')
+            .and_then(|path| document.pointer(path))
+    {
+        return declares_validate(target, document);
+    }
+    commands
+        .get("allOf")
+        .and_then(|value| value.as_array())
+        .is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| declares_validate(schema, document))
+        })
+}
+
+fn effective_configs(
+    project: &crate::models::Project,
+    component: &crate::models::ComponentReference,
+) -> anyhow::Result<Vec<(String, crate::models::ProjectValue)>> {
+    use crate::models::ProjectValue;
+    let Some(ProjectValue::Map(usage)) = project.other.get_from_component(component) else {
+        anyhow::bail!("component usage must be a map");
+    };
+    let base = usage.get("config");
+    if let Some(envs) = usage.get("env") {
+        let ProjectValue::Map(envs) = envs else {
+            anyhow::bail!("env must be a map");
+        };
+        if !envs.is_empty() {
+            let mut configs = Vec::with_capacity(envs.len());
+            for (name, env) in envs {
+                let ProjectValue::Map(env) = env else {
+                    anyhow::bail!("env {name} must be a map");
+                };
+                let config = match (base, env.get("config")) {
+                    (Some(base), Some(patch)) => {
+                        super::release::prepare::merge_config(base.clone(), patch.clone())
+                    }
+                    (Some(config), None) | (None, Some(config)) => config.clone(),
+                    (None, None) => anyhow::bail!("env {name}: no config found in forest.cue"),
+                };
+                configs.push((format!("env {name}"), config));
+            }
+            configs.sort_by(|a, b| a.0.cmp(&b.0));
+            return Ok(configs);
+        }
+    }
+    Ok(vec![(
+        "config".to_string(),
+        base.cloned()
+            .ok_or_else(|| anyhow::anyhow!("no config found in forest.cue"))?,
+    )])
+}
+
+async fn validate_config(
+    path: &std::path::Path,
+    schema_files: &[&str],
+    component: &crate::models::ComponentReference,
+    version: Option<&str>,
+    custom_validation: bool,
+    spec: &serde_json::Value,
+) -> anyhow::Result<()> {
+    let mut config = tempfile::Builder::new().suffix(".json").tempfile()?;
+    serde_json::to_writer(config.as_file_mut(), spec)?;
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.current_dir(path)
+            .args(["vet", "-c", "-d", "#Spec"])
+            .args(schema_files)
+            .arg(config.path());
+        cmd
+    })
+    .await?;
+    if !output.status.success() {
+        // CUE diagnostics can include supplied values, which may be secrets.
+        anyhow::bail!(
+            "config does not conform to component #Spec (cue vet {})",
+            output.status
+        );
+    }
+    if !custom_validation {
+        return Ok(());
+    }
+    let result = if let Some(binary) = component_binary::resolve_binary_with_meta(
+        path,
+        &component.name,
+        Some(&component.organisation),
+        Some(&component.name),
+        version,
+    ) {
+        component_binary::invoke_component(
+            &binary,
+            "commands/validate",
+            spec,
+            &serde_json::json!({}),
+        )
+        .await?
+    } else if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint_with_meta(
+        path,
+        Some(&component.organisation),
+        Some(&component.name),
+        version,
+    ) {
+        crate::services::component_deno::invoke_deno_component(
+            path,
+            &entrypoint,
+            "commands/validate",
+            spec,
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .await?
+    } else {
+        anyhow::bail!("declared commands/validate has no binary or deno entrypoint");
+    };
+    let response: ValidationResponse = serde_json::from_value(result).map_err(|_| {
+        anyhow::anyhow!("validator did not return a boolean valid and string errors")
+    })?;
+    if !response.valid || !response.errors.is_empty() {
+        if response.errors.is_empty() {
+            anyhow::bail!("validator rejected config");
+        }
+        anyhow::bail!("{}", response.errors.join("; "));
+    }
+    Ok(())
 }

@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-* **validate:** validate configured pinned registry components through the existing component cache and shared binary/Deno metadata, just like local components. Fail when a configured component has no validator, validation cannot run, or its response does not confirm validity. Contract-only dependencies and unused peer dependencies do not require a validator; projects without component configs report no validation coverage rather than claiming all configs are valid.
+* **validate:** validate configured local and pinned registry components against their CUE `#Spec`, including defaults and effective base-plus-environment configs merged with release preparation's existing semantics. `commands/validate` is optional and runs only when declared; a declared custom validator still fails closed when unavailable or returning an invalid/rejected result. Missing or unusable schemas fail validation. Contract-only dependencies and unused peer dependencies remain optional; projects without component configs report no validation coverage rather than claiming all configs are valid.
 
 ## [0.3.13](https://github.com/understory-io/forest/compare/v0.3.12...v0.3.13) (2026-09-07)
 

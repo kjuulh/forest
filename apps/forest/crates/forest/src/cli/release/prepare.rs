@@ -602,7 +602,7 @@ impl Display for DeploymentItem {
     }
 }
 
-fn merge_config(base: ProjectValue, patch: ProjectValue) -> ProjectValue {
+pub(crate) fn merge_config(base: ProjectValue, patch: ProjectValue) -> ProjectValue {
     match (base, patch) {
         (ProjectValue::String(_base), ProjectValue::String(patch)) => ProjectValue::String(patch),
         (ProjectValue::Integer(_base), ProjectValue::Integer(patch)) => {

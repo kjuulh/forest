@@ -72,7 +72,11 @@ esac
             .path()
             .join(format!("cache/forest/components/{org}/{name}/1.0.0"));
         fs::create_dir_all(&path).unwrap();
-        fs::write(path.join("forest.component.cue"), "package fixture\n").unwrap();
+        fs::write(
+            path.join("forest.component.cue"),
+            "package fixture\n#Spec: {replicas: int & >0}\n#Commands: {validate: {}}\n",
+        )
+        .unwrap();
         fs::write(path.join("forest.cue"), format!(
             "package fixture\nproject: organisation: \"{org}\"\nforest: component: {{name: \"{name}\", version: \"1.0.0\"}}\n"
         )).unwrap();
@@ -199,5 +203,66 @@ fn local_component_configs_still_use_the_component_validator() {
             &format!("owned: service: config: replicas: {replicas}"),
         );
         project.validate("schema", valid);
+    }
+}
+
+#[test]
+fn schema_only_components_validate_without_an_optional_runtime_command() {
+    let project = Project::new();
+    let schema = project
+        .root
+        .path()
+        .join("cache/forest/components/owned/service/1.0.0/forest.component.cue");
+    fs::write(
+        &schema,
+        "package fixture\n#Spec: {replicas: int & >0 | *1}\n#Commands: {}\n",
+    )
+    .unwrap();
+    fs::remove_file(&project.binary).unwrap();
+    for (config, valid) in [
+        ("{}", true),
+        ("{replicas: 2}", true),
+        ("{replicas: 0}", false),
+        ("{replicas: \"two\"}", false),
+    ] {
+        project.config(
+            "\"owned/service\": version: \"1.0.0\"",
+            &format!("owned: service: config: {config}"),
+        );
+        project.validate("unavailable", valid);
+    }
+    fs::write(&schema, "package fixture\n#Commands: {}\n").unwrap();
+    project.validate("unavailable", false);
+}
+
+#[test]
+fn each_environment_validates_the_same_deep_merged_config_as_release_prepare() {
+    let project = Project::new();
+    let component = project
+        .root
+        .path()
+        .join("cache/forest/components/owned/service/1.0.0");
+    fs::write(
+        component.join("forest.component.cue"),
+        "package fixture\n#Spec: #Settings\n",
+    )
+    .unwrap();
+    fs::write(
+        component.join("spec.cue"),
+        "package fixture\n#Settings: {name: string, host: string, postgres: {enabled: bool | *true, database: string, instances: int & >=1}}\n",
+    ).unwrap();
+    fs::remove_file(&project.binary).unwrap();
+    for (instances, valid) in [(2, true), (0, false)] {
+        project.config(
+            "\"owned/service\": version: \"1.0.0\"",
+            &format!(r#"owned: service: {{
+                config: {{name: "app", postgres: {{database: "app", instances: 0}}}}
+                env: {{
+                    dev: {{config: {{host: "dev.example.test", postgres: instances: 1}}}}
+                    prod: {{config: {{host: "prod.example.test", postgres: instances: {instances}}}}}
+                }}
+            }}"#),
+        );
+        project.validate("unavailable", valid);
     }
 }
