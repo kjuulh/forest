@@ -1,6 +1,7 @@
 use crate::{
+    component_cache::ComponentCacheState,
     contracts::{self},
-    models::{ComponentSource, DependencyType},
+    models::ComponentSource,
     services::{component_binary, project::ProjectParserState},
     state::State,
 };
@@ -74,28 +75,33 @@ impl ValidateCommand {
         let mut contract_implementations: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
 
-        for dep in &project.dependencies.dependencies {
-            let path = match &dep.dependency_type {
-                DependencyType::Local(path) => path.clone(),
-                DependencyType::Versioned(_) => continue, // skip registry deps for now
-            };
-
-            if !component_binary::is_v2_component(&path) {
-                continue;
-            }
-
-            // Skip contract-only dependencies (they define types, not services)
-            let dep_key = format!("{}/{}", dep.organisation, dep.name);
+        for comp_ref in project.dependencies.get_components() {
+            let dep_key = format!("{}/{}", comp_ref.organisation, comp_ref.name);
             if contracts::is_contract(&dep_key) {
                 continue;
             }
-
-            // Build the spec from project config
-            let comp_ref = crate::models::ComponentReference {
-                organisation: dep.organisation.clone(),
-                name: dep.name.clone(),
-                source: ComponentSource::Local(path.clone()),
+            // Peer dependencies without a usage block have no project config to validate.
+            if !project.has_component_usage(&comp_ref.organisation, &comp_ref.name) {
+                continue;
+            }
+            let (path, version) = match &comp_ref.source {
+                ComponentSource::Local(path) => (path.clone(), None),
+                ComponentSource::Versioned(version) => (
+                    state
+                        .component_cache()
+                        .versioned_component_dir(&comp_ref.organisation, &comp_ref.name, version)
+                        .await?,
+                    Some(version.as_str()),
+                ),
             };
+            let dep = &comp_ref;
+            if !component_binary::is_v2_component(&path) {
+                errors.push(format!(
+                    "{dep_key}: no v2 component validator found at {}",
+                    path.display()
+                ));
+                continue;
+            }
 
             let spec_json = match project.get_component_config(&comp_ref) {
                 Some(config) => serde_json::to_value(config).unwrap_or_default(),
@@ -109,8 +115,20 @@ impl ValidateCommand {
             };
 
             // Check which contracts this component implements (before validation)
-            let descriptor = component_binary::load_cached_descriptor(&path)
-                .or_else(|| crate::services::component_deno::load_cached_descriptor(&path));
+            let descriptor = component_binary::load_cached_descriptor_with_meta(
+                &path,
+                Some(&dep.organisation),
+                Some(&dep.name),
+                version,
+            )
+            .or_else(|| {
+                crate::services::component_deno::load_cached_descriptor_with_meta(
+                    &path,
+                    Some(&dep.organisation),
+                    Some(&dep.name),
+                    version,
+                )
+            });
             if let Some(ref descriptor) = descriptor {
                 let comp_contracts = contracts::component_contracts(descriptor);
                 for topic in &comp_contracts {
@@ -123,8 +141,13 @@ impl ValidateCommand {
 
             // Invoke commands/validate — try binary first, then deno
             let validate_result = if let Some(binary_path) =
-                component_binary::resolve_binary(&path, &dep.name)
-            {
+                component_binary::resolve_binary_with_meta(
+                    &path,
+                    &dep.name,
+                    Some(&dep.organisation),
+                    Some(&dep.name),
+                    version,
+                ) {
                 let input = serde_json::json!({});
                 component_binary::invoke_component(
                     &binary_path,
@@ -133,8 +156,19 @@ impl ValidateCommand {
                     &input,
                 )
                 .await
-            } else if crate::services::component_deno::is_deno_component(&path) {
-                if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(&path)
+            } else if crate::services::component_deno::is_deno_component_with_meta(
+                &path,
+                Some(&dep.organisation),
+                Some(&dep.name),
+                version,
+            ) {
+                if let Some(entrypoint) =
+                    crate::services::component_deno::resolve_entrypoint_with_meta(
+                        &path,
+                        Some(&dep.organisation),
+                        Some(&dep.name),
+                        version,
+                    )
                 {
                     crate::services::component_deno::invoke_deno_component(
                         &path,
@@ -147,6 +181,7 @@ impl ValidateCommand {
                     )
                     .await
                 } else {
+                    errors.push(format!("{dep_key}: no deno entrypoint found"));
                     continue;
                 }
             } else {
@@ -159,24 +194,24 @@ impl ValidateCommand {
 
             match validate_result {
                 Ok(result) => {
-                    let valid = result
-                        .get("valid")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true);
-                    let spec_errors = result
-                        .get("errors")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .map(String::from)
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
+                    let response = match serde_json::from_value::<ValidationResponse>(result) {
+                        Ok(response) => response,
+                        Err(_) => {
+                            errors.push(format!(
+                                "{dep_key}: validator did not return a boolean valid and string errors"
+                            ));
+                            continue;
+                        }
+                    };
+                    let valid = response.valid && response.errors.is_empty();
+                    let spec_errors = response.errors;
 
                     if valid {
                         eprintln!("  {} {}/{}  config valid", "✓", dep.organisation, dep.name);
                     } else {
+                        if spec_errors.is_empty() {
+                            errors.push(format!("{dep_key}: validator rejected config"));
+                        }
                         for err in &spec_errors {
                             errors.push(format!("{}/{}: {}", dep.organisation, dep.name, err));
                         }
@@ -222,7 +257,11 @@ impl ValidateCommand {
 
         eprintln!();
         if errors.is_empty() {
-            eprintln!("Validated {} component(s), all configs valid.", validated);
+            if validated == 0 {
+                eprintln!("No component configs to validate.");
+            } else {
+                eprintln!("Validated {} component(s), all configs valid.", validated);
+            }
             Ok(())
         } else {
             eprintln!(
@@ -236,4 +275,11 @@ impl ValidateCommand {
             anyhow::bail!("validation failed")
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct ValidationResponse {
+    valid: bool,
+    #[serde(default)]
+    errors: Vec<String>,
 }
