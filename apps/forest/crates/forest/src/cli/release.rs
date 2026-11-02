@@ -14,6 +14,7 @@ mod create;
 pub(crate) mod detect;
 mod drift;
 mod fail;
+mod files;
 pub(crate) mod prepare;
 pub(crate) mod reject;
 pub(crate) mod show;
@@ -41,6 +42,8 @@ pub enum Commands {
     Create(CreateCommand),
     /// Show detail (header, stages, destinations, plan output, deploy logs) for a release.
     Show(ShowCommand),
+    /// Export immutable artifact files to a new private local directory (read-only).
+    Files(files::FilesCommand),
     /// Report that the deploy an annotation announced never happened.
     Fail(FailCommand),
     /// Approve a plan stage parked awaiting approval, letting the apply proceed.
@@ -64,6 +67,7 @@ impl ReleaseCommand {
             Some(Commands::Release(cmd)) => cmd.execute(state).await?,
             Some(Commands::Create(cmd)) => cmd.execute(state).await?,
             Some(Commands::Show(cmd)) => cmd.execute(state).await?,
+            Some(Commands::Files(cmd)) => cmd.execute(state).await?,
             Some(Commands::Fail(cmd)) => cmd.execute(state).await?,
             Some(Commands::Approve(cmd)) => cmd.execute(state).await?,
             Some(Commands::Reject(cmd)) => cmd.execute(state).await?,

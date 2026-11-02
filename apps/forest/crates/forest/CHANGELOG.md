@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **release:** add read-only `forest release files --artifact-id <uuid> --output <new-directory>` using the active context and existing artifact-files RPC. Export server filenames under category directories with metadata-only path, byte-count and SHA-256 inventories (`--format json` supported). On Unix, new directories are 0700 and files 0600; unsafe paths, symlinks, duplicate/conflicting paths and existing outputs are refused. A partial I/O failure reports failure and requires a fresh destination. No prepare, annotation, approval or release is performed; non-Unix export is explicitly unsupported.
+
 ## [0.3.13](https://github.com/understory-io/forest/compare/v0.3.12...v0.3.13) (2026-09-07)
 
 

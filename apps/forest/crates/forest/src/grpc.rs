@@ -679,6 +679,24 @@ impl GrpcClient {
         Ok(())
     }
 
+    /// Read prepared artifact files using the active context's authenticated client.
+    pub async fn get_artifact_files(
+        &self,
+        artifact_id: &Uuid,
+        category: Option<&str>,
+    ) -> anyhow::Result<Vec<ArtifactFile>> {
+        let mut client = self.artifact_client().await?;
+        let response = client
+            .get_artifact_files(GetArtifactFilesRequest {
+                artifact_id: artifact_id.to_string(),
+                category: category.map(str::to_owned),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("get artifact files")?;
+        Ok(response.into_inner().files)
+    }
+
     pub async fn begin_artifact_upload(&self) -> anyhow::Result<UploadFileHandle> {
         let mut client = self.artifact_client().await?;
 
