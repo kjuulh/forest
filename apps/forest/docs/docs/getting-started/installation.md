@@ -50,6 +50,13 @@ To go back to that stable release, name it: `forest self update v<latest-stable>
 Every path verifies the checksum, then that the new binary reports the
 requested version, before replacing the running one.
 
+The background update notice compares the latest release with the version of
+the binary that is running. If it keeps naming an old version you have already
+updated past, another `forest` earlier on `PATH` printed it, typically a
+`cargo install` build in `~/.cargo/bin` reached by a shell hook that runs before
+`~/.local/bin` is put first. `type -a forest` lists them. After v0.3.17 the
+notice names that binary: `you have <version> at <path>`.
+
 `forest --version` prints the commit a release was built from, as
 `forest <version> (commit <sha>)`; a binary built from source says
 `(local build)`. Releases up to and including v0.3.16 print only

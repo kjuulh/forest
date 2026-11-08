@@ -494,53 +494,71 @@ pub async fn maybe_print_update_nag() {
     let prerelease = follows_prereleases();
     let cache = read_cache();
     let now = now_unix();
-    let stale = cache
-        .as_ref()
-        .map(|c| {
-            c.prerelease != prerelease
-                || now.saturating_sub(c.last_check_unix) >= CHECK_INTERVAL.as_secs()
-        })
-        .unwrap_or(true);
 
-    let latest_str: String = if stale {
-        let latest = if prerelease {
-            fetch_ranked_releases(true)
-                .await
-                .ok()
-                .and_then(|r| r.into_iter().next().map(|(v, _)| v))
-        } else {
-            fetch_latest_version().await.ok()
-        };
-        match latest {
-            Some(v) => {
-                let s = v.to_string();
-                write_cache(&UpdateCache {
-                    last_check_unix: now,
-                    latest_version: Some(s.clone()),
-                    prerelease,
-                });
-                s
+    let latest_str: String = match cached_latest(cache.as_ref(), now, prerelease) {
+        CachedLatest::Fresh(Some(v)) => v.to_string(),
+        CachedLatest::Fresh(None) => return,
+        CachedLatest::Stale => {
+            let latest = if prerelease {
+                fetch_ranked_releases(true)
+                    .await
+                    .ok()
+                    .and_then(|r| r.into_iter().next().map(|(v, _)| v))
+            } else {
+                fetch_latest_version().await.ok()
+            };
+            match latest {
+                Some(v) => {
+                    let s = v.to_string();
+                    write_cache(&UpdateCache {
+                        last_check_unix: now,
+                        latest_version: Some(s.clone()),
+                        prerelease,
+                    });
+                    s
+                }
+                None => return,
             }
-            None => return,
-        }
-    } else {
-        match cache.and_then(|c| c.latest_version) {
-            Some(v) => v,
-            None => return,
         }
     };
 
-    let Ok(latest) = Version::parse(&latest_str) else {
-        return;
-    };
-    let current = current_version();
-    if latest > current {
-        eprintln!(
-            "\n✨ forest {latest} is available (you have {current}). \
-             Run `forest self update` to upgrade.\n   \
-             Release notes: https://github.com/{REPO}/releases/tag/v{latest}"
-        );
+    let exe = std::env::current_exe().ok();
+    if let Some(notice) = update_notice(&latest_str, &current_version(), exe.as_deref()) {
+        eprintln!("{notice}");
     }
+}
+
+enum CachedLatest<'a> {
+    Stale,
+    Fresh(Option<&'a str>),
+}
+
+fn cached_latest(cache: Option<&UpdateCache>, now: u64, prerelease: bool) -> CachedLatest<'_> {
+    match cache {
+        Some(c)
+            if c.prerelease == prerelease
+                && now.saturating_sub(c.last_check_unix) < CHECK_INTERVAL.as_secs() =>
+        {
+            CachedLatest::Fresh(c.latest_version.as_deref())
+        }
+        _ => CachedLatest::Stale,
+    }
+}
+
+fn update_notice(latest: &str, current: &Version, exe: Option<&Path>) -> Option<String> {
+    let latest = Version::parse(latest).ok()?;
+    if latest <= *current {
+        return None;
+    }
+    let you_have = match exe {
+        Some(exe) => format!("{current} at {}", exe.display()),
+        None => current.to_string(),
+    };
+    Some(format!(
+        "\n✨ forest {latest} is available (you have {you_have}). \
+         Run `forest self update` to upgrade.\n   \
+         Release notes: https://github.com/{REPO}/releases/tag/v{latest}"
+    ))
 }
 
 #[cfg(test)]
@@ -696,5 +714,69 @@ mod tests {
         assert_eq!(parsed.last_check_unix, 1_700_000_000);
         assert_eq!(parsed.latest_version.as_deref(), Some("0.2.3"));
         assert!(!parsed.prerelease);
+    }
+
+    fn cache(last_check_unix: u64, latest: &str, prerelease: bool) -> UpdateCache {
+        UpdateCache {
+            last_check_unix,
+            latest_version: Some(latest.into()),
+            prerelease,
+        }
+    }
+
+    fn v(s: &str) -> Version {
+        Version::parse(s).unwrap()
+    }
+
+    #[test]
+    fn a_cache_older_than_a_day_or_from_the_other_channel_is_refetched() {
+        let now = 1_800_000_000;
+        let day = CHECK_INTERVAL.as_secs();
+        assert!(matches!(
+            cached_latest(None, now, false),
+            CachedLatest::Stale
+        ));
+        assert!(matches!(
+            cached_latest(Some(&cache(now - day, "0.3.17", false)), now, false),
+            CachedLatest::Stale
+        ));
+        assert!(matches!(
+            cached_latest(Some(&cache(now - 60, "0.3.17", false)), now, true),
+            CachedLatest::Stale
+        ));
+        assert!(matches!(
+            cached_latest(Some(&cache(now - day + 1, "0.3.17", false)), now, false),
+            CachedLatest::Fresh(Some("0.3.17"))
+        ));
+    }
+
+    #[test]
+    fn a_replaced_binary_reading_the_same_cache_reports_its_own_version() {
+        let cached = cache(1_800_000_000, "0.3.17", false);
+        let CachedLatest::Fresh(Some(latest)) = cached_latest(Some(&cached), 1_800_000_060, false)
+        else {
+            panic!("a minute-old cache is fresh");
+        };
+        assert_eq!(update_notice(latest, &v("0.3.17"), None), None);
+        let old = Path::new("/Users/me/.cargo/bin/forest");
+        let notice = update_notice(latest, &v("0.3.7"), Some(old)).unwrap();
+        assert!(
+            notice.contains(
+                "forest 0.3.17 is available (you have 0.3.7 at /Users/me/.cargo/bin/forest)"
+            ),
+            "{notice}"
+        );
+        assert!(notice.contains("/releases/tag/v0.3.17"), "{notice}");
+    }
+
+    #[test]
+    fn the_notice_compares_versions_by_semver_not_by_text() {
+        assert!(update_notice("0.3.17", &v("0.3.7"), None).is_some());
+        assert!(update_notice("0.3.7", &v("0.3.17"), None).is_none());
+        assert!(update_notice("0.3.17", &v("0.3.17"), None).is_none());
+        assert!(update_notice("0.3.18-rc.1", &v("0.3.17"), None).is_some());
+        assert!(update_notice("0.3.17", &v("0.3.18-rc.1"), None).is_none());
+        assert!(update_notice("0.3.17", &v("0.3.17-rc.2"), None).is_some());
+        assert!(update_notice("not-a-version", &v("0.3.7"), None).is_none());
     }
 }
