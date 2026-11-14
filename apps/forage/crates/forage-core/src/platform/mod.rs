@@ -962,6 +962,13 @@ pub trait ForestPlatform: Send + Sync {
         enabled: bool,
     ) -> Result<(), PlatformError>;
 
+    async fn reset_notification_preference(
+        &self,
+        access_token: &str,
+        notification_type: &str,
+        channel: &str,
+    ) -> Result<(), PlatformError>;
+
     async fn evaluate_policies(
         &self,
         access_token: &str,

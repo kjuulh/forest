@@ -1420,6 +1420,14 @@ impl AnnotationContext {
             self.actor_type.as_deref(),
         )
     }
+
+    pub fn personal_recipient_attribution(&self) -> Option<String> {
+        crate::services::release_owner::personal_recipient_attribution(
+            &self.metadata,
+            self.source.user_id.as_deref(),
+            self.actor_type.as_deref(),
+        )
+    }
 }
 
 #[cfg(test)]

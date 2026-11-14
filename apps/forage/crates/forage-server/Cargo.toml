@@ -47,3 +47,4 @@ qrcode.workspace = true
 image.workspace = true
 pulldown-cmark = "0.12"
 ammonia = "4"
+rsa = { version = "0.9", features = ["sha2"] }

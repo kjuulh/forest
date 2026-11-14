@@ -29,6 +29,8 @@ pub struct ReleaseContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_attribution: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_branch: Option<String>,
@@ -286,6 +288,30 @@ impl NotificationRegistry {
                 enabled: r.enabled,
             })
             .collect())
+    }
+
+    /// Deletes the user's explicit preference; deleting one that is not there
+    /// is not an error.
+    pub async fn reset_preference(
+        &self,
+        user_id: &Uuid,
+        notification_type: &str,
+        channel: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query!(
+            r#"
+            DELETE FROM notification_preferences
+            WHERE user_id = $1 AND notification_type = $2 AND channel = $3
+            "#,
+            user_id,
+            notification_type,
+            channel,
+        )
+        .execute(&self.db)
+        .await
+        .context("reset notification preference")?;
+
+        Ok(())
     }
 
     pub async fn set_preference(

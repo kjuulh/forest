@@ -86,6 +86,8 @@ impl ReleaseService for ReleaseServer {
             }
         }
 
+        release_author::strip_server_owned(&mut req.metadata);
+
         match release_author::DetectedAuthor::from_metadata(&req.metadata) {
             Some(detected) => {
                 let resolved = release_author::resolve(&self.state.user_service(), &detected).await;
@@ -104,6 +106,12 @@ impl ReleaseService for ReleaseServer {
                     source.user_id = Some(user_id.clone());
                     req.metadata
                         .insert(release_author::META_RESOLVED_USER_ID.to_string(), user_id);
+                    if let Some(linked_by) = resolved.how.as_meta() {
+                        req.metadata.insert(
+                            release_author::META_LINKED_BY.to_string(),
+                            linked_by.to_string(),
+                        );
+                    }
                 }
             }
 
@@ -187,6 +195,11 @@ impl ReleaseService for ReleaseServer {
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
                     source_user_id: release_owner::personal_recipient_id(
+                        &req.metadata,
+                        source.user_id.as_deref(),
+                        Some(actor.actor_type()),
+                    ),
+                    source_attribution: release_owner::personal_recipient_attribution(
                         &req.metadata,
                         source.user_id.as_deref(),
                         Some(actor.actor_type()),
@@ -520,6 +533,9 @@ impl ReleaseService for ReleaseServer {
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
                     source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
+                    source_attribution: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.personal_recipient_attribution()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
@@ -537,7 +553,6 @@ impl ReleaseService for ReleaseServer {
                         .and_then(|a| a.context.description.clone()),
                     context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
                     context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
-                    ..Default::default()
                 },
             )
             .await
@@ -715,6 +730,9 @@ impl ReleaseService for ReleaseServer {
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
                     source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
+                    source_attribution: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.personal_recipient_attribution()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),

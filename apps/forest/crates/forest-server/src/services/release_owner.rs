@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::services::release_author::{DetectedAuthor, META_PREFIX, META_RESOLVED_USER_ID};
+use crate::services::release_author::{
+    DetectedAuthor, META_LINKED_BY, META_PREFIX, META_RESOLVED_USER_ID,
+};
 
 const ACTOR_TYPE_USER: &str = "user";
 
@@ -54,6 +56,31 @@ pub fn personal_recipient(
         (Some(ACTOR_TYPE_USER), None) | (None, _) => Err(NoOwner::Unknown),
         (Some(_), _) => Err(NoOwner::ActorIsMachine),
     }
+}
+
+/// How the personal recipient was established, for consumers that trust some
+/// ways more than others: "actor" (the authenticated user who ran it),
+/// "github_id" or "email" (the detected author, linked that way), or "" when a
+/// recipient exists but the link was recorded before this was tracked. `None`
+/// exactly when there is no personal recipient.
+pub fn personal_recipient_attribution(
+    metadata: &HashMap<String, String>,
+    source_user_id: Option<&str>,
+    actor_type: Option<&str>,
+) -> Option<String> {
+    personal_recipient(metadata, source_user_id, actor_type).ok()?;
+
+    let resolved = metadata
+        .get(META_RESOLVED_USER_ID)
+        .is_some_and(|v| !v.trim().is_empty());
+    if !resolved {
+        return Some("actor".to_string());
+    }
+
+    Some(match metadata.get(META_LINKED_BY).map(|v| v.trim()) {
+        Some(how @ ("github_id" | "email")) => how.to_string(),
+        _ => String::new(),
+    })
 }
 
 pub fn personal_recipient_id(
@@ -197,6 +224,82 @@ mod tests {
         assert!(!is_bot_login("dentych"));
         assert!(!is_bot_login("kjuulh"));
         assert!(!is_bot_login("botond"));
+    }
+
+    #[test]
+    fn the_human_who_annotated_is_attributed_as_the_actor() {
+        assert_eq!(
+            personal_recipient_attribution(&HashMap::new(), Some(KASPER), Some("user")),
+            Some("actor".to_string()),
+        );
+    }
+
+    #[test]
+    fn a_linked_author_carries_how_they_were_linked() {
+        for how in ["github_id", "email"] {
+            assert_eq!(
+                personal_recipient_attribution(
+                    &meta(&[
+                        ("forest.author.github_login", "dentych"),
+                        ("forest.author.user_id", DENNIS),
+                        ("forest.author.linked_by", how),
+                    ]),
+                    Some(KASPER),
+                    Some("user"),
+                ),
+                Some(how.to_string()),
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_recorded_before_attribution_was_tracked_is_unknown_not_the_actor() {
+        assert_eq!(
+            personal_recipient_attribution(
+                &meta(&[("forest.author.user_id", DENNIS)]),
+                Some(KASPER),
+                Some("user"),
+            ),
+            Some(String::new()),
+        );
+        assert_eq!(
+            personal_recipient_attribution(
+                &meta(&[
+                    ("forest.author.user_id", DENNIS),
+                    ("forest.author.linked_by", "a-guess"),
+                ]),
+                Some(KASPER),
+                Some("user"),
+            ),
+            Some(String::new()),
+        );
+    }
+
+    #[test]
+    fn no_recipient_means_no_attribution() {
+        assert_eq!(
+            personal_recipient_attribution(
+                &meta(&[("forest.author.github_login", "renovate[bot]")]),
+                Some(KASPER),
+                Some("user"),
+            ),
+            None,
+        );
+        assert_eq!(
+            personal_recipient_attribution(&HashMap::new(), Some(KASPER), Some("app")),
+            None,
+        );
+        assert_eq!(
+            personal_recipient_attribution(
+                &meta(&[
+                    ("forest.author.origin", "git-commit"),
+                    ("forest.author.email", "nobody@example.com"),
+                ]),
+                Some(KASPER),
+                Some("user"),
+            ),
+            None,
+        );
     }
 
     #[test]

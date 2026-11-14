@@ -13,6 +13,8 @@ mod notification_worker;
 mod http_metrics;
 mod page_timing;
 mod pretty_json;
+mod providers;
+mod recipients;
 mod routes;
 mod serve_grpc;
 mod serve_http;
@@ -250,6 +252,51 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    state = state.with_slack_api(
+        crate::providers::SlackApi::new(
+            env_var_nonempty("SLACK_API_BASE_URL")
+                .unwrap_or_else(|| crate::providers::SLACK_API_BASE.to_string()),
+        ),
+        env_var_nonempty("SLACK_AUTHORIZE_URL")
+            .unwrap_or_else(|| crate::providers::SLACK_AUTHORIZE_URL.to_string()),
+    );
+    if let Some(secret) = env_var_nonempty("SLACK_SIGNING_SECRET") {
+        state = state.with_slack_signing_secret(secret);
+    }
+
+    if let (Some(app_id), Some(slug), Some(private_key_pem), Some(client_id), Some(client_secret)) = (
+        env_var_nonempty("GITHUB_APP_ID"),
+        env_var_nonempty("GITHUB_APP_SLUG"),
+        env_var_nonempty("GITHUB_APP_PRIVATE_KEY"),
+        env_var_nonempty("GITHUB_APP_CLIENT_ID"),
+        env_var_nonempty("GITHUB_APP_CLIENT_SECRET"),
+    ) {
+        let app = crate::providers::GitHubApp::new(crate::providers::GitHubAppConfig {
+            app_id,
+            slug,
+            client_id,
+            client_secret,
+            webhook_secret: env_var_nonempty("GITHUB_APP_WEBHOOK_SECRET").unwrap_or_default(),
+            private_key_pem,
+            api_base: env_var_nonempty("GITHUB_API_BASE_URL")
+                .unwrap_or_else(|| "https://api.github.com".into()),
+            web_base: env_var_nonempty("GITHUB_WEB_BASE_URL")
+                .unwrap_or_else(|| "https://github.com".into()),
+        })
+        .map_err(|e| anyhow::anyhow!(e))?;
+        tracing::info!("GitHub organisation connections enabled");
+        state = state.with_github_app(std::sync::Arc::new(app));
+    }
+
+    if let Some(service_token) = forest_client.service_account_key() {
+        state = state.with_recipient_directory(std::sync::Arc::new(
+            crate::recipients::ForestRecipients {
+                grpc: forest_client.clone(),
+                service_token: service_token.to_string(),
+            },
+        ));
+    }
+
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GOOGLE_CLIENT_ID"),
         env_var_nonempty("GOOGLE_CLIENT_SECRET"),
@@ -318,6 +365,7 @@ async fn main() -> anyhow::Result<()> {
                     forage_url,
                     grpc: grpc_for_consumer,
                     service_token: token_for_consumer,
+                    slack: state.slack_api.clone(),
                 });
             } else {
                 tracing::warn!(
@@ -328,6 +376,7 @@ async fn main() -> anyhow::Result<()> {
                     store: store.clone(),
                     service_token,
                     forage_url,
+                    slack: state.slack_api.clone(),
                 });
             }
         } else {
@@ -386,5 +435,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod test_providers;
 #[cfg(test)]
 mod tests;

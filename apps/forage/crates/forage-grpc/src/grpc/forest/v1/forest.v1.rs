@@ -1914,6 +1914,13 @@ pub struct ReleaseContext {
     /// Number of destinations involved
     #[prost(int32, tag="16")]
     pub destination_count: i32,
+    /// How source_user_id was established: "actor" (the authenticated user who
+    /// ran the release), "github_id" (the detected commit author, via a GitHub
+    /// identity linked to their Forest account), "email" (the detected commit
+    /// author, via an email on their Forest account), or empty when unknown or
+    /// when there is no personal recipient.
+    #[prost(string, tag="18")]
+    pub source_attribution: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Notification {
@@ -1964,6 +1971,24 @@ pub struct SetNotificationPreferenceRequest {
 pub struct SetNotificationPreferenceResponse {
     #[prost(message, optional, tag="1")]
     pub preference: ::core::option::Option<NotificationPreference>,
+}
+/// Explicit preferences stored for one user. Service accounts only: delivery
+/// services read a recipient's preferences before routing to them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetUserNotificationPreferencesRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+/// Removes the caller's explicit preference, so the default applies again.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetNotificationPreferenceRequest {
+    #[prost(enumeration="NotificationType", tag="1")]
+    pub notification_type: i32,
+    #[prost(enumeration="NotificationChannel", tag="2")]
+    pub channel: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetNotificationPreferenceResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListenNotificationsRequest {

@@ -89,6 +89,7 @@ fn test_event(org: &str) -> NotificationEvent {
             environment: "production".into(),
             source_username: "alice".into(),
             source_user_id: String::new(),
+            source_attribution: "actor".into(),
             commit_sha: "aabbccdd".into(),
             commit_branch: "main".into(),
             context_title: "Deploy v3.0 succeeded".into(),
@@ -116,6 +117,7 @@ fn failed_event(org: &str) -> NotificationEvent {
             environment: "production".into(),
             source_username: "bob".into(),
             source_user_id: String::new(),
+            source_attribution: "actor".into(),
             commit_sha: "deadbeef".into(),
             commit_branch: "hotfix".into(),
             context_title: "Deploy v3.0 failed".into(),
@@ -151,7 +153,7 @@ async fn process_payload_routes_and_dispatches_to_webhook() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -176,7 +178,7 @@ async fn process_payload_skips_when_no_matching_integrations() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    let result = NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher).await;
+    let result = NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher).await;
     assert!(result.is_ok(), "should succeed with no matching integrations");
 }
 
@@ -186,7 +188,7 @@ async fn process_payload_rejects_invalid_json() {
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
 
     let result =
-        NotificationConsumer::process_payload(b"not-json", store.as_ref(), &dispatcher).await;
+        NotificationConsumer::process_payload(b"not-json", store.as_ref(), None, None, &dispatcher).await;
     assert!(result.is_err(), "invalid JSON should fail");
     assert!(
         result.unwrap_err().contains("deserialize"),
@@ -224,7 +226,7 @@ async fn process_payload_respects_disabled_rules() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -237,7 +239,7 @@ async fn process_payload_respects_disabled_rules() {
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
 
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -289,7 +291,7 @@ async fn process_payload_dispatches_to_multiple_integrations() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -322,7 +324,7 @@ async fn process_payload_records_delivery_status() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -356,7 +358,7 @@ async fn process_payload_records_failed_delivery() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -456,7 +458,7 @@ async fn jetstream_publish_and_consume_delivers_webhook() {
         .expect("message error");
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -539,7 +541,7 @@ async fn jetstream_multiple_messages_all_delivered() {
             .expect("stream ended")
             .expect("error");
 
-        NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+        NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
             .await
             .unwrap();
         msg.ack().await.unwrap();
@@ -618,7 +620,7 @@ async fn jetstream_message_for_wrong_org_skips_dispatch() {
         .unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
     msg.ack().await.unwrap();

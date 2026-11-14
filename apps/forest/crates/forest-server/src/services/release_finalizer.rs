@@ -151,6 +151,9 @@ async fn create_release_notification(
         source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
         source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
         source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
+        source_attribution: ann_ctx
+            .as_ref()
+            .and_then(|a| a.personal_recipient_attribution()),
         source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
         run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
         commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),

@@ -98,6 +98,66 @@ impl NotificationService for NotificationsServer {
         }))
     }
 
+    async fn reset_notification_preference(
+        &self,
+        request: tonic::Request<ResetNotificationPreferenceRequest>,
+    ) -> std::result::Result<tonic::Response<ResetNotificationPreferenceResponse>, tonic::Status>
+    {
+        let user_id = extract_actor_id(request.extensions())?;
+
+        let req = request.into_inner();
+        let ntype = notification_type_to_str(req.notification_type());
+        let channel = notification_channel_to_str(req.channel());
+
+        self.state
+            .notification_registry()
+            .reset_preference(&user_id, ntype, channel)
+            .await
+            .to_internal_error()?;
+
+        Ok(Response::new(ResetNotificationPreferenceResponse {}))
+    }
+
+    /// Delivery services (Forage) read a recipient's explicit preferences
+    /// before routing a personal notification to them. Nobody else may read
+    /// another person's preferences, so only service accounts get through.
+    async fn get_user_notification_preferences(
+        &self,
+        request: tonic::Request<GetUserNotificationPreferencesRequest>,
+    ) -> std::result::Result<tonic::Response<GetNotificationPreferencesResponse>, tonic::Status>
+    {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        if !matches!(actor, Actor::ServiceAccount { .. }) {
+            return Err(tonic::Status::permission_denied(
+                "only service accounts may read another user's notification preferences",
+            ));
+        }
+
+        let user_id = request
+            .into_inner()
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        let prefs = self
+            .state
+            .notification_registry()
+            .get_preferences(&user_id)
+            .await
+            .to_internal_error()?;
+
+        Ok(Response::new(GetNotificationPreferencesResponse {
+            preferences: prefs
+                .into_iter()
+                .map(|p| NotificationPreference {
+                    notification_type: notification_type_from_str(&p.notification_type).into(),
+                    channel: notification_channel_from_str(&p.channel).into(),
+                    enabled: p.enabled,
+                })
+                .collect(),
+        }))
+    }
+
     type ListenNotificationsStream = ReceiverStream<Result<Notification, tonic::Status>>;
 
     async fn listen_notifications(
@@ -256,6 +316,7 @@ fn release_context_to_grpc(
         context_web: ctx.context_web.unwrap_or_default(),
         error_message: ctx.error_message.unwrap_or_default(),
         destination_count: ctx.destination_count,
+        source_attribution: ctx.source_attribution.unwrap_or_default(),
     }
 }
 

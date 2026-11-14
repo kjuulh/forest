@@ -6,6 +6,16 @@ pub const META_PREFIX: &str = "forest.author";
 
 pub const META_RESOLVED_USER_ID: &str = "forest.author.user_id";
 
+/// How `META_RESOLVED_USER_ID` was found: "github_id" or "email".
+pub const META_LINKED_BY: &str = "forest.author.linked_by";
+
+/// Removes the keys only the server may set: a caller naming the release's
+/// owner, or how it was linked, would otherwise choose who gets notified.
+pub fn strip_server_owned(metadata: &mut HashMap<String, String>) {
+    metadata.remove(META_RESOLVED_USER_ID);
+    metadata.remove(META_LINKED_BY);
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DetectedAuthor {
     pub origin: Option<String>,
@@ -56,6 +66,17 @@ pub enum Linked {
     GithubId,
     Email,
     Unlinked,
+}
+
+impl Linked {
+    /// The value recorded under `META_LINKED_BY`; `None` when nobody was linked.
+    pub fn as_meta(&self) -> Option<&'static str> {
+        match self {
+            Linked::GithubId => Some("github_id"),
+            Linked::Email => Some("email"),
+            Linked::Unlinked => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +161,22 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn a_caller_cannot_name_the_owner_or_how_they_were_linked() {
+        let mut m = meta(&[
+            ("forest.author.user_id", "victim"),
+            ("forest.author.linked_by", "github_id"),
+            ("forest.author.github_login", "someone"),
+        ]);
+        strip_server_owned(&mut m);
+        assert!(!m.contains_key(META_RESOLVED_USER_ID));
+        assert!(!m.contains_key(META_LINKED_BY));
+        assert_eq!(
+            m.get("forest.author.github_login").map(String::as_str),
+            Some("someone")
+        );
     }
 
     #[test]

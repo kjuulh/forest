@@ -22,6 +22,8 @@ pub struct ReleaseContext {
     pub environment: String,
     pub source_username: String,
     pub source_user_id: String,
+    /// How Forest attributed the recipient: "actor", "github_id", "email" or "" (unknown).
+    pub source_attribution: String,
     pub commit_sha: String,
     pub commit_branch: String,
     pub context_title: String,
@@ -78,18 +80,18 @@ pub fn route_notification(
 
     integrations
         .iter()
-        .map(|integration| match &integration.config {
+        .filter_map(|integration| match &integration.config {
             IntegrationConfig::Webhook {
                 url,
                 secret,
                 headers,
-            } => DispatchTask::Webhook {
+            } => Some(DispatchTask::Webhook {
                 integration_id: integration.id.clone(),
                 url: url.clone(),
                 secret: secret.clone(),
                 headers: headers.clone(),
                 payload: payload.clone(),
-            },
+            }),
             IntegrationConfig::Slack {
                 webhook_url,
                 access_token,
@@ -102,7 +104,7 @@ pub fn route_notification(
                     .as_ref()
                     .map(|r| r.slug.clone())
                     .unwrap_or_default();
-                DispatchTask::Slack {
+                Some(DispatchTask::Slack {
                     integration_id: integration.id.clone(),
                     webhook_url: webhook_url.clone(),
                     access_token: access_token.clone(),
@@ -112,8 +114,9 @@ pub fn route_notification(
                     event_type: event.notification_type.clone(),
                     event: event.clone(),
                     message,
-                }
+                })
             }
+            IntegrationConfig::GitHub { .. } => None,
         })
         .collect()
 }
@@ -133,84 +136,22 @@ pub async fn route_notification_for_org(
         }
     };
 
-    let mut tasks = route_notification(event, &integrations);
+    route_notification(event, &integrations)
+}
 
-    if let Some(release) = &event.release {
-        tracing::debug!(
-            source_user_id = %release.source_user_id,
-            source_username = %release.source_username,
-            "DM routing: checking release owner"
-        );
-    }
-    let dm_event_types = ["release_started", "release_succeeded", "release_failed"];
-    if let Some(release) = event.release.as_ref().filter(|r| {
-        !r.source_user_id.is_empty() && dm_event_types.contains(&event.notification_type.as_str())
-    }) {
-        let slack_count = integrations.iter().filter(|i| matches!(&i.config, IntegrationConfig::Slack { .. })).count();
-        tracing::debug!(
-            total_integrations = integrations.len(),
-            slack_integrations = slack_count,
-            "DM routing: iterating integrations for DM lookup"
-        );
-        for integration in &integrations {
-            if let IntegrationConfig::Slack {
-                team_id,
-                access_token,
-                ..
-            } = &integration.config
-            {
-                tracing::debug!(
-                    integration_id = %integration.id,
-                    team_id = %team_id,
-                    has_token = !access_token.is_empty(),
-                    "DM routing: checking slack integration"
-                );
-                if access_token.is_empty() || team_id.is_empty() {
-                    continue;
-                }
-                match store
-                    .get_slack_user_link(&release.source_user_id, team_id)
-                    .await
-                {
-                    Ok(Some(link)) => {
-                        tracing::info!(
-                            user_id = %release.source_user_id,
-                            team_id = %team_id,
-                            slack_user_id = %link.slack_user_id,
-                            "DM routing: found slack link, creating DM task"
-                        );
-                        let message = format_slack_message(event, &std::collections::HashMap::new(), "");
-                        tasks.push(DispatchTask::SlackDm {
-                            integration_id: integration.id.clone(),
-                            access_token: access_token.clone(),
-                            slack_user_id: link.slack_user_id,
-                            release_id: release.slug.clone(),
-                            notification_id: event.id.clone(),
-                            event_type: event.notification_type.clone(),
-                            event: event.clone(),
-                            message,
-                        });
-                    }
-                    Ok(None) => {
-                        tracing::debug!(
-                            user_id = %release.source_user_id,
-                            team_id = %team_id,
-                            "DM routing: no slack link found for user in this workspace"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            user = %release.source_user_id,
-                            team_id = %team_id,
-                            error = %e,
-                            "failed to look up slack user link for DM"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
+/// Every delivery for an event: channel posts, webhooks and at most one DM per
+/// Slack workspace. Skipped DMs are recorded in the delivery history.
+pub async fn route_all(
+    store: &dyn IntegrationStore,
+    recipients: Option<&dyn super::direct::RecipientDirectory>,
+    slack: Option<&dyn super::direct::SlackDirectory>,
+    event: &NotificationEvent,
+) -> Vec<DispatchTask> {
+    let mut tasks = route_notification_for_org(store, event).await;
+    let plan =
+        super::direct::plan_direct_messages(store, recipients, slack, event, chrono::Utc::now()).await;
+    super::direct::record_skips(store, event, &plan).await;
+    tasks.extend(plan.tasks);
     tasks
 }
 
@@ -671,6 +612,7 @@ mod tests {
                 environment: "production".into(),
                 source_username: "alice".into(),
                 source_user_id: "alice_id".into(),
+                source_attribution: "actor".into(),
                 commit_sha: "abc1234def".into(),
                 commit_branch: "main".into(),
                 context_title: "Release failed".into(),
@@ -774,107 +716,6 @@ mod tests {
         let integrations = vec![webhook_integration("w1"), slack_integration("s1")];
         let tasks = route_notification(&event, &integrations);
         assert_eq!(tasks.len(), 2);
-    }
-
-    async fn route_with_slack(
-        event: &NotificationEvent,
-        linked_user: Option<&str>,
-    ) -> Vec<DispatchTask> {
-        let store = super::super::InMemoryIntegrationStore::new();
-        let integration = store
-            .create_integration(&super::super::CreateIntegrationInput {
-                organisation: "test-org".into(),
-                integration_type: super::super::IntegrationType::Slack,
-                name: "#deploys".into(),
-                config: IntegrationConfig::Slack {
-                    team_id: "T123".into(),
-                    team_name: "Test".into(),
-                    channel_id: "C456".into(),
-                    channel_name: "#deploys".into(),
-                    access_token: "xoxb-test".into(),
-                    webhook_url: "https://hooks.slack.com/test".into(),
-                },
-                created_by: "user-1".into(),
-            })
-            .await
-            .expect("create slack integration");
-        assert!(integration.enabled);
-
-        if let Some(user_id) = linked_user {
-            store
-                .upsert_slack_user_link(&super::super::SlackUserLink {
-                    id: "link-1".into(),
-                    user_id: user_id.into(),
-                    team_id: "T123".into(),
-                    team_name: "Test".into(),
-                    slack_user_id: "U999".into(),
-                    slack_username: "alice".into(),
-                    created_at: "2026-03-09T00:00:00Z".into(),
-                })
-                .await
-                .expect("link slack user");
-        }
-
-        route_notification_for_org(&store, event).await
-    }
-
-    fn dm_recipients(tasks: &[DispatchTask]) -> Vec<&str> {
-        tasks
-            .iter()
-            .filter_map(|t| match t {
-                DispatchTask::SlackDm { slack_user_id, .. } => Some(slack_user_id.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn channel_posts(tasks: &[DispatchTask]) -> usize {
-        tasks
-            .iter()
-            .filter(|t| matches!(t, DispatchTask::Slack { .. }))
-            .count()
-    }
-
-    #[tokio::test]
-    async fn the_owner_of_a_release_is_dmd() {
-        let mut event = test_event();
-        event.notification_type = "release_succeeded".into();
-
-        let tasks = route_with_slack(&event, Some("alice_id")).await;
-
-        assert_eq!(dm_recipients(&tasks), vec!["U999"]);
-        assert_eq!(channel_posts(&tasks), 1, "the channel post still happens");
-    }
-
-    #[tokio::test]
-    async fn a_release_with_no_owner_posts_to_the_channel_and_dms_nobody() {
-        let mut event = test_event();
-        event.notification_type = "release_succeeded".into();
-        event.release.as_mut().expect("release").source_user_id = String::new();
-        event.release.as_mut().expect("release").source_username = "renovate[bot]".into();
-
-        let tasks = route_with_slack(&event, Some("kasper_id")).await;
-
-        assert!(
-            dm_recipients(&tasks).is_empty(),
-            "a release nobody owns must not DM anybody, got {:?}",
-            dm_recipients(&tasks),
-        );
-        assert_eq!(channel_posts(&tasks), 1, "the channel post is unchanged");
-    }
-
-    #[tokio::test]
-    async fn a_non_owner_is_not_dmd_about_somebody_elses_release() {
-        let mut event = test_event();
-        event.notification_type = "release_succeeded".into();
-        let tasks = route_with_slack(&event, Some("kasper_id")).await;
-
-        assert!(
-            dm_recipients(&tasks).is_empty(),
-            "only the owner is DM'd, got {:?}",
-            dm_recipients(&tasks),
-        );
-        assert_eq!(channel_posts(&tasks), 1);
     }
 
     #[test]

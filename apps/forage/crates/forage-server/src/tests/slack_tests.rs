@@ -430,45 +430,28 @@ async fn slack_callback_without_state_returns_error() {
 }
 
 #[tokio::test]
-async fn slack_callback_with_error_redirects() {
+async fn slack_callback_with_a_bare_org_name_as_state_is_refused() {
     let (app, sessions, _) = build_app_with_integrations();
     let cookie = create_test_session(&sessions).await;
 
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/integrations/slack/callback?state=testorg&error=access_denied")
-                .header("cookie", cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-    let location = resp.headers().get("location").unwrap().to_str().unwrap();
-    assert!(location.contains("install/slack"));
-    assert!(location.contains("error="));
-    assert!(location.contains("access_denied"));
-}
-
-#[tokio::test]
-async fn slack_callback_without_oauth_config_returns_503() {
-    let (app, sessions, _) = build_app_with_integrations();
-    let cookie = create_test_session(&sessions).await;
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/integrations/slack/callback?code=test-code&state=testorg")
-                .header("cookie", cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    for uri in [
+        "/integrations/slack/callback?state=testorg&error=access_denied",
+        "/integrations/slack/callback?code=test-code&state=testorg",
+        "/integrations/slack/callback?code=test-code&state=testorg:reinstall:abc",
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("cookie", cookie.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri}");
+    }
 }
 
 #[tokio::test]

@@ -5253,6 +5253,68 @@ pub mod notification_service_client {
             self.inner.unary(req, path, codec).await
         }
         ///
+        pub async fn reset_notification_preference(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ResetNotificationPreferenceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetNotificationPreferenceResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.NotificationService/ResetNotificationPreference",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.NotificationService",
+                        "ResetNotificationPreference",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn get_user_notification_preferences(
+            &mut self,
+            request: impl tonic::IntoRequest<
+                super::GetUserNotificationPreferencesRequest,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNotificationPreferencesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.NotificationService/GetUserNotificationPreferences",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.NotificationService",
+                        "GetUserNotificationPreferences",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
         pub async fn listen_notifications(
             &mut self,
             request: impl tonic::IntoRequest<super::ListenNotificationsRequest>,
@@ -5338,6 +5400,22 @@ pub mod notification_service_server {
             request: tonic::Request<super::SetNotificationPreferenceRequest>,
         ) -> std::result::Result<
             tonic::Response<super::SetNotificationPreferenceResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn reset_notification_preference(
+            &self,
+            request: tonic::Request<super::ResetNotificationPreferenceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetNotificationPreferenceResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn get_user_notification_preferences(
+            &self,
+            request: tonic::Request<super::GetUserNotificationPreferencesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNotificationPreferencesResponse>,
             tonic::Status,
         >;
         /// Server streaming response type for the ListenNotifications method.
@@ -5533,6 +5611,114 @@ pub mod notification_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = SetNotificationPreferenceSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.NotificationService/ResetNotificationPreference" => {
+                    #[allow(non_camel_case_types)]
+                    struct ResetNotificationPreferenceSvc<T: NotificationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: NotificationService,
+                    > tonic::server::UnaryService<
+                        super::ResetNotificationPreferenceRequest,
+                    > for ResetNotificationPreferenceSvc<T> {
+                        type Response = super::ResetNotificationPreferenceResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::ResetNotificationPreferenceRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificationService>::reset_notification_preference(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ResetNotificationPreferenceSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.NotificationService/GetUserNotificationPreferences" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetUserNotificationPreferencesSvc<T: NotificationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: NotificationService,
+                    > tonic::server::UnaryService<
+                        super::GetUserNotificationPreferencesRequest,
+                    > for GetUserNotificationPreferencesSvc<T> {
+                        type Response = super::GetNotificationPreferencesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetUserNotificationPreferencesRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificationService>::get_user_notification_preferences(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetUserNotificationPreferencesSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

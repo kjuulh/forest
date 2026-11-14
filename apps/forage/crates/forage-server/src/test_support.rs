@@ -85,6 +85,8 @@ pub(crate) struct MockPlatformBehavior {
     pub get_notification_preferences_result:
         Option<Result<Vec<NotificationPreference>, PlatformError>>,
     pub set_notification_preference_result: Option<Result<(), PlatformError>>,
+    pub reset_notification_preference_result: Option<Result<(), PlatformError>>,
+    pub preference_calls: Vec<(String, String, Option<bool>)>,
     pub list_destination_types_result: Option<Result<Vec<DestinationTypeInfo>, PlatformError>>,
     pub reveal_destination_metadata_result: Option<Result<String, PlatformError>>,
     pub list_allowed_domains_result:
@@ -451,6 +453,10 @@ impl MockPlatformClient {
         Self {
             behavior: Mutex::new(behavior),
         }
+    }
+
+    pub fn preference_calls(&self) -> Vec<(String, String, Option<bool>)> {
+        self.behavior.lock().unwrap().preference_calls.clone()
     }
 }
 
@@ -1027,12 +1033,28 @@ impl ForestPlatform for MockPlatformClient {
     async fn set_notification_preference(
         &self,
         _access_token: &str,
-        _notification_type: &str,
-        _channel: &str,
-        _enabled: bool,
+        notification_type: &str,
+        channel: &str,
+        enabled: bool,
     ) -> Result<(), PlatformError> {
-        let b = self.behavior.lock().unwrap();
+        let mut b = self.behavior.lock().unwrap();
+        b.preference_calls
+            .push((notification_type.into(), channel.into(), Some(enabled)));
         b.set_notification_preference_result
+            .clone()
+            .unwrap_or(Ok(()))
+    }
+
+    async fn reset_notification_preference(
+        &self,
+        _access_token: &str,
+        notification_type: &str,
+        channel: &str,
+    ) -> Result<(), PlatformError> {
+        let mut b = self.behavior.lock().unwrap();
+        b.preference_calls
+            .push((notification_type.into(), channel.into(), None));
+        b.reset_notification_preference_result
             .clone()
             .unwrap_or(Ok(()))
     }

@@ -205,6 +205,79 @@ async fn verify_email_with_user_jwt_for_other_user_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_user_cannot_mark_an_address_they_added_as_verified() {
+    let fixture = restricted_fixture().await.unwrap();
+    let mut users = fixture.users();
+
+    let email = unique_understory_email();
+    let registered = users
+        .register(RegisterRequest {
+            username: unique_username(),
+            email: email.clone(),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .expect("register")
+        .into_inner();
+    let user_id = registered.user.expect("user").user_id;
+    users
+        .confirm_email_verification(authed_request(
+            RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
+            ConfirmEmailVerificationRequest {
+                email: email.clone(),
+            },
+        ))
+        .await
+        .expect("confirm own email");
+    let token = users
+        .login(LoginRequest {
+            identifier: Some(login_request::Identifier::Email(email)),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .expect("login")
+        .into_inner()
+        .tokens
+        .expect("tokens")
+        .access_token;
+
+    let colleague = unique_understory_email();
+    users
+        .add_email(authed_request(
+            &token,
+            AddEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect("add email");
+
+    let err = users
+        .verify_email(authed_request(
+            &token,
+            VerifyEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect_err("self-verification without proof must be rejected");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
+
+    users
+        .verify_email(authed_request(
+            RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
+            VerifyEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect("the service account can still verify");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn add_email_response_signals_verification_required() {
     let fixture = restricted_fixture().await.unwrap();
     let mut users = fixture.users();

@@ -15,6 +15,7 @@ pub struct NotificationDispatcher {
     forage_url: String,
     grpc: Option<Arc<GrpcForestClient>>,
     service_token: String,
+    slack: crate::providers::SlackApi,
 }
 
 impl NotificationDispatcher {
@@ -23,7 +24,19 @@ impl NotificationDispatcher {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("failed to build reqwest client");
-        Self { http, store, forage_url, grpc: None, service_token: String::new() }
+        Self {
+            http,
+            store,
+            forage_url,
+            grpc: None,
+            service_token: String::new(),
+            slack: crate::providers::SlackApi::default(),
+        }
+    }
+
+    pub fn with_slack_api(mut self, slack: crate::providers::SlackApi) -> Self {
+        self.slack = slack;
+        self
     }
 
     pub fn with_grpc(mut self, grpc: Arc<GrpcForestClient>, service_token: String) -> Self {
@@ -74,6 +87,9 @@ impl NotificationDispatcher {
                             error = %e,
                             "non-retryable delivery error"
                         );
+                        if is_revoked_token_error(&e) {
+                            self.disable_revoked(task, &integration_id).await;
+                        }
                         let _ = self
                             .store
                             .record_delivery(
@@ -295,7 +311,7 @@ impl NotificationDispatcher {
 
             let resp = self
                 .http
-                .post("https://slack.com/api/chat.update")
+                .post(self.slack.url("chat.update"))
                 .bearer_auth(access_token)
                 .json(&payload)
                 .send()
@@ -344,7 +360,7 @@ impl NotificationDispatcher {
 
         let resp = self
             .http
-            .post("https://slack.com/api/chat.postMessage")
+            .post(self.slack.url("chat.postMessage"))
             .bearer_auth(access_token)
             .json(&payload)
             .send()
@@ -386,7 +402,7 @@ impl NotificationDispatcher {
 
         let resp = self
             .http
-            .post("https://slack.com/api/conversations.join")
+            .post(self.slack.url("conversations.join"))
             .bearer_auth(access_token)
             .json(&payload)
             .send()
@@ -477,6 +493,58 @@ impl NotificationDispatcher {
     }
 }
 
+fn is_revoked_token_error(err: &str) -> bool {
+    ["invalid_auth", "token_revoked", "account_inactive"]
+        .iter()
+        .any(|code| err.contains(code))
+}
+
+impl NotificationDispatcher {
+    /// A revoked Slack token can never deliver again: stop routing to it until
+    /// an admin reinstalls, rather than failing every future event.
+    async fn disable_revoked(&self, task: &DispatchTask, integration_id: &str) {
+        let organisation = match task {
+            DispatchTask::Slack { event, .. } | DispatchTask::SlackDm { event, .. } => {
+                &event.organisation
+            }
+            DispatchTask::Webhook { .. } => return,
+        };
+        let team_of = |i: &forage_core::integrations::Integration| match &i.config {
+            forage_core::integrations::IntegrationConfig::Slack { team_id, .. } => {
+                Some(team_id.clone())
+            }
+            _ => None,
+        };
+        let integrations = self
+            .store
+            .list_integrations(organisation)
+            .await
+            .unwrap_or_default();
+        let team = integrations
+            .iter()
+            .find(|i| i.id == integration_id)
+            .and_then(team_of)
+            .filter(|t| !t.is_empty());
+        for integration in &integrations {
+            let same_workspace = integration.id == integration_id
+                || (team.is_some() && team_of(integration) == team);
+            if !same_workspace {
+                continue;
+            }
+            if let Err(e) = self
+                .store
+                .set_integration_enabled(organisation, &integration.id, false)
+                .await
+            {
+                tracing::warn!(integration_id = %integration.id, error = %e, "failed to disable revoked slack integration");
+                continue;
+            }
+            let _ = self.store.delete_directory_matches(&integration.id).await;
+            tracing::warn!(integration_id = %integration.id, "slack token revoked; integration disabled until reinstalled");
+        }
+    }
+}
+
 fn is_non_retryable_error(err: &str) -> bool {
     const NON_RETRYABLE: &[&str] = &[
         "channel_not_found",
@@ -510,6 +578,7 @@ pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
         environment: r.environment.clone(),
         source_username: r.source_username.clone(),
         source_user_id: r.source_user_id.clone(),
+        source_attribution: r.source_attribution.clone(),
         commit_sha: r.commit_sha.clone(),
         commit_branch: r.commit_branch.clone(),
         context_title: r.context_title.clone(),
@@ -539,6 +608,7 @@ pub struct NotificationListener {
     pub store: Arc<dyn IntegrationStore>,
     pub service_token: String,
     pub forage_url: String,
+    pub slack: crate::providers::SlackApi,
 }
 
 impl Component for NotificationListener {
@@ -549,7 +619,8 @@ impl Component for NotificationListener {
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
         let dispatcher = Arc::new(
             NotificationDispatcher::new(self.store.clone(), self.forage_url.clone())
-                .with_grpc(self.grpc.clone(), self.service_token.clone()),
+                .with_grpc(self.grpc.clone(), self.service_token.clone())
+                .with_slack_api(self.slack.clone()),
         );
 
         let mut backoff = 1u64;
@@ -621,8 +692,14 @@ impl NotificationListener {
                         "received notification"
                     );
 
-                    let tasks = forage_core::integrations::router::route_notification_for_org(
+                    let recipients = crate::recipients::ForestRecipients {
+                        grpc: self.grpc.clone(),
+                        service_token: self.service_token.clone(),
+                    };
+                    let tasks = forage_core::integrations::router::route_all(
                         self.store.as_ref(),
+                        Some(&recipients),
+                        Some(&self.slack),
                         &event,
                     )
                     .await;

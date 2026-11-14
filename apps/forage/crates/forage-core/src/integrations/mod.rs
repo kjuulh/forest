@@ -1,6 +1,9 @@
+pub mod baseline;
+pub mod direct;
 pub mod email;
 pub mod nats;
 pub mod router;
+pub mod signing;
 pub mod webhook;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +29,8 @@ pub struct Integration {
 pub enum IntegrationType {
     Slack,
     Webhook,
+    #[serde(rename = "github")]
+    GitHub,
 }
 
 impl IntegrationType {
@@ -33,6 +38,7 @@ impl IntegrationType {
         match self {
             Self::Slack => "slack",
             Self::Webhook => "webhook",
+            Self::GitHub => "github",
         }
     }
 
@@ -40,6 +46,7 @@ impl IntegrationType {
         match s {
             "slack" => Some(Self::Slack),
             "webhook" => Some(Self::Webhook),
+            "github" => Some(Self::GitHub),
             _ => None,
         }
     }
@@ -48,6 +55,7 @@ impl IntegrationType {
         match self {
             Self::Slack => "Slack",
             Self::Webhook => "Webhook",
+            Self::GitHub => "GitHub",
         }
     }
 }
@@ -69,6 +77,17 @@ pub enum IntegrationConfig {
         secret: Option<String>,
         #[serde(default)]
         headers: HashMap<String, String>,
+    },
+    /// A GitHub App installation on one organisation account. No token is
+    /// stored: installation tokens are minted from the app key when needed.
+    #[serde(rename = "github")]
+    GitHub {
+        installation_id: i64,
+        account_id: i64,
+        account_login: String,
+        installed_by_login: String,
+        #[serde(default)]
+        suspended: bool,
     },
 }
 
@@ -137,6 +156,7 @@ pub enum DeliveryStatus {
     Delivered,
     Failed,
     Pending,
+    Skipped,
 }
 
 impl DeliveryStatus {
@@ -145,6 +165,7 @@ impl DeliveryStatus {
             Self::Delivered => "delivered",
             Self::Failed => "failed",
             Self::Pending => "pending",
+            Self::Skipped => "skipped",
         }
     }
 
@@ -153,6 +174,7 @@ impl DeliveryStatus {
             "delivered" => Some(Self::Delivered),
             "failed" => Some(Self::Failed),
             "pending" => Some(Self::Pending),
+            "skipped" => Some(Self::Skipped),
             _ => None,
         }
     }
@@ -292,6 +314,51 @@ pub trait IntegrationStore: Send + Sync {
         &self,
         msg_ref: &SlackMessageRef,
     ) -> Result<(), IntegrationError>;
+
+    async fn get_slack_baseline(
+        &self,
+        integration_id: &str,
+    ) -> Result<Option<baseline::SlackBaseline>, IntegrationError>;
+
+    async fn upsert_slack_baseline(
+        &self,
+        baseline: &baseline::SlackBaseline,
+    ) -> Result<(), IntegrationError>;
+
+    async fn get_directory_match(
+        &self,
+        integration_id: &str,
+        user_id: &str,
+    ) -> Result<Option<baseline::DirectoryMatch>, IntegrationError>;
+
+    async fn upsert_directory_match(
+        &self,
+        m: &baseline::DirectoryMatch,
+    ) -> Result<(), IntegrationError>;
+
+    async fn delete_directory_matches(&self, integration_id: &str) -> Result<(), IntegrationError>;
+
+    /// Every integration of one type across all organisations; used only to
+    /// resolve signed provider events to the integration they concern.
+    async fn list_integrations_of_type(
+        &self,
+        integration_type: IntegrationType,
+    ) -> Result<Vec<Integration>, IntegrationError>;
+
+    /// Binds a GitHub installation to one Forest organisation. `Duplicate` if
+    /// it is already bound to a different integration.
+    async fn bind_github_installation(
+        &self,
+        installation_id: i64,
+        organisation: &str,
+        integration_id: &str,
+    ) -> Result<(), IntegrationError>;
+
+    /// The (organisation, integration id) a GitHub installation is bound to.
+    async fn get_github_installation_binding(
+        &self,
+        installation_id: i64,
+    ) -> Result<Option<(String, String)>, IntegrationError>;
 }
 
 pub fn generate_api_token() -> String {
@@ -351,6 +418,9 @@ pub struct InMemoryIntegrationStore {
     token_hashes: std::sync::Mutex<HashMap<String, String>>,
     slack_user_links: std::sync::Mutex<Vec<SlackUserLink>>,
     slack_message_refs: std::sync::Mutex<Vec<SlackMessageRef>>,
+    slack_baselines: std::sync::Mutex<HashMap<String, baseline::SlackBaseline>>,
+    directory_matches: std::sync::Mutex<HashMap<(String, String), baseline::DirectoryMatch>>,
+    github_installations: std::sync::Mutex<HashMap<i64, (String, String)>>,
 }
 
 impl InMemoryIntegrationStore {
@@ -362,6 +432,9 @@ impl InMemoryIntegrationStore {
             token_hashes: std::sync::Mutex::new(HashMap::new()),
             slack_user_links: std::sync::Mutex::new(Vec::new()),
             slack_message_refs: std::sync::Mutex::new(Vec::new()),
+            slack_baselines: std::sync::Mutex::new(HashMap::new()),
+            directory_matches: std::sync::Mutex::new(HashMap::new()),
+            github_installations: std::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -479,6 +552,15 @@ impl IntegrationStore for InMemoryIntegrationStore {
         }
         let mut rules = self.rules.lock().unwrap();
         rules.retain(|r| r.integration_id != id);
+        self.slack_baselines.lock().unwrap().remove(id);
+        self.directory_matches
+            .lock()
+            .unwrap()
+            .retain(|(iid, _), _| iid != id);
+        self.github_installations
+            .lock()
+            .unwrap()
+            .retain(|_, (_, iid)| iid != id);
         Ok(())
     }
 
@@ -683,6 +765,103 @@ impl IntegrationStore for InMemoryIntegrationStore {
         }
         Ok(())
     }
+
+    async fn get_slack_baseline(
+        &self,
+        integration_id: &str,
+    ) -> Result<Option<baseline::SlackBaseline>, IntegrationError> {
+        Ok(self.slack_baselines.lock().unwrap().get(integration_id).cloned())
+    }
+
+    async fn upsert_slack_baseline(
+        &self,
+        b: &baseline::SlackBaseline,
+    ) -> Result<(), IntegrationError> {
+        self.slack_baselines
+            .lock()
+            .unwrap()
+            .insert(b.integration_id.clone(), b.clone());
+        Ok(())
+    }
+
+    async fn get_directory_match(
+        &self,
+        integration_id: &str,
+        user_id: &str,
+    ) -> Result<Option<baseline::DirectoryMatch>, IntegrationError> {
+        Ok(self
+            .directory_matches
+            .lock()
+            .unwrap()
+            .get(&(integration_id.to_string(), user_id.to_string()))
+            .cloned())
+    }
+
+    async fn upsert_directory_match(
+        &self,
+        m: &baseline::DirectoryMatch,
+    ) -> Result<(), IntegrationError> {
+        self.directory_matches
+            .lock()
+            .unwrap()
+            .insert((m.integration_id.clone(), m.user_id.clone()), m.clone());
+        Ok(())
+    }
+
+    async fn delete_directory_matches(&self, integration_id: &str) -> Result<(), IntegrationError> {
+        self.directory_matches
+            .lock()
+            .unwrap()
+            .retain(|(iid, _), _| iid != integration_id);
+        Ok(())
+    }
+
+    async fn list_integrations_of_type(
+        &self,
+        integration_type: IntegrationType,
+    ) -> Result<Vec<Integration>, IntegrationError> {
+        Ok(self
+            .integrations
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|i| i.integration_type == integration_type)
+            .cloned()
+            .collect())
+    }
+
+    async fn bind_github_installation(
+        &self,
+        installation_id: i64,
+        organisation: &str,
+        integration_id: &str,
+    ) -> Result<(), IntegrationError> {
+        let mut bindings = self.github_installations.lock().unwrap();
+        if let Some((_, existing)) = bindings.get(&installation_id)
+            && existing != integration_id
+        {
+            return Err(IntegrationError::Duplicate(
+                "GitHub installation is already connected".into(),
+            ));
+        }
+        bindings.insert(
+            installation_id,
+            (organisation.to_string(), integration_id.to_string()),
+        );
+        Ok(())
+    }
+
+    async fn get_github_installation_binding(
+        &self,
+        installation_id: i64,
+    ) -> Result<Option<(String, String)>, IntegrationError> {
+        Ok(self
+            .github_installations
+            .lock()
+            .unwrap()
+            .get(&installation_id)
+            .cloned())
+    }
 }
 
 #[cfg(test)]
@@ -691,7 +870,7 @@ mod tests {
 
     #[test]
     fn integration_type_roundtrip() {
-        for t in &[IntegrationType::Slack, IntegrationType::Webhook] {
+        for t in &[IntegrationType::Slack, IntegrationType::Webhook, IntegrationType::GitHub] {
             let s = t.as_str();
             assert_eq!(IntegrationType::parse(s), Some(*t));
         }
@@ -709,6 +888,7 @@ mod tests {
             DeliveryStatus::Delivered,
             DeliveryStatus::Failed,
             DeliveryStatus::Pending,
+            DeliveryStatus::Skipped,
         ] {
             let str = s.as_str();
             assert_eq!(DeliveryStatus::parse(str), Some(*s));

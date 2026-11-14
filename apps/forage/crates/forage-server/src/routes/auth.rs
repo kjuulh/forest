@@ -45,6 +45,10 @@ pub fn router() -> Router<AppState> {
             post(update_notification_preference),
         )
         .route(
+            "/settings/account/notifications/reset",
+            post(reset_notification_preference),
+        )
+        .route(
             "/settings/account/slack/connect",
             get(slack_connect),
         )
@@ -818,7 +822,91 @@ async fn account_page(
         mfa_enabled,
         flash_message(query.flash.as_deref()),
         error_message(query.error.as_deref()),
+        Some(slack_dm_context(&state, &session, &prefs, &slack_links).await),
     )
+}
+
+/// The member's individual Slack notification settings: what they inherit
+/// from their organisations, what they chose themselves, and how each
+/// connected workspace would reach them.
+async fn slack_dm_context(
+    state: &AppState,
+    session: &Session,
+    prefs: &[forage_core::platform::NotificationPreference],
+    slack_links: &[SlackUserLink],
+) -> minijinja::Value {
+    use forage_core::integrations::baseline::{
+        notification_type_to_forest, explicit_slack_preferences, MappingStatus, PersonalPreference,
+        DM_NOTIFICATION_TYPES,
+    };
+    use forage_core::integrations::direct::{resolve_directory_match, slack_teams, RecipientProfile};
+
+    let explicit = explicit_slack_preferences(prefs);
+    let mut teams = Vec::new();
+    if let Some(store) = state.integration_store.as_ref() {
+        for org in &session.user.orgs {
+            for team in slack_teams(store.as_ref(), &org.name).await {
+                teams.push((org.name.clone(), team));
+            }
+        }
+    }
+
+    let profile = RecipientProfile {
+        user_id: session.user.user_id.clone(),
+        username: session.user.username.clone(),
+        emails: session.user.emails.clone(),
+        github_user_ids: vec![],
+    };
+    let now = chrono::Utc::now();
+    let mut routes = Vec::new();
+    for (org, team) in &teams {
+        let team_name = match &team.integration.config {
+            forage_core::integrations::IntegrationConfig::Slack { team_name, .. } => team_name.clone(),
+            _ => String::new(),
+        };
+        let (route_state, label) = if slack_links.iter().any(|l| l.team_id == team.team_id) {
+            ("reachable", "Your personal Slack link".to_string())
+        } else if !team.baseline.directory_mapping {
+            ("off", "Not reached until you link Slack yourself".to_string())
+        } else {
+            match (state.slack_directory.as_ref(), state.integration_store.as_ref()) {
+                (Some(slack), Some(store)) => {
+                    match resolve_directory_match(store.as_ref(), slack.as_ref(), team, &profile, now, false).await {
+                        Ok(MappingStatus::Matched { .. }) => {
+                            ("reachable", "The Slack account matching your verified email (organisation baseline)".to_string())
+                        }
+                        Ok(other) => ("gap", format!("Not reached: {}. Link Slack yourself below.", other.describe())),
+                        Err(_) => ("unknown", "Couldn't check with Slack right now".to_string()),
+                    }
+                }
+                _ => ("unknown", "Couldn't check with Slack right now".to_string()),
+            }
+        };
+        routes.push(context! { org => org, team_name => team_name, state => route_state, label => label });
+    }
+
+    let rows: Vec<_> = DM_NOTIFICATION_TYPES
+        .iter()
+        .map(|nt| {
+            let personal = PersonalPreference::from_explicit(explicit.get(*nt).copied());
+            let defaults: std::collections::BTreeSet<bool> =
+                teams.iter().map(|(_, t)| t.baseline.org_default(nt)).collect();
+            let org_default = match (defaults.len(), defaults.iter().next()) {
+                (0, _) => "none",
+                (1, Some(true)) => "on",
+                (1, Some(false)) => "off",
+                _ => "varies",
+            };
+            context! {
+                key => notification_type_to_forest(nt).unwrap_or_default(),
+                label => super::integrations::notification_type_label(nt),
+                mode => personal.as_str(),
+                org_default => org_default,
+            }
+        })
+        .collect();
+
+    context! { connected => !teams.is_empty(), rows => rows, routes => routes }
 }
 
 fn flash_message(flash: Option<&str>) -> Option<&'static str> {
@@ -874,6 +962,7 @@ fn render_account(
     mfa_enabled: bool,
     flash: Option<&str>,
     oauth_error: Option<&str>,
+    slack_dm: Option<minijinja::Value>,
 ) -> Result<Response, Response> {
     let html = state
         .templates
@@ -926,6 +1015,7 @@ fn render_account(
                 has_google_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::Google),
                 flash => flash,
                 oauth_error => oauth_error,
+                slack_dm => slack_dm,
             },
         )
         .map_err(|e| {
@@ -956,7 +1046,7 @@ async fn update_username_submit(
     }
 
     if let Err(e) = validate_username(&form.username) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -977,11 +1067,11 @@ async fn update_username_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
             tracing::error!("failed to update username: {e}");
-            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], &[], false, None, None, None)
         }
     }
 }
@@ -1009,11 +1099,11 @@ async fn change_password_submit(
     }
 
     if form.new_password != form.new_password_confirm {
-        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], &[], false, None, None, None);
     }
 
     if let Err(e) = validate_password(&form.new_password) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -1028,11 +1118,11 @@ async fn change_password_submit(
     {
         Ok(()) => Ok(Redirect::to("/settings/account").into_response()),
         Err(forage_core::auth::AuthError::InvalidCredentials) => {
-            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
             tracing::error!("failed to change password: {e}");
-            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], &[], false, None, None, None)
         }
     }
 }
@@ -1058,7 +1148,7 @@ async fn add_email_submit(
     }
 
     if let Err(e) = validate_email(&form.email) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -1089,11 +1179,11 @@ async fn add_email_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
             tracing::error!("failed to add email: {e}");
-            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], &[], false, None, None, None)
         }
     }
 }
@@ -1137,7 +1227,7 @@ async fn remove_email_submit(
         }
         Err(e) => {
             tracing::error!("failed to remove email: {e}");
-            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None, None)
         }
     }
 }
@@ -1335,6 +1425,34 @@ struct UpdateNotificationPreferenceForm {
     enabled: String,
 }
 
+#[derive(Deserialize)]
+struct ResetNotificationPreferenceForm {
+    _csrf: String,
+    notification_type: String,
+    channel: String,
+}
+
+async fn reset_notification_preference(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<ResetNotificationPreferenceForm>,
+) -> Result<Response, Response> {
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Forbidden",
+            "Invalid CSRF token.",
+        ));
+    }
+    state
+        .platform_client
+        .reset_notification_preference(&session.access_token, &form.notification_type, &form.channel)
+        .await
+        .map_err(|e| internal_error(&state, "reset notification preference", &e))?;
+    Ok(Redirect::to("/settings/account#notifications").into_response())
+}
+
 async fn update_notification_preference(
     State(state): State<AppState>,
     session: Session,
@@ -1382,15 +1500,39 @@ async fn slack_connect(
         "{}/settings/account/slack/callback",
         slack_config.redirect_host
     );
+    let states = state.oauth_state_store.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Slack not configured",
+            "Slack linking needs the OAuth state store.",
+        )
+    })?;
+    let nonce = super::org_connections::new_nonce();
+    states
+        .create(
+            SLACK_LINK_STATE,
+            &nonce,
+            Some(&session.user.user_id),
+            chrono::Utc::now() + chrono::Duration::minutes(10),
+        )
+        .await
+        .map_err(|e| internal_error(&state, "slack link state", &e))?;
     let url = format!(
-        "https://slack.com/oauth/v2/authorize?client_id={}&user_scope=identity.basic&redirect_uri={}&state={}",
+        "{}?client_id={}&user_scope=identity.basic&redirect_uri={}&state={}",
+        state.slack_authorize_url,
         urlencoding::encode(&slack_config.client_id),
         urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&session.user.user_id),
+        urlencoding::encode(&nonce),
     );
 
     Ok(Redirect::to(&url))
 }
+
+/// A personal Slack link overrides the org directory route, so a link planted
+/// through a forged callback would redirect someone's DMs: bind it to a
+/// single-use nonce rather than the (guessable) user id.
+const SLACK_LINK_STATE: &str = "slack_link";
 
 #[derive(Deserialize)]
 struct SlackUserCallbackQuery {
@@ -1419,7 +1561,15 @@ async fn slack_user_callback(
     })?;
 
     let state_param = query.state.unwrap_or_default();
-    if state_param != session.user.user_id {
+    let started_by = match state.oauth_state_store.as_ref() {
+        Some(states) => states
+            .consume(SLACK_LINK_STATE, &state_param)
+            .await
+            .map_err(|e| internal_error(&state, "slack link state", &e))?
+            .and_then(|f| f.return_to),
+        None => None,
+    };
+    if started_by.as_deref() != Some(session.user.user_id.as_str()) {
         return Err(error_page(
             &state,
             StatusCode::FORBIDDEN,
@@ -1453,7 +1603,7 @@ async fn slack_user_callback(
 
     let http = reqwest::Client::new();
     let token_resp = http
-        .post("https://slack.com/api/oauth.v2.access")
+        .post(state.slack_api.url("oauth.v2.access"))
         .form(&[
             ("client_id", slack_config.client_id.as_str()),
             ("client_secret", slack_config.client_secret.as_str()),
@@ -1510,7 +1660,7 @@ async fn slack_user_callback(
     } else {
         let identity_name: Option<String> = async {
             let r = http
-                .get("https://slack.com/api/users.identity")
+                .get(state.slack_api.url("users.identity"))
                 .bearer_auth(&user_access_token)
                 .send()
                 .await

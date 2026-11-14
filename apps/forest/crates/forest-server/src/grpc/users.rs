@@ -542,21 +542,18 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<VerifyEmailRequest>,
     ) -> std::result::Result<tonic::Response<VerifyEmailResponse>, tonic::Status> {
-        let claims = request
-            .extensions()
-            .get::<crate::tokens::AppClaims>()
-            .cloned()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth"))?;
+        // Marking an address verified is the outcome of proving ownership
+        // (a redeemed verification link), which only the delivery service can
+        // attest. A user token used to be enough, so anyone could "verify" an
+        // address they added and be reached through it as that person.
+        let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
-        if claims.user_id != user_id.to_string() {
-            return Err(tonic::Status::permission_denied(
-                "verify_email is restricted to the authenticated user",
-            ));
-        }
 
         self.service()
             .verify_email(user_id, &req.email)

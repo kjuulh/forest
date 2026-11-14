@@ -188,6 +188,132 @@ impl GrpcForestClient {
     }
 }
 
+impl GrpcForestClient {
+    /// Pages through the organisation's members (bounded to 5000) looking for `user_id`.
+    pub async fn is_org_member_with_token(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        user_id: &str,
+    ) -> Result<bool, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetOrganisationRequest {
+                identifier: Some(forage_grpc::get_organisation_request::Identifier::Name(
+                    organisation.into(),
+                )),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let org = match self.org_client().get_organisation(req).await {
+            Ok(resp) => resp.into_inner().organisation,
+            Err(status) if status.code() == tonic::Code::NotFound => return Ok(false),
+            Err(status) => return Err(format!("gRPC get_organisation: {}", status.code())),
+        };
+        let Some(org) = org else { return Ok(false) };
+
+        let mut page_token = String::new();
+        for _ in 0..50 {
+            let req = bearer_request(
+                service_token,
+                forage_grpc::ListMembersRequest {
+                    organisation_id: org.organisation_id.clone(),
+                    page_size: 100,
+                    page_token: page_token.clone(),
+                },
+            )
+            .map_err(|e| format!("invalid token: {e}"))?;
+            let resp = self
+                .org_client()
+                .list_members(req)
+                .await
+                .map_err(|s| format!("gRPC list_members: {}", s.code()))?
+                .into_inner();
+            if resp.members.iter().any(|m| m.user_id == user_id) {
+                return Ok(true);
+            }
+            if resp.next_page_token.is_empty() || resp.members.is_empty() {
+                return Ok(false);
+            }
+            page_token = resp.next_page_token;
+        }
+        Err("member list exceeded the paging bound".into())
+    }
+
+    /// `Ok(None)` when the user no longer exists.
+    pub async fn recipient_profile_with_token(
+        &self,
+        service_token: &str,
+        user_id: &str,
+    ) -> Result<Option<forage_core::integrations::direct::RecipientProfile>, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetUserRequest {
+                identifier: Some(forage_grpc::get_user_request::Identifier::UserId(
+                    user_id.into(),
+                )),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let user = match self.client().get_user(req).await {
+            Ok(resp) => resp.into_inner().user,
+            Err(status) if status.code() == tonic::Code::NotFound => return Ok(None),
+            Err(status) => return Err(format!("gRPC get_user: {}", status.code())),
+        };
+        let Some(user) = user else { return Ok(None) };
+        let github_user_ids = user
+            .oauth_connections
+            .iter()
+            .filter(|c| c.provider() == forage_grpc::OAuthProvider::OauthProviderGithub)
+            .filter_map(|c| c.provider_user_id.parse::<i64>().ok())
+            .collect();
+        let converted = convert_user(user);
+        Ok(Some(forage_core::integrations::direct::RecipientProfile {
+            user_id: converted.user_id,
+            username: converted.username,
+            emails: converted.emails,
+            github_user_ids,
+        }))
+    }
+
+    pub async fn user_notification_preferences_with_token(
+        &self,
+        service_token: &str,
+        user_id: &str,
+    ) -> Result<Vec<NotificationPreference>, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetUserNotificationPreferencesRequest {
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let resp = self
+            .notification_client()
+            .get_user_notification_preferences(req)
+            .await
+            .map_err(|s| format!("gRPC get_user_notification_preferences: {}", s.code()))?;
+        Ok(resp
+            .into_inner()
+            .preferences
+            .into_iter()
+            .map(convert_notification_preference)
+            .collect())
+    }
+}
+
+fn convert_notification_preference(p: forage_grpc::NotificationPreference) -> NotificationPreference {
+    let nt = forage_grpc::NotificationType::try_from(p.notification_type)
+        .unwrap_or(forage_grpc::NotificationType::Unspecified);
+    let ch = forage_grpc::NotificationChannel::try_from(p.channel)
+        .unwrap_or(forage_grpc::NotificationChannel::Unspecified);
+    NotificationPreference {
+        notification_type: nt.as_str_name().to_string(),
+        channel: ch.as_str_name().to_string(),
+        enabled: p.enabled,
+    }
+}
+
 fn map_status(status: tonic::Status) -> AuthError {
     match status.code() {
         tonic::Code::Unauthenticated => AuthError::InvalidCredentials,
@@ -2902,17 +3028,7 @@ impl ForestPlatform for GrpcForestClient {
             .into_inner()
             .preferences
             .into_iter()
-            .map(|p| {
-                let nt = forage_grpc::NotificationType::try_from(p.notification_type)
-                    .unwrap_or(forage_grpc::NotificationType::Unspecified);
-                let ch = forage_grpc::NotificationChannel::try_from(p.channel)
-                    .unwrap_or(forage_grpc::NotificationChannel::Unspecified);
-                NotificationPreference {
-                    notification_type: nt.as_str_name().to_string(),
-                    channel: ch.as_str_name().to_string(),
-                    enabled: p.enabled,
-                }
-            })
+            .map(convert_notification_preference)
             .collect())
     }
 
@@ -2937,6 +3053,30 @@ impl ForestPlatform for GrpcForestClient {
         )?;
         self.notification_client()
             .set_notification_preference(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn reset_notification_preference(
+        &self,
+        access_token: &str,
+        notification_type: &str,
+        channel: &str,
+    ) -> Result<(), PlatformError> {
+        let nt = forage_grpc::NotificationType::from_str_name(notification_type)
+            .unwrap_or(forage_grpc::NotificationType::Unspecified) as i32;
+        let ch = forage_grpc::NotificationChannel::from_str_name(channel)
+            .unwrap_or(forage_grpc::NotificationChannel::Unspecified) as i32;
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ResetNotificationPreferenceRequest {
+                notification_type: nt,
+                channel: ch,
+            },
+        )?;
+        self.notification_client()
+            .reset_notification_preference(req)
             .await
             .map_err(map_platform_status)?;
         Ok(())

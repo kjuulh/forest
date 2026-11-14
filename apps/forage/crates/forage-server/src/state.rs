@@ -7,6 +7,7 @@ use forage_core::auth::oauth_state::OAuthStateStore;
 use forage_core::auth::{ForestAuth, OidcExchange};
 use forage_core::compute::ComputeScheduler;
 use forage_core::integrations::IntegrationStore;
+use forage_core::integrations::direct::{RecipientDirectory, SlackDirectory};
 use forage_core::platform::{ForestOAuthApps, ForestPlatform};
 use forage_core::registry::ForestRegistry;
 use forage_core::session::SessionStore;
@@ -55,6 +56,12 @@ pub struct AppState {
     pub registry_client: Option<Arc<dyn ForestRegistry>>,
     pub oauth_apps_client: Option<Arc<dyn ForestOAuthApps>>,
     pub service_account_key: Option<String>,
+    pub slack_api: crate::providers::SlackApi,
+    pub slack_authorize_url: String,
+    pub slack_signing_secret: Option<String>,
+    pub slack_directory: Option<Arc<dyn SlackDirectory>>,
+    pub recipient_directory: Option<Arc<dyn RecipientDirectory>>,
+    pub github_app: Option<Arc<crate::providers::GitHubApp>>,
 }
 
 impl AppState {
@@ -85,6 +92,12 @@ impl AppState {
             registry_client: None,
             oauth_apps_client: None,
             service_account_key: None,
+            slack_api: crate::providers::SlackApi::default(),
+            slack_authorize_url: crate::providers::SLACK_AUTHORIZE_URL.to_string(),
+            slack_signing_secret: None,
+            slack_directory: None,
+            recipient_directory: None,
+            github_app: None,
         }
     }
 
@@ -165,6 +178,33 @@ impl AppState {
 
     pub fn with_service_account_key(mut self, key: String) -> Self {
         self.service_account_key = Some(key);
+        self
+    }
+
+    pub fn with_slack_api(mut self, api: crate::providers::SlackApi, authorize_url: String) -> Self {
+        self.slack_directory = Some(Arc::new(api.clone()));
+        self.slack_api = api;
+        self.slack_authorize_url = authorize_url;
+        self
+    }
+
+    pub fn with_slack_signing_secret(mut self, secret: String) -> Self {
+        self.slack_signing_secret = Some(secret);
+        self
+    }
+
+    pub fn with_slack_directory(mut self, directory: Arc<dyn SlackDirectory>) -> Self {
+        self.slack_directory = Some(directory);
+        self
+    }
+
+    pub fn with_recipient_directory(mut self, directory: Arc<dyn RecipientDirectory>) -> Self {
+        self.recipient_directory = Some(directory);
+        self
+    }
+
+    pub fn with_github_app(mut self, app: Arc<crate::providers::GitHubApp>) -> Self {
+        self.github_app = Some(app);
         self
     }
 }

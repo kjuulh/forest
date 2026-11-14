@@ -69,7 +69,7 @@ const EXEMPT: &[(&str, &str)] = &[
     ("users.rs::get_user_stats", "self-scoped via the actor"),
     (
         "users.rs::verify_email",
-        "email-verification token authenticates the action",
+        "service-account internal call: only proof of ownership verifies an address",
     ),
     (
         "users.rs::confirm_email_verification",
@@ -134,6 +134,10 @@ const EXEMPT: &[(&str, &str)] = &[
     (
         "notifications.rs::set_notification_preference",
         "self-scoped",
+    ),
+    (
+        "notifications.rs::reset_notification_preference",
+        "self-scoped — deletes only the caller's own preference",
     ),
     (
         "runner.rs::register_runner",

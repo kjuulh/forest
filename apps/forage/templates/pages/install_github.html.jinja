@@ -1,0 +1,33 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12 max-w-2xl">
+    <div class="mb-8">
+        <a href="/orgs/{{ current_org }}/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">&larr; All integrations</a>
+    </div>
+    <div class="flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0"><svg class="w-6 h-6 text-gray-600" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg></div>
+        <h1 class="text-2xl font-bold">Connect a GitHub organisation</h1>
+    </div>
+    <p class="text-sm text-gray-500 mb-6">Install the Forest GitHub App on your GitHub organisation once. Forest then shows which of its members can have the releases they author on GitHub attributed to them, so the right person gets individual notifications.</p>
+
+    {% if error %}
+    <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
+    {% endif %}
+
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-6">
+        <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">Permission requested:</span> Organization members, read-only. No repository, code or email access.</div>
+        <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">Who can connect:</span> an admin of this Forest organisation who is also an owner of the GitHub organisation. Forest verifies both before connecting.</div>
+        <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">What it never does:</span> create Forest accounts, add anyone to this organisation, change roles or sign-in methods, or treat GitHub membership as Forest membership. A GitHub organisation can be connected to one Forest organisation only.</div>
+    </div>
+
+    {% if has_github_app %}
+    <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/github">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-sm">Install on GitHub</button>
+    </form>
+    {% else %}
+    <div class="px-4 py-3 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg">GitHub organisation connections are not configured on this server yet.</div>
+    {% endif %}
+</section>
+{% endblock %}

@@ -269,16 +269,65 @@
     </div>
     {% endif %}
 
+    {% if slack_dm and slack_dm.connected %}
+    <div class="mb-12" id="notifications">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Individual Slack messages</h2>
+        <p class="text-sm text-gray-500 mb-4">Messages about releases that belong to you. Your organisation sets a default; your own choice here always wins.</p>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4">
+            {% for row in slack_dm.rows %}
+            <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2" data-testid="dm-{{ row.key }}">
+                <div>
+                    <span class="block text-sm text-gray-900">{{ row.label }}</span>
+                    <span class="block text-xs text-gray-500">
+                        {% if row.mode == "inherit" %}
+                        Following your organisation's default ({{ row.org_default }})
+                        {% elif row.mode == "on" %}
+                        On &middot; your choice (organisation default: {{ row.org_default }})
+                        {% else %}
+                        Off &middot; your choice (organisation default: {{ row.org_default }})
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="flex items-center gap-1">
+                    {% for opt in [["true", "On", "on"], ["false", "Off", "off"]] %}
+                    <form method="POST" action="/settings/account/notifications" class="inline">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="notification_type" value="{{ row.key }}">
+                        <input type="hidden" name="channel" value="NOTIFICATION_CHANNEL_SLACK">
+                        <input type="hidden" name="enabled" value="{{ opt[0] }}">
+                        <button type="submit" class="px-3 py-1 text-sm rounded-md border transition-colors {{ 'bg-gray-900 text-white border-gray-900' if row.mode == opt[2] else 'border-gray-300 hover:bg-gray-50' }}">{{ opt[1] }}</button>
+                    </form>
+                    {% endfor %}
+                    <form method="POST" action="/settings/account/notifications/reset" class="inline">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="notification_type" value="{{ row.key }}">
+                        <input type="hidden" name="channel" value="NOTIFICATION_CHANNEL_SLACK">
+                        <button type="submit" class="px-3 py-1 text-sm rounded-md border transition-colors {{ 'bg-gray-900 text-white border-gray-900' if row.mode == 'inherit' else 'border-gray-300 hover:bg-gray-50' }}" {{ 'disabled' if row.mode == 'inherit' }}>Org default</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for r in slack_dm.routes %}
+            <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                <span class="text-sm font-medium text-gray-900 sm:w-56 shrink-0">{{ r.org }}{% if r.team_name %} &middot; {{ r.team_name }}{% endif %}</span>
+                <span class="text-sm {{ 'text-green-700' if r.state == 'reachable' else 'text-gray-600' }}" data-testid="dm-route">{{ r.label }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="mb-12">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Notification preferences</h2>
-        <p class="text-sm text-gray-500 mb-4">Choose which events trigger notifications on each channel.</p>
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">CLI notifications</h2>
+        <p class="text-sm text-gray-500 mb-4">Choose which events appear in your CLI notification feed.</p>
         <div class="border border-gray-200 rounded-lg overflow-hidden">
             <table class="w-full text-sm">
                 <thead>
                     <tr class="bg-gray-50 border-b border-gray-200">
                         <th class="text-left px-4 py-3 font-medium text-gray-700">Event</th>
                         <th class="text-center px-4 py-3 font-medium text-gray-700 w-24">CLI</th>
-                        <th class="text-center px-4 py-3 font-medium text-gray-700 w-24">Slack</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -290,7 +339,6 @@
                     ] %}
                     {% set channels = [
                         {"key": "NOTIFICATION_CHANNEL_CLI", "label": "CLI"},
-                        {"key": "NOTIFICATION_CHANNEL_SLACK", "label": "Slack"},
                     ] %}
                     {% for event in event_types %}
                     <tr>

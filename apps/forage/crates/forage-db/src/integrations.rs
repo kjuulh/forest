@@ -3,6 +3,7 @@ use forage_core::integrations::{
     IntegrationStore, IntegrationType, NotificationDelivery, NotificationRule, SlackMessageRef,
     SlackUserLink, NOTIFICATION_TYPES,
 };
+use forage_core::integrations::baseline::{DirectoryMatch, SlackBaseline};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -566,6 +567,183 @@ impl IntegrationStore for PgIntegrationStore {
         .await
         .map_err(|e| IntegrationError::Store(e.to_string()))?;
         Ok(())
+    }
+
+    async fn get_slack_baseline(
+        &self,
+        integration_id: &str,
+    ) -> Result<Option<SlackBaseline>, IntegrationError> {
+        let Ok(iid) = Uuid::parse_str(integration_id) else {
+            return Ok(None);
+        };
+        let row: Option<(bool, serde_json::Value, String, chrono::DateTime<chrono::Utc>)> =
+            sqlx::query_as(
+                "SELECT directory_mapping, dm_defaults, updated_by, updated_at
+                 FROM slack_baselines WHERE integration_id = $1",
+            )
+            .bind(iid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(row.map(|(directory_mapping, dm_defaults, updated_by, updated_at)| SlackBaseline {
+            integration_id: integration_id.to_string(),
+            directory_mapping,
+            dm_defaults: serde_json::from_value(dm_defaults).unwrap_or_default(),
+            updated_by,
+            updated_at: updated_at.to_rfc3339(),
+        }))
+    }
+
+    async fn upsert_slack_baseline(&self, b: &SlackBaseline) -> Result<(), IntegrationError> {
+        let iid = Uuid::parse_str(&b.integration_id)
+            .map_err(|_| IntegrationError::NotFound(b.integration_id.clone()))?;
+        let defaults =
+            serde_json::to_value(&b.dm_defaults).map_err(|e| IntegrationError::Store(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO slack_baselines (integration_id, directory_mapping, dm_defaults, updated_by, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (integration_id) DO UPDATE SET
+               directory_mapping = EXCLUDED.directory_mapping,
+               dm_defaults = EXCLUDED.dm_defaults,
+               updated_by = EXCLUDED.updated_by,
+               updated_at = NOW()",
+        )
+        .bind(iid)
+        .bind(b.directory_mapping)
+        .bind(defaults)
+        .bind(&b.updated_by)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_directory_match(
+        &self,
+        integration_id: &str,
+        user_id: &str,
+    ) -> Result<Option<DirectoryMatch>, IntegrationError> {
+        let Ok(iid) = Uuid::parse_str(integration_id) else {
+            return Ok(None);
+        };
+        let row: Option<(serde_json::Value, serde_json::Value, chrono::DateTime<chrono::Utc>)> =
+            sqlx::query_as(
+                "SELECT emails, status, checked_at FROM slack_directory_matches
+                 WHERE integration_id = $1 AND user_id = $2",
+            )
+            .bind(iid)
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        let Some((emails, status, checked_at)) = row else {
+            return Ok(None);
+        };
+        let (Ok(emails), Ok(status)) = (serde_json::from_value(emails), serde_json::from_value(status))
+        else {
+            return Ok(None);
+        };
+        Ok(Some(DirectoryMatch {
+            integration_id: integration_id.to_string(),
+            user_id: user_id.to_string(),
+            emails,
+            status,
+            checked_at: checked_at.to_rfc3339(),
+        }))
+    }
+
+    async fn upsert_directory_match(&self, m: &DirectoryMatch) -> Result<(), IntegrationError> {
+        let iid = Uuid::parse_str(&m.integration_id)
+            .map_err(|_| IntegrationError::NotFound(m.integration_id.clone()))?;
+        let checked_at = chrono::DateTime::parse_from_rfc3339(&m.checked_at)
+            .map_err(|e| IntegrationError::InvalidInput(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO slack_directory_matches (integration_id, user_id, emails, status, checked_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (integration_id, user_id) DO UPDATE SET
+               emails = EXCLUDED.emails, status = EXCLUDED.status, checked_at = EXCLUDED.checked_at",
+        )
+        .bind(iid)
+        .bind(&m.user_id)
+        .bind(serde_json::to_value(&m.emails).map_err(|e| IntegrationError::Store(e.to_string()))?)
+        .bind(serde_json::to_value(&m.status).map_err(|e| IntegrationError::Store(e.to_string()))?)
+        .bind(checked_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete_directory_matches(&self, integration_id: &str) -> Result<(), IntegrationError> {
+        let Ok(iid) = Uuid::parse_str(integration_id) else {
+            return Ok(());
+        };
+        sqlx::query("DELETE FROM slack_directory_matches WHERE integration_id = $1")
+            .bind(iid)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn list_integrations_of_type(
+        &self,
+        integration_type: IntegrationType,
+    ) -> Result<Vec<Integration>, IntegrationError> {
+        let rows: Vec<IntegrationRow> = sqlx::query_as(
+            "SELECT id, organisation, integration_type, name, config_encrypted, enabled, created_by, created_at, updated_at
+             FROM integrations WHERE integration_type = $1 ORDER BY created_at",
+        )
+        .bind(integration_type.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        rows.into_iter().map(|r| self.row_to_integration(r)).collect()
+    }
+
+    async fn bind_github_installation(
+        &self,
+        installation_id: i64,
+        organisation: &str,
+        integration_id: &str,
+    ) -> Result<(), IntegrationError> {
+        let iid = Uuid::parse_str(integration_id)
+            .map_err(|_| IntegrationError::NotFound(integration_id.to_string()))?;
+        let bound: Option<(Uuid,)> = sqlx::query_as(
+            "INSERT INTO github_installations (installation_id, organisation, integration_id)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (installation_id) DO NOTHING
+             RETURNING integration_id",
+        )
+        .bind(installation_id)
+        .bind(organisation)
+        .bind(iid)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        if bound.is_some() {
+            return Ok(());
+        }
+        match self.get_github_installation_binding(installation_id).await? {
+            Some((_, existing)) if existing == integration_id => Ok(()),
+            _ => Err(IntegrationError::Duplicate(
+                "GitHub installation is already connected".into(),
+            )),
+        }
+    }
+
+    async fn get_github_installation_binding(
+        &self,
+        installation_id: i64,
+    ) -> Result<Option<(String, String)>, IntegrationError> {
+        let row: Option<(String, Uuid)> = sqlx::query_as(
+            "SELECT organisation, integration_id FROM github_installations WHERE installation_id = $1",
+        )
+        .bind(installation_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(row.map(|(org, iid)| (org, iid.to_string())))
     }
 }
 

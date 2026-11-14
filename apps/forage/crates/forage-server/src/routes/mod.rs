@@ -5,6 +5,7 @@ mod device;
 mod events;
 mod integrations;
 mod introspect;
+mod org_connections;
 pub(crate) mod oauth;
 mod pages;
 mod platform;
@@ -28,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .merge(platform::router())
         .merge(events::router())
         .merge(integrations::router())
+        .merge(org_connections::router())
         .merge(developers::router())
         .merge(visibility::router())
         .merge(directory::routes())

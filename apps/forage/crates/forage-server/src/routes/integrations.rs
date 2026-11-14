@@ -62,6 +62,10 @@ pub fn router() -> Router<AppState> {
             post(create_slack),
         )
         .route(
+            "/orgs/{org}/settings/integrations/install/slack/start",
+            post(start_slack_install),
+        )
+        .route(
             "/orgs/{org}/settings/integrations/{id}/reinstall",
             post(reinstall_slack),
         )
@@ -71,7 +75,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-fn require_org_membership<'a>(
+pub(super) fn require_org_membership<'a>(
     state: &AppState,
     orgs: &'a [CachedOrg],
     org: &str,
@@ -94,7 +98,7 @@ fn require_org_membership<'a>(
     })
 }
 
-fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
+pub(super) fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     if org.role == "owner" || org.role == "admin" {
         Ok(())
     } else {
@@ -107,7 +111,7 @@ fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     }
 }
 
-fn require_integration_store(state: &AppState) -> Result<(), Response> {
+pub(super) fn require_integration_store(state: &AppState) -> Result<(), Response> {
     if state.integration_store.is_some() {
         Ok(())
     } else {
@@ -120,7 +124,7 @@ fn require_integration_store(state: &AppState) -> Result<(), Response> {
     }
 }
 
-fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
+pub(super) fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     if session.csrf_token == form_csrf {
         Ok(())
     } else {
@@ -142,6 +146,10 @@ struct ListQuery {
 struct DetailQuery {
     #[serde(default)]
     test: Option<String>,
+    #[serde(default)]
+    saved: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 async fn list_integrations(
@@ -397,6 +405,34 @@ async fn integration_detail(
             detail => url,
             has_secret => secret.is_some(),
         },
+        IntegrationConfig::GitHub { .. } => {
+            return super::org_connections::github_connection_page(&state, &session, &org, &integration)
+                .await;
+        }
+    };
+    let sender = match &integration.config {
+        IntegrationConfig::Slack { team_id, .. } if !team_id.is_empty() => {
+            forage_core::integrations::direct::sending_integration(store.as_ref(), &org, team_id)
+                .await
+                .filter(|s| s.id != integration.id)
+        }
+        _ => None,
+    };
+    let baseline = if integration.integration_type == IntegrationType::Slack {
+        let b = forage_core::integrations::direct::load_baseline(store.as_ref(), &id).await;
+        Some(context! {
+            sent_by => sender.as_ref().map(|s| context! { id => &s.id, name => &s.name }),
+            directory_mapping => b.directory_mapping,
+            updated_by => &b.updated_by,
+            updated_at => &b.updated_at,
+            defaults => forage_core::integrations::baseline::DM_NOTIFICATION_TYPES.iter().map(|nt| context! {
+                notification_type => nt,
+                label => notification_type_label(nt),
+                enabled => b.org_default(nt),
+            }).collect::<Vec<_>>(),
+        })
+    } else {
+        None
     };
 
     let html = state
@@ -427,6 +463,9 @@ async fn integration_detail(
                 rules => rules_ctx,
                 deliveries => deliveries_ctx,
                 test_sent => query.test.is_some(),
+                baseline => baseline,
+                saved => query.saved.is_some(),
+                error => query.error,
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
@@ -561,6 +600,7 @@ async fn test_integration(
             environment: "staging".into(),
             source_username: session.user.username.clone(),
             source_user_id: session.user.user_id.clone(),
+            source_attribution: "actor".into(),
             commit_sha: "abc1234".into(),
             commit_branch: "main".into(),
             context_title: "Test notification from Forest".into(),
@@ -593,15 +633,6 @@ async fn install_slack_page(
     require_admin(&state, cached_org)?;
     require_integration_store(&state)?;
 
-    let slack_oauth_url = state.slack_config.as_ref().map(|sc| {
-        format!(
-            "https://slack.com/oauth/v2/authorize?client_id={}&scope=assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email&redirect_uri={}/integrations/slack/callback&state={}",
-            urlencoding::encode(&sc.client_id),
-            urlencoding::encode(&sc.redirect_host),
-            urlencoding::encode(&org),
-        )
-    });
-
     let html = state
         .templates
         .render(
@@ -618,7 +649,6 @@ async fn install_slack_page(
                 csrf_token => &session.csrf_token,
                 active_tab => "settings",
                 error => query.error,
-                slack_oauth_url => slack_oauth_url,
                 has_slack_oauth => state.slack_config.is_some(),
             },
         )
@@ -764,18 +794,78 @@ async fn reinstall_slack(
         )
     })?;
 
-    let oauth_state = format!("{}:reinstall:{}", org, id);
-    let redirect_uri = format!(
-        "{}/integrations/slack/callback",
-        slack_config.redirect_host
-    );
-    let url = format!(
-        "https://slack.com/oauth/v2/authorize?client_id={}&scope=assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email&redirect_uri={}&state={}",
-        urlencoding::encode(&slack_config.client_id),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&oauth_state),
-    );
+    let url = slack_authorize_redirect(&state, slack_config, &session, &org, Some(&id)).await?;
+    Ok(Redirect::to(&url).into_response())
+}
 
+const SLACK_INSTALL_STATE: &str = "slack_install";
+
+/// Existing bot scopes, unchanged by org baseline delivery, which needs only
+/// `chat:write`, `users:read` and `users:read.email` of these.
+const SLACK_BOT_SCOPES: &str = "assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email";
+
+/// Binds a Slack install to this admin, organisation and (for a reinstall)
+/// integration with a single-use server-side nonce.
+async fn slack_authorize_redirect(
+    state: &AppState,
+    slack_config: &crate::state::SlackConfig,
+    session: &Session,
+    org: &str,
+    reinstall_id: Option<&str>,
+) -> Result<String, Response> {
+    let store = state.oauth_state_store.as_ref().ok_or_else(|| {
+        error_page(
+            state,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Not available",
+            "Slack installation needs the OAuth state store.",
+        )
+    })?;
+    let nonce = super::org_connections::new_nonce();
+    let return_to = format!(
+        "{org}\n{}\n{}",
+        session.user.user_id,
+        reinstall_id.unwrap_or_default()
+    );
+    store
+        .create(
+            SLACK_INSTALL_STATE,
+            &nonce,
+            Some(&return_to),
+            chrono::Utc::now() + chrono::Duration::minutes(10),
+        )
+        .await
+        .map_err(|e| internal_error(state, "slack install state", &e))?;
+    let redirect_uri = format!("{}/integrations/slack/callback", slack_config.redirect_host);
+    Ok(format!(
+        "{}?client_id={}&scope={}&redirect_uri={}&state={}",
+        state.slack_authorize_url,
+        urlencoding::encode(&slack_config.client_id),
+        SLACK_BOT_SCOPES,
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(&nonce),
+    ))
+}
+
+async fn start_slack_install(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Result<Response, Response> {
+    let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
+    require_admin(&state, cached_org)?;
+    require_integration_store(&state)?;
+    validate_csrf(&session, &form._csrf)?;
+    let slack_config = state.slack_config.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Not configured",
+            "Slack OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.",
+        )
+    })?;
+    let url = slack_authorize_redirect(&state, slack_config, &session, &org, None).await?;
     Ok(Redirect::to(&url).into_response())
 }
 
@@ -800,12 +890,33 @@ async fn slack_oauth_callback(
         )
     })?;
 
-    let (org, reinstall_id) = if raw_state.contains(":reinstall:") {
-        let parts: Vec<&str> = raw_state.splitn(2, ":reinstall:").collect();
-        (parts[0].to_string(), Some(parts[1].to_string()))
-    } else {
-        (raw_state, None)
+    let invalid_state = || {
+        error_page(
+            &state,
+            axum::http::StatusCode::FORBIDDEN,
+            "Installation not verified",
+            "This Slack installation link is invalid, expired or was started by someone else. Start again from Forest.",
+        )
     };
+    let flow = match state.oauth_state_store.as_ref() {
+        Some(store) => store
+            .consume(SLACK_INSTALL_STATE, &raw_state)
+            .await
+            .map_err(|e| internal_error(&state, "slack install state", &e))?,
+        None => None,
+    };
+    let Some(return_to) = flow.and_then(|f| f.return_to) else {
+        return Err(invalid_state());
+    };
+    let mut parts = return_to.splitn(3, '\n');
+    let (org, started_by, reinstall_id) = (
+        parts.next().unwrap_or_default().to_string(),
+        parts.next().unwrap_or_default().to_string(),
+        parts.next().filter(|s| !s.is_empty()).map(String::from),
+    );
+    if started_by != session.user.user_id {
+        return Err(invalid_state());
+    }
 
     if let Some(err) = query.error {
         let redirect_to = if let Some(ref rid) = reinstall_id {
@@ -840,7 +951,7 @@ async fn slack_oauth_callback(
 
     let http = reqwest::Client::new();
     let token_resp = http
-        .post("https://slack.com/api/oauth.v2.access")
+        .post(state.slack_api.url("oauth.v2.access"))
         .form(&[
             ("client_id", slack_config.client_id.as_str()),
             ("client_secret", slack_config.client_secret.as_str()),
@@ -877,6 +988,15 @@ async fn slack_oauth_callback(
         .into_response());
     }
 
+    if resp_body["is_enterprise_install"].as_bool() == Some(true) {
+        return Ok(Redirect::to(&format!(
+            "/orgs/{}/settings/integrations/install/slack?error={}",
+            org,
+            urlencoding::encode("Enterprise Grid org-wide installs are not supported; install into one workspace.")
+        ))
+        .into_response());
+    }
+
     let team_id = resp_body["team"]["id"]
         .as_str()
         .unwrap_or("")
@@ -907,6 +1027,7 @@ async fn slack_oauth_callback(
         format!("Slack - {channel_name}")
     };
 
+    let new_team_id = team_id.clone();
     let config = IntegrationConfig::Slack {
         team_id,
         team_name,
@@ -919,10 +1040,35 @@ async fn slack_oauth_callback(
     let store = state.integration_store.as_ref().unwrap();
 
     if let Some(ref existing_id) = reinstall_id {
+        let existing = store.get_integration(&org, existing_id).await.map_err(|_| {
+            error_page(
+                &state,
+                axum::http::StatusCode::NOT_FOUND,
+                "Not found",
+                "Integration not found.",
+            )
+        })?;
+        if let IntegrationConfig::Slack { team_id: old_team, .. } = &existing.config
+            && !old_team.is_empty()
+            && *old_team != new_team_id
+        {
+            return Ok(Redirect::to(&format!(
+                "/orgs/{}/settings/integrations/{}?error={}",
+                org,
+                existing_id,
+                urlencoding::encode("Reinstall was authorised for a different Slack workspace; nothing changed.")
+            ))
+            .into_response());
+        }
         store
             .update_integration_config(&org, existing_id, &integration_name, &config)
             .await
             .map_err(|e| internal_error(&state, "reinstall slack", &e))?;
+        store
+            .set_integration_enabled(&org, existing_id, true)
+            .await
+            .map_err(|e| internal_error(&state, "reinstall slack", &e))?;
+        let _ = store.delete_directory_matches(existing_id).await;
 
         Ok(Redirect::to(&format!(
             "/orgs/{}/settings/integrations/{}",
@@ -970,7 +1116,7 @@ async fn slack_oauth_callback(
     }
 }
 
-fn notification_type_label(nt: &str) -> &str {
+pub(super) fn notification_type_label(nt: &str) -> &str {
     match nt {
         "release_annotated" => "Release annotated",
         "release_started" => "Release started",
