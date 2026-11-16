@@ -6,7 +6,7 @@ repository = "https://git.kjuulh.io/kjuulh/forest"
 readme = "../../README.md"
 license = "MIT"
 
-version = "0.3.17"
+version = "0.3.18"
 
 [dependencies]
 forest-grpc-interface.workspace = true

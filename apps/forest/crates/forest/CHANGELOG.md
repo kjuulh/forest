@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.18](https://github.com/understory-io/forest/compare/v0.3.17...v0.3.18) (2026-11-14)
+
+
+### Features
+
+* **forage:** org-level Slack + GitHub connections for individual release notifications ([#338](https://github.com/understory-io/forest/issues/338)) ([e5ca53f](https://github.com/understory-io/forest/commit/e5ca53fb8eba577fbf191f8dd62e7273b4cb62c7))
+* **forage:** visibility settings for organisations and components ([#336](https://github.com/understory-io/forest/issues/336)) ([2c9d82b](https://github.com/understory-io/forest/commit/2c9d82bc68683dfae8343c44830c6a6733722c29))
+* **registry:** read-only public components and organisations, so non-members can depend on them ([#335](https://github.com/understory-io/forest/issues/335)) ([8c6dd99](https://github.com/understory-io/forest/commit/8c6dd991aae45ee02fbfdd5c3bb18f72624ccccd))
+* **service-release:** pass arbitrary --set values to prepare ([#333](https://github.com/understory-io/forest/issues/333)) ([46eda77](https://github.com/understory-io/forest/commit/46eda776a2ece0ec9ad93059027898f0249889d1))
+
+
+### Bug Fixes
+
+* **self:** update notice names the binary that is behind ([#337](https://github.com/understory-io/forest/issues/337)) ([1153947](https://github.com/understory-io/forest/commit/1153947f3b41b2be07936ffe3bb8b0f4452d1bdc))
+
 ## [0.3.17](https://github.com/understory-io/forest/compare/v0.3.16...v0.3.17) (2026-10-22)
 
 
