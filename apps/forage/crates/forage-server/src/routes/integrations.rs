@@ -14,7 +14,7 @@ use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error};
+use super::{error_page, internal_error, report_error};
 use crate::auth::Session;
 use crate::notification_worker::NotificationDispatcher;
 use crate::state::AppState;
@@ -344,17 +344,14 @@ async fn integration_detail(
     require_integration_store(&state)?;
 
     let store = state.integration_store.as_ref().unwrap();
-    let integration = store
-        .get_integration(&org, &id)
-        .await
-        .map_err(|e| {
-            error_page(
-                &state,
-                axum::http::StatusCode::NOT_FOUND,
-                "Not found",
-                &format!("Integration not found: {e}"),
-            )
-        })?;
+    let integration = store.get_integration(&org, &id).await.map_err(|e| {
+        error_page(
+            &state,
+            axum::http::StatusCode::NOT_FOUND,
+            "Not found",
+            &report_error("get integration", &e),
+        )
+    })?;
 
     let rules = store.list_rules(&id).await.unwrap_or_default();
     let deliveries = store.list_deliveries(&id, 20).await.unwrap_or_default();
@@ -772,7 +769,7 @@ async fn reinstall_slack(
             &state,
             axum::http::StatusCode::NOT_FOUND,
             "Not found",
-            &format!("Integration not found: {e}"),
+            &report_error("get Slack integration for reinstall", &e),
         )
     })?;
 
@@ -918,11 +915,20 @@ async fn slack_oauth_callback(
         return Err(invalid_state());
     }
 
-    if let Some(err) = query.error {
+    if query.error.is_some() {
         let redirect_to = if let Some(ref rid) = reinstall_id {
-            format!("/orgs/{}/settings/integrations/{}?error={}", org, rid, urlencoding::encode(&format!("Slack authorization denied: {err}")))
+            format!(
+                "/orgs/{}/settings/integrations/{}?error={}",
+                org,
+                rid,
+                urlencoding::encode("Slack authorization was denied. Please try again.")
+            )
         } else {
-            format!("/orgs/{}/settings/integrations/install/slack?error={}", org, urlencoding::encode(&format!("Slack authorization denied: {err}")))
+            format!(
+                "/orgs/{}/settings/integrations/install/slack?error={}",
+                org,
+                urlencoding::encode("Slack authorization was denied. Please try again.")
+            )
         };
         return Ok(Redirect::to(&redirect_to).into_response());
     }
@@ -983,7 +989,7 @@ async fn slack_oauth_callback(
         return Ok(Redirect::to(&format!(
             "/orgs/{}/settings/integrations/install/slack?error={}",
             org,
-            urlencoding::encode(&format!("Slack error: {err_msg}"))
+            urlencoding::encode(&report_error("Slack OAuth response", &err_msg))
         ))
         .into_response());
     }

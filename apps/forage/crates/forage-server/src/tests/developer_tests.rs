@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use forage_core::platform::PlatformError;
 use tower::ServiceExt;
 
 use crate::build_router;
@@ -97,26 +96,6 @@ async fn create_with_openid_scope_is_requestable() {
     let text = body_text(resp).await;
     assert!(text.contains("OIDC App"));
     assert!(text.contains("openid"));
-}
-
-#[tokio::test]
-async fn create_validation_error_redirects_back_with_message() {
-    let oauth = Arc::new(MockOAuthAppsClient::with_error(
-        PlatformError::InvalidArgument("invalid redirect URI: http://app.example/cb".into()),
-    ));
-    let (state, sessions) = test_state_with_oauth_apps(oauth);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let body = "_csrf=test-csrf&name=My+App&redirect_uris=http%3A%2F%2Fapp.example%2Fcb&scope_profile=on";
-    let resp = app
-        .oneshot(post("/orgs/testorg/settings/developers", &cookie, body))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-    let loc = resp.headers().get("location").unwrap().to_str().unwrap();
-    assert!(loc.starts_with("/orgs/testorg/settings/developers/new?error="));
-    assert!(loc.contains("invalid%20redirect"));
 }
 
 #[tokio::test]

@@ -15,7 +15,7 @@ use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::{Deserialize, Serialize};
 
-use super::{error_page, internal_error, warn_default};
+use super::{error_page, internal_error, report_error, warn_default};
 use crate::auth::{self, Session};
 use crate::manifest_view::ManifestView;
 use crate::pretty_json;
@@ -790,13 +790,8 @@ fn create_org_error_message(name: &str, error: &PlatformError) -> String {
         PlatformError::AlreadyExists(_) => format!(
             "An organisation named “{name}” already exists. Choose a different slug, or ask an owner to invite you."
         ),
-        PlatformError::InvalidArgument(msg) | PlatformError::PermissionDenied(msg) => msg.clone(),
-        PlatformError::Unavailable(_) => {
-            "Forest is temporarily unavailable. Wait a moment and try again.".into()
-        }
         PlatformError::NotAuthenticated => "Your session expired. Sign in again and retry.".into(),
-        PlatformError::NotFound(msg) if !msg.is_empty() => msg.clone(),
-        _ => "Could not create organisation. Please try again.".into(),
+        _ => report_error("create organisation", error),
     }
 }
 
@@ -856,7 +851,6 @@ async fn create_org_submit(
             Ok(Redirect::to(&format!("/orgs/{}/projects", form.name)).into_response())
         }
         Err(e) => {
-            tracing::error!("failed to create org: {e}");
             let error = create_org_error_message(&form.name, &e);
             let html = state
                 .templates
@@ -871,15 +865,7 @@ async fn create_org_submit(
                         error => error,
                     },
                 )
-                .map_err(|e| {
-                    tracing::error!("template error: {e:#}");
-                    error_page(
-                        &state,
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Something went wrong",
-                        "Please try again.",
-                    )
-                })?;
+                .map_err(|e| internal_error(&state, "render organisation error", &e))?;
             Ok(Html(html).into_response())
         }
     }
@@ -5573,7 +5559,7 @@ async fn approve_release_submit(
                 &state,
                 &headers,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("{other}"),
+                &report_error("approve release", &other),
             ),
         })?;
 
@@ -5620,7 +5606,7 @@ async fn reject_release_submit(
                 &state,
                 &headers,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("{other}"),
+                &report_error("reject release", &other),
             ),
         })?;
 
@@ -5668,7 +5654,7 @@ async fn approve_plan_stage_submit(
                 &state,
                 &headers,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("{other}"),
+                &report_error("approve plan stage", &other),
             ),
         })?;
 
@@ -5724,7 +5710,7 @@ async fn reject_plan_stage_submit(
                 &state,
                 &headers,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &format!("{other}"),
+                &report_error("reject plan stage", &other),
             ),
         })?;
 
@@ -6077,10 +6063,18 @@ async fn add_allowed_domain_submit(
 
     match result {
         Ok(_) => Ok(Redirect::to(&format!("/orgs/{org}/settings/access")).into_response()),
-        Err(PlatformError::InvalidArgument(msg))
-        | Err(PlatformError::AlreadyExists(msg))
-        | Err(PlatformError::PermissionDenied(msg)) => {
-            access_page_inner(state, session, org, AccessPageFlash::Error(msg)).await
+        Err(
+            e @ (PlatformError::InvalidArgument(_)
+            | PlatformError::AlreadyExists(_)
+            | PlatformError::PermissionDenied(_)),
+        ) => {
+            access_page_inner(
+                state,
+                session,
+                org,
+                AccessPageFlash::Error(report_error("add allowed domain", &e)),
+            )
+            .await
         }
         Err(e) => Err(internal_error(&state, "add_allowed_domain", &e)),
     }
@@ -6158,13 +6152,13 @@ async fn verify_allowed_domain_submit(
              again — propagation can take a few minutes.",
             form.domain
         )),
-        Err(PlatformError::Unavailable(msg)) => AccessPageFlash::Error(format!(
-            "DNS lookup is currently unavailable ({msg}). Try again shortly."
-        )),
-        Err(PlatformError::InvalidArgument(msg))
-        | Err(PlatformError::PermissionDenied(msg))
-        | Err(PlatformError::AlreadyExists(msg))
-        | Err(PlatformError::NotFound(msg)) => AccessPageFlash::Error(msg),
+        Err(
+            e @ (PlatformError::Unavailable(_)
+            | PlatformError::InvalidArgument(_)
+            | PlatformError::PermissionDenied(_)
+            | PlatformError::AlreadyExists(_)
+            | PlatformError::NotFound(_)),
+        ) => AccessPageFlash::Error(report_error("verify allowed domain", &e)),
         Err(e) => return Err(internal_error(&state, "verify_allowed_domain", &e)),
     };
 
@@ -6196,9 +6190,12 @@ async fn accept_join_offer_submit(
         .accept_join_offer(&session.access_token, &org_id)
         .await
         .map_err(|e| match e {
-            PlatformError::PermissionDenied(msg) => {
-                error_page(&state, StatusCode::FORBIDDEN, "Not eligible", &msg)
-            }
+            denied @ PlatformError::PermissionDenied(_) => error_page(
+                &state,
+                StatusCode::FORBIDDEN,
+                "Not eligible",
+                &report_error("accept join offer", &denied),
+            ),
             other => internal_error(&state, "accept_join_offer", &other),
         })?;
 

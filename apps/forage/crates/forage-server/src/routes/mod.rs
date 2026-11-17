@@ -39,16 +39,6 @@ pub fn router() -> Router<AppState> {
 }
 
 fn error_page(state: &AppState, status: StatusCode, heading: &str, message: &str) -> Response {
-    error_page_detail(state, status, heading, message, None)
-}
-
-fn error_page_detail(
-    state: &AppState,
-    status: StatusCode,
-    heading: &str,
-    message: &str,
-    detail: Option<&str>,
-) -> Response {
     let html = state.templates.render(
         "pages/error.html.jinja",
         context! {
@@ -57,7 +47,6 @@ fn error_page_detail(
             status => status.as_u16(),
             heading => heading,
             message => message,
-            detail => detail,
         },
     );
     match html {
@@ -66,17 +55,97 @@ fn error_page_detail(
     }
 }
 
+fn report_error(context: &str, err: &dyn std::fmt::Display) -> String {
+    generic_error_message(record_error(context, err))
+}
+
+fn record_error(context: &str, err: &dyn std::fmt::Display) -> uuid::Uuid {
+    let error_id = uuid::Uuid::new_v4();
+    let diagnostic = redact_diagnostic(format!("{err:#}"));
+    tracing::error!(%error_id, context, error = %diagnostic, "browser operation failed");
+    error_id
+}
+
+fn generic_error_message(error_id: uuid::Uuid) -> String {
+    format!("An internal error occurred. Please try again. Reference: {error_id}")
+}
+
 fn internal_error(state: &AppState, context: &str, err: &dyn std::fmt::Display) -> Response {
-    let detail = format!("{err:#}");
-    tracing::error!("{context}: {detail}");
-    error_page_detail(
+    let error_id = record_error(context, err);
+    let message = generic_error_message(error_id);
+    let mut response = error_page(
         state,
         StatusCode::INTERNAL_SERVER_ERROR,
         "Something went wrong",
-        "An internal error occurred. Please try again.",
-        Some(&detail),
-    )
+        &message,
+    );
+    let mut encoded = uuid::Uuid::encode_buffer();
+    response.headers_mut().insert(
+        "x-error-id",
+        error_id
+            .hyphenated()
+            .encode_lower(&mut encoded)
+            .parse()
+            .expect("server-minted UUID header"),
+    );
+    response
 }
+
+fn redact_diagnostic(mut diagnostic: String) -> String {
+    use regex::Regex;
+    use std::{borrow::Cow, sync::LazyLock};
+
+    static URL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)\b(?:https?|postgres(?:ql)?|mysql|rediss?|amqps?)://[^\s<>"']+"#)
+            .expect("URL redaction regex")
+    });
+    static CREDENTIALS: LazyLock<[(Regex, &'static str); 3]> = LazyLock::new(|| {
+        [
+            (
+                Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+")
+                    .expect("authorization redaction regex"),
+                "[REDACTED AUTH]",
+            ),
+            (
+                Regex::new(r#"(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|(?:api|access)[_-]?key(?:[_-]?id)?)|authorization|cookie|set-cookie)\b(?:\\?["'])?\s*[:=]\s*(?:\\"(?:\\.|[^"\\])*\\"|"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;}\]]+)"#)
+                    .expect("credential redaction regex"),
+                "${1}=[REDACTED]",
+            ),
+            (
+                Regex::new(r"\b(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|(?:gh[pousr]_|github_pat_|forest_(?:pat|oat)_|xox[baprs]-)[A-Za-z0-9_-]+)")
+                    .expect("token redaction regex"),
+                "[REDACTED TOKEN]",
+            ),
+        ]
+    });
+    if let Cow::Owned(redacted) =
+        URL.replace_all(
+            &diagnostic,
+            |captures: &regex::Captures<'_>| match reqwest::Url::parse(&captures[0]) {
+                Ok(url) => match (url.host_str(), url.port()) {
+                    (Some(host), Some(port)) => {
+                        format!("{}://{host}:{port}/[REDACTED]", url.scheme())
+                    }
+                    (Some(host), None) => format!("{}://{host}/[REDACTED]", url.scheme()),
+                    _ => "[REDACTED URL]".into(),
+                },
+                Err(_) => "[REDACTED URL]".into(),
+            },
+        )
+    {
+        diagnostic = redacted;
+    }
+    for (pattern, replacement) in CREDENTIALS.iter() {
+        if let Cow::Owned(redacted) = pattern.replace_all(&diagnostic, *replacement) {
+            diagnostic = redacted;
+        }
+    }
+    diagnostic
+}
+
+#[cfg(test)]
+#[path = "../tests/error_diagnostic_tests.rs"]
+mod diagnostic_tests;
 
 fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Display>) -> T {
     match result {

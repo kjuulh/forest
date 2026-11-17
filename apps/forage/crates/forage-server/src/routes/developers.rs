@@ -9,7 +9,7 @@ use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error, orgs_context};
+use super::{error_page, internal_error, orgs_context, report_error};
 use crate::auth::Session;
 use crate::state::AppState;
 
@@ -89,9 +89,11 @@ fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
 
 fn flash_for(err: &PlatformError) -> Option<String> {
     match err {
-        PlatformError::InvalidArgument(m)
-        | PlatformError::AlreadyExists(m)
-        | PlatformError::PermissionDenied(m) => Some(m.clone()),
+        PlatformError::InvalidArgument(_)
+        | PlatformError::AlreadyExists(_)
+        | PlatformError::PermissionDenied(_) => {
+            Some(report_error("OAuth application settings", err))
+        }
         _ => None,
     }
 }

@@ -163,40 +163,6 @@ async fn add_domain_redirects_back_on_success() {
 }
 
 #[tokio::test]
-async fn add_invalid_domain_re_renders_page_with_error() {
-    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        add_allowed_domain_result: Some(Err(PlatformError::InvalidArgument(
-            "domain is not a valid hostname".into(),
-        ))),
-        list_allowed_domains_result: Some(Ok(vec![])),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/orgs/testorg/settings/access")
-                .header("cookie", &cookie)
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("domain=no-tld&_csrf=test-csrf"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = body_to_string(response.into_body()).await;
-    assert!(
-        html.contains("not a valid hostname"),
-        "validation error must surface inline"
-    );
-}
-
-#[tokio::test]
 async fn verify_domain_success_renders_info_flash() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         verify_allowed_domain_result: Some(Ok(VerifyDomainOutcome::Verified)),

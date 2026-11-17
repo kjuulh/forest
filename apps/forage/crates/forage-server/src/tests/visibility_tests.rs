@@ -215,33 +215,6 @@ async fn a_non_member_gets_no_org_visibility_page() {
 }
 
 #[tokio::test]
-async fn a_forest_refusal_is_shown_on_the_page() {
-    let calls = Arc::new(Mutex::new(vec![]));
-    let mock = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        get_visibility_result: Some(Ok(vis("private", None, true))),
-        set_visibility_result: Some(Err(PlatformError::PermissionDenied(
-            "changing visibility needs an organisation admin, not an app token".into(),
-        ))),
-        visibility_calls: Some(calls.clone()),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), mock);
-    let cookie = create_test_session(&sessions).await;
-
-    let response = post(
-        build_router(state),
-        ORG_PAGE,
-        &cookie,
-        "visibility=public&_csrf=test-csrf",
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let html = body_to_string(response.into_body()).await;
-    assert!(html.contains("changing visibility needs an organisation admin"));
-}
-
-#[tokio::test]
 async fn project_page_shows_own_and_effective_state() {
     let calls = Arc::new(Mutex::new(vec![]));
     let (state, sessions) = test_state_with(
@@ -455,32 +428,6 @@ async fn a_member_post_is_refused_even_when_forest_would_show_the_form() {
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "{uri}");
     }
     assert!(calls.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn a_forest_error_message_is_escaped() {
-    let mock = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        get_visibility_result: Some(Ok(vis("private", None, true))),
-        set_visibility_result: Some(Err(PlatformError::InvalidArgument(
-            "<script>alert(1)</script>".into(),
-        ))),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), mock);
-    let cookie = create_test_session(&sessions).await;
-
-    let response = post(
-        build_router(state),
-        ORG_PAGE,
-        &cookie,
-        "visibility=public&_csrf=test-csrf",
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let html = body_to_string(response.into_body()).await;
-    assert!(!html.contains("<script>alert(1)</script>"));
-    assert!(html.contains("&lt;script&gt;"));
 }
 
 #[tokio::test]

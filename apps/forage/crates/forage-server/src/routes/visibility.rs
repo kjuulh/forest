@@ -9,7 +9,7 @@ use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error, orgs_context, require_org_membership};
+use super::{error_page, internal_error, orgs_context, report_error, require_org_membership};
 use crate::auth::{self, Session};
 use crate::state::AppState;
 
@@ -82,12 +82,13 @@ fn validate_form(
 }
 
 fn refusal_status(error: &PlatformError) -> Option<(StatusCode, String)> {
-    match error {
-        PlatformError::PermissionDenied(msg) => Some((StatusCode::FORBIDDEN, msg.clone())),
-        PlatformError::InvalidArgument(msg) => Some((StatusCode::BAD_REQUEST, msg.clone())),
-        PlatformError::NotFound(msg) => Some((StatusCode::NOT_FOUND, msg.clone())),
-        _ => None,
-    }
+    let status = match error {
+        PlatformError::PermissionDenied(_) => StatusCode::FORBIDDEN,
+        PlatformError::InvalidArgument(_) => StatusCode::BAD_REQUEST,
+        PlatformError::NotFound(_) => StatusCode::NOT_FOUND,
+        _ => return None,
+    };
+    Some((status, report_error("change visibility", error)))
 }
 
 fn read_error(state: &AppState, error: PlatformError) -> Response {

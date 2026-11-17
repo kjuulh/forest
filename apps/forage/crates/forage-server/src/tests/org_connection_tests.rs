@@ -600,7 +600,8 @@ async fn slack_callback_error_redirects_back_to_the_install_page() {
     .await;
 
     assert_eq!(s, StatusCode::SEE_OTHER);
-    assert!(location.contains("install/slack") && location.contains("access_denied"));
+    assert!(location.contains("install/slack") && location.contains("error="));
+    assert!(!location.contains("access_denied"));
 }
 
 // --- Slack events ----------------------------------------------------------

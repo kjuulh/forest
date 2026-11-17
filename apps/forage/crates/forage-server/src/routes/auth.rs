@@ -9,7 +9,7 @@ use forage_core::integrations::SlackUserLink;
 use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error};
+use super::{error_page, internal_error, record_error, report_error};
 use crate::auth::{self, MaybeSession, Session};
 use crate::state::AppState;
 use axum_extra::extract::CookieJar;
@@ -104,7 +104,7 @@ async fn signup_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Query(params): Query<ReturnToParams>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
@@ -127,7 +127,7 @@ async fn signup_submit(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Form(form): Form<SignupForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt_owned = form.return_to.clone();
     let rt = auth::safe_return_to(rt_owned.as_deref());
     if maybe.session.is_some() {
@@ -161,7 +161,7 @@ async fn signup_submit(
     {
         Ok(RegisterResult::VerificationRequired) => {
             if let Err(e) = enqueue_verification_email(&state, &form.email, rt).await {
-                tracing::error!(error = %e, "failed to enqueue verification email after signup");
+                let _ = record_error("enqueue verification email after signup", &e);
             }
             render_verify_email_check_inbox(&state, &form.email)
         }
@@ -186,7 +186,7 @@ async fn signup_submit(
                             })
                             .collect(),
                         Err(e) => {
-                            tracing::warn!(error = %e, "failed to fetch orgs during signup");
+                            let _ = record_error("fetch organisations during signup", &e);
                             vec![]
                         }
                     };
@@ -199,7 +199,7 @@ async fn signup_submit(
                     })
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "failed to fetch user during signup");
+                    let _ = record_error("fetch user during signup", &e);
                     None
                 }
             };
@@ -222,12 +222,12 @@ async fn signup_submit(
                     let dest = rt.unwrap_or("/dashboard");
                     Ok((cookie, Redirect::to(dest)).into_response())
                 }
-                Err(_) => render_signup(
+                Err(e) => render_signup(
                     &state,
                     &form.username,
                     &form.email,
                     "",
-                    Some("Internal error. Please try again.".into()),
+                    Some(report_error("create signup session", &e)),
                     rt,
                 ),
             }
@@ -240,23 +240,12 @@ async fn signup_submit(
             Some("Username or email already registered".into()),
             rt,
         ),
-        Err(forage_core::auth::AuthError::Unavailable(msg)) => {
-            tracing::error!("forest-server unavailable: {msg}");
-            render_signup(
-                &state,
-                &form.username,
-                &form.email,
-                "",
-                Some("Service temporarily unavailable. Please try again.".into()),
-                rt,
-            )
-        }
         Err(e) => render_signup(
             &state,
             &form.username,
             &form.email,
             "",
-            Some(e.to_string()),
+            Some(report_error("register user", &e)),
             rt,
         ),
     }
@@ -269,7 +258,7 @@ fn render_signup(
     _password: &str,
     error: Option<String>,
     return_to: Option<&str>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let html = state
         .templates
         .render(
@@ -287,10 +276,7 @@ fn render_signup(
                 return_to => return_to,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| internal_error(state, "render signup", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -304,7 +290,7 @@ async fn login_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Query(params): Query<ReturnToParams>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
@@ -327,7 +313,7 @@ async fn login_submit(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Form(form): Form<LoginForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let return_to = form.return_to.clone();
     let rt = auth::safe_return_to(return_to.as_deref());
 
@@ -370,7 +356,7 @@ async fn login_submit(
                             })
                             .collect(),
                         Err(e) => {
-                            tracing::warn!(error = %e, "failed to fetch orgs during login");
+                            let _ = record_error("fetch organisations during login", &e);
                             vec![]
                         }
                     };
@@ -383,7 +369,7 @@ async fn login_submit(
                     })
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "failed to fetch user during login");
+                    let _ = record_error("fetch user during login", &e);
                     None
                 }
             };
@@ -407,10 +393,10 @@ async fn login_submit(
                     let dest = rt.unwrap_or("/dashboard");
                     Ok((cookie, Redirect::to(dest)).into_response())
                 }
-                Err(_) => render_login(
+                Err(e) => render_login(
                     &state,
                     &form.identifier,
-                    Some("Internal error. Please try again.".into()),
+                    Some(report_error("create login session", &e)),
                     rt,
                 ),
             }
@@ -435,10 +421,7 @@ async fn login_submit(
                         return_to => rt,
                     },
                 )
-                .map_err(|e| {
-                    tracing::error!("template error: {e:#}");
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+                .map_err(|e| internal_error(&state, "render login MFA challenge", &e))?;
 
             let mut response = Html(html).into_response();
             if let Ok(val) = HeaderValue::from_str(&cookie_value) {
@@ -450,7 +433,7 @@ async fn login_submit(
             let email_for_resend = form.identifier.clone();
             if email_for_resend.contains('@') {
                 if let Err(e) = enqueue_verification_email(&state, &email_for_resend, rt).await {
-                    tracing::warn!(error = %e, "failed to enqueue verification email on login block");
+                    let _ = record_error("enqueue verification email on login block", &e);
                 }
             }
             render_verify_email_check_inbox(&state, &email_for_resend)
@@ -461,16 +444,12 @@ async fn login_submit(
             Some("Invalid email/username or password".into()),
             rt,
         ),
-        Err(forage_core::auth::AuthError::Unavailable(msg)) => {
-            tracing::error!("forest-server unavailable: {msg}");
-            render_login(
-                &state,
-                &form.identifier,
-                Some("Service temporarily unavailable. Please try again.".into()),
-                rt,
-            )
-        }
-        Err(e) => render_login(&state, &form.identifier, Some(e.to_string()), rt),
+        Err(e) => render_login(
+            &state,
+            &form.identifier,
+            Some(report_error("password login", &e)),
+            rt,
+        ),
     }
 }
 
@@ -485,7 +464,7 @@ async fn login_mfa_submit(
     State(state): State<AppState>,
     jar: CookieJar,
     Form(form): Form<MfaForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     use axum::http::header::SET_COOKIE;
     use axum::http::HeaderValue;
 
@@ -496,7 +475,7 @@ async fn login_mfa_submit(
         .map(|c| c.value().to_string())
         .ok_or_else(|| {
             tracing::warn!("MFA submit without mfa_session cookie");
-            axum::http::StatusCode::BAD_REQUEST
+            StatusCode::BAD_REQUEST.into_response()
         })?;
 
     let tokens = match state
@@ -518,14 +497,10 @@ async fn login_mfa_submit(
                         return_to => rt,
                     },
                 )
-                .map_err(|e| {
-                    tracing::error!("template error: {e:#}");
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+                .map_err(|e| internal_error(&state, "render invalid login MFA challenge", &e))?;
             return Ok(Html(html).into_response());
         }
         Err(e) => {
-            tracing::error!("MFA verify error: {e}");
             let html = state
                 .templates
                 .render(
@@ -534,11 +509,11 @@ async fn login_mfa_submit(
                         title => "Two-factor authentication - Forest",
                         description => "Enter your authenticator code to continue",
                         is_auth_page => true,
-                        error => Some(e.to_string()),
+                        error => Some(report_error("verify login MFA", &e)),
                         return_to => rt,
                     },
                 )
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+                .map_err(|e| internal_error(&state, "render failed login MFA challenge", &e))?;
             return Ok(Html(html).into_response());
         }
     };
@@ -566,7 +541,7 @@ async fn login_mfa_submit(
             })
         }
         Err(e) => {
-            tracing::warn!(error = %e, "failed to fetch user after MFA");
+            let _ = record_error("fetch user after MFA", &e);
             None
         }
     };
@@ -595,7 +570,7 @@ async fn login_mfa_submit(
             }
             Ok(response)
         }
-        Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => Err(internal_error(&state, "create MFA login session", &e)),
     }
 }
 
@@ -604,7 +579,7 @@ fn render_login(
     identifier: &str,
     error: Option<String>,
     return_to: Option<&str>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let html = state
         .templates
         .render(
@@ -621,10 +596,7 @@ fn render_login(
                 return_to => return_to,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| internal_error(state, "render login", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -798,7 +770,7 @@ async fn account_page(
         .list_linked_identities(&session.access_token, &session.user.user_id)
         .await
         .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to fetch linked identities");
+            let _ = record_error("fetch linked identities", &e);
             vec![]
         });
 
@@ -1070,8 +1042,19 @@ async fn update_username_submit(
             render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to update username: {e}");
-            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], &[], false, None, None, None)
+            let message = report_error("update username", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1121,8 +1104,19 @@ async fn change_password_submit(
             render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to change password: {e}");
-            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], &[], false, None, None, None)
+            let message = report_error("change password", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1173,7 +1167,7 @@ async fn add_email_submit(
                 if let Err(e) =
                     enqueue_verification_email(&state, &result.email.email, None).await
                 {
-                    tracing::warn!(error = %e, "failed to enqueue verification email on add_email");
+                    let _ = record_error("enqueue verification email on add email", &e);
                 }
             }
             Ok(Redirect::to("/settings/account").into_response())
@@ -1182,8 +1176,19 @@ async fn add_email_submit(
             render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to add email: {e}");
-            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], &[], false, None, None, None)
+            let message = report_error("add email", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1226,8 +1231,19 @@ async fn remove_email_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(e) => {
-            tracing::error!("failed to remove email: {e}");
-            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None, None)
+            let message = report_error("remove email", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1265,11 +1281,7 @@ async fn resend_verification_submit(
     }
 
     if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
-        tracing::warn!(
-            error = %e,
-            user_id = %session.user.user_id,
-            "resend verification email failed to enqueue"
-        );
+        let _ = record_error("resend verification email", &e);
         return Ok(Redirect::to(
             "/settings/account?error=verification_resend_failed",
         )
@@ -1358,7 +1370,7 @@ async fn mfa_verify_setup(
                 forage_core::auth::AuthError::InvalidCredentials => {
                     "Invalid code. Please check your authenticator app and try again.".to_string()
                 }
-                other => other.to_string(),
+                other => report_error("verify MFA setup", other),
             };
             error_page(&state, StatusCode::BAD_REQUEST, "Verification failed", &msg)
         })?;
@@ -1395,7 +1407,7 @@ async fn mfa_disable(
                 forage_core::auth::AuthError::InvalidCredentials => {
                     "Invalid code. Please enter your current authenticator code.".to_string()
                 }
-                other => other.to_string(),
+                other => report_error("disable MFA", other),
             };
             error_page(&state, StatusCode::BAD_REQUEST, "Could not disable MFA", &msg)
         })?;
@@ -1546,8 +1558,8 @@ async fn slack_user_callback(
     session: Session,
     Query(query): Query<SlackUserCallbackQuery>,
 ) -> Result<Response, Response> {
-    if let Some(err) = query.error {
-        tracing::warn!("Slack user OAuth denied: {err}");
+    if query.error.is_some() {
+        tracing::warn!("Slack user OAuth denied");
         return Ok(Redirect::to("/settings/account").into_response());
     }
 
@@ -1612,33 +1624,23 @@ async fn slack_user_callback(
         ])
         .send()
         .await
-        .map_err(|e| {
-            internal_error(
-                &state,
-                "slack user oauth",
-                &format!("Failed to contact Slack: {e}"),
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "contact Slack for user OAuth", &e))?;
 
-    let resp_body: serde_json::Value = token_resp.json().await.map_err(|e| {
-        internal_error(
-            &state,
-            "slack user oauth",
-            &format!("Failed to parse Slack response: {e}"),
-        )
-    })?;
+    let resp_body: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| internal_error(&state, "parse Slack user OAuth response", &e))?;
 
     if resp_body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         let err_msg = resp_body
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown error");
-        tracing::error!("Slack user OAuth error: {err_msg}");
         return Err(error_page(
             &state,
             StatusCode::BAD_GATEWAY,
             "Slack error",
-            &format!("Slack returned an error: {err_msg}"),
+            &report_error("Slack user OAuth response", &err_msg),
         ));
     }
 
@@ -1765,15 +1767,7 @@ async fn persist_oauth_flow(
     store
         .create(provider, oauth_state, return_to, expires_at)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, provider, "failed to persist OAuth flow state");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Login unavailable",
-                "Could not start the sign-in flow. Please try again.",
-            )
-        })
+        .map_err(|e| internal_error(state, "persist OAuth flow state", &e))
 }
 
 async fn consume_oauth_flow_return_to(
@@ -1788,7 +1782,7 @@ async fn consume_oauth_flow_return_to(
             .filter(|r| auth::safe_return_to(Some(r)).is_some()),
         Ok(None) => None,
         Err(e) => {
-            tracing::warn!(error = %e, provider, "OAuth flow state consume failed");
+            let _ = record_error("consume OAuth flow state", &e);
             None
         }
     }
@@ -1955,18 +1949,10 @@ async fn google_oauth_callback(
         )
     })?;
 
-    let identity = oidc
-        .exchange_code(code, &redirect_uri)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Google OIDC exchange failed");
-            error_page(
-                &state,
-                StatusCode::BAD_GATEWAY,
-                "Login failed",
-                "Failed to verify your Google account. Please try again.",
-            )
-        })?;
+    let identity = oidc.exchange_code(code, &redirect_uri).await.map_err(|e| {
+        let message = report_error("Google OIDC exchange", &e);
+        error_page(&state, StatusCode::BAD_GATEWAY, "Login failed", &message)
+    })?;
 
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
@@ -1989,17 +1975,9 @@ async fn google_oauth_callback(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("Google OAuth login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "Google OAuth login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "Google sign-in failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "Google OAuth login", &e),
         })?;
 
     let user_cache = {
@@ -2017,7 +1995,7 @@ async fn google_oauth_callback(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during OAuth login");
+                let _ = record_error("fetch organisations during Google OAuth login", &e);
                 vec![]
             }
         };
@@ -2045,15 +2023,11 @@ async fn google_oauth_callback(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create Google OAuth login session", &e))?;
 
     let mut jar = auth::session_cookie(&session_id, true);
 
@@ -2220,18 +2194,10 @@ async fn github_oauth_callback(
         )
     })?;
 
-    let identity = oidc
-        .exchange_code(code, &redirect_uri)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "GitHub OIDC exchange failed");
-            error_page(
-                &state,
-                StatusCode::BAD_GATEWAY,
-                "Login failed",
-                "Failed to verify your GitHub account. Please try again.",
-            )
-        })?;
+    let identity = oidc.exchange_code(code, &redirect_uri).await.map_err(|e| {
+        let message = report_error("GitHub OIDC exchange", &e);
+        error_page(&state, StatusCode::BAD_GATEWAY, "Login failed", &message)
+    })?;
 
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
@@ -2254,17 +2220,9 @@ async fn github_oauth_callback(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("GitHub OAuth login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "GitHub OAuth login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "GitHub sign-in failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "GitHub OAuth login", &e),
         })?;
 
     let user_cache = {
@@ -2282,7 +2240,7 @@ async fn github_oauth_callback(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during GitHub login");
+                let _ = record_error("fetch organisations during GitHub OAuth login", &e);
                 vec![]
             }
         };
@@ -2310,15 +2268,11 @@ async fn github_oauth_callback(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create GitHub OAuth login session", &e))?;
 
     let mut jar = auth::session_cookie(&session_id, true);
     let mut clear_cookie = axum_extra::extract::cookie::Cookie::from("forage_oauth_state");
@@ -2389,15 +2343,7 @@ async fn complete_profile_submit(
                 )
                 .unwrap_err()
             }
-            _ => {
-                tracing::error!(error = %e, "failed to update username");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Update failed",
-                    "Failed to set username. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "update username during profile completion", &e),
         })?;
 
     let mut updated = session.session_data.clone();
@@ -2436,15 +2382,7 @@ fn render_complete_profile(
                 return_to => return_to,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
+        .map_err(|e| internal_error(state, "render complete profile", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -2509,15 +2447,7 @@ async fn magic_link_request(
             since,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link count_recent failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "count recent magic links", &e))?;
     if count >= 3 {
         return render_magic_link_sent(&state, &form.email);
     }
@@ -2535,15 +2465,7 @@ async fn magic_link_request(
             rt,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link store_token failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "store magic link token", &e))?;
 
     let verify_url = format!(
         "{}/auth/magic-link/verify?token={}",
@@ -2570,22 +2492,15 @@ async fn magic_link_request(
             email_type: "magic-link".into(),
         };
 
-        let payload = serde_json::to_vec(&envelope).map_err(|e| {
-            tracing::error!(error = %e, "failed to serialize email envelope");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|e| internal_error(&state, "serialize magic link email", &e))?;
 
         let subject = forage_core::integrations::email::email_subject("magic-link");
         if let Err(e) = js.publish(subject, payload.into()).await {
-            tracing::error!(error = %e, "failed to publish magic link email to NATS");
+            let _ = record_error("publish magic link email", &e);
         }
     } else {
-        tracing::warn!(email = %form.email, url = %verify_url, "NATS not configured, magic link email not sent (token stored)");
+        tracing::warn!("NATS not configured, magic link email not sent (token stored)");
     }
 
     render_magic_link_sent(&state, &form.email)
@@ -2632,15 +2547,7 @@ async fn magic_link_verify(
             &token_hash,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link verify_and_consume failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?
+        .map_err(|e| internal_error(&state, "consume magic link token", &e))?
         .ok_or_else(|| {
             error_page(
                 &state,
@@ -2664,17 +2571,9 @@ async fn magic_link_verify(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("magic link login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "magic link login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "Magic link login failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "magic link login", &e),
         })?;
 
     let user_cache = {
@@ -2692,7 +2591,7 @@ async fn magic_link_verify(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during magic link login");
+                let _ = record_error("fetch organisations during magic link login", &e);
                 vec![]
             }
         };
@@ -2720,15 +2619,11 @@ async fn magic_link_verify(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create magic link login session", &e))?;
 
     let jar = auth::session_cookie(&session_id, true);
 
@@ -2755,15 +2650,7 @@ fn render_magic_link_form(
                 return_to => return_to,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
+        .map_err(|e| internal_error(state, "render magic link form", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -2779,15 +2666,7 @@ fn render_magic_link_sent(state: &AppState, email: &str) -> Result<Response, Res
                 email => email,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
+        .map_err(|e| internal_error(state, "render magic link sent", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -2840,7 +2719,7 @@ async fn upload_picture_submit(
             }
             "picture" => {
                 let data = field.bytes().await.map_err(|e| {
-                    tracing::error!("failed to read upload: {e}");
+                    let _ = record_error("read uploaded profile picture", &e);
                     error_page(
                         &state,
                         StatusCode::BAD_REQUEST,
@@ -2887,7 +2766,7 @@ async fn upload_picture_submit(
     })?;
 
     let webp_data = reencode_avatar(&raw_data).map_err(|e| {
-        tracing::warn!("image re-encode failed: {e}");
+        let _ = record_error("decode uploaded profile picture", &e);
         error_page(
             &state,
             StatusCode::BAD_REQUEST,
@@ -2910,15 +2789,7 @@ async fn upload_picture_submit(
             Some(&avatar_url),
         )
         .await
-        .map_err(|e| {
-            tracing::error!("failed to update profile picture URL in forest: {e}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Update failed",
-                "Failed to update your profile picture. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "update profile picture URL", &e))?;
 
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
@@ -2955,15 +2826,7 @@ async fn remove_picture_submit(
         .forest_client
         .update_profile_picture_url(&session.access_token, &session.user.user_id, Some(""))
         .await
-        .map_err(|e| {
-            tracing::error!("failed to clear profile picture URL: {e}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Update failed",
-                "Failed to remove your profile picture. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "clear profile picture URL", &e))?;
 
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
@@ -3028,7 +2891,7 @@ async fn stored_avatar(state: &AppState, user_id: &str) -> Option<forage_db::Pro
     match store.get(user_id).await {
         Ok(pic) => pic,
         Err(e) => {
-            tracing::warn!("profile picture lookup for {user_id} failed: {e:#}");
+            let _ = record_error("look up stored profile picture", &e);
             None
         }
     }
@@ -3119,23 +2982,16 @@ async fn enqueue_verification_email(
             forage_core::auth::magic_link::TOKEN_TYPE_EMAIL_VERIFY,
         );
         if let Err(e) = js.publish(subject, payload.into()).await {
-            tracing::error!(error = %e, "failed to publish verification email to NATS");
+            let _ = record_error("publish verification email", &e);
         }
     } else {
-        tracing::warn!(
-            email = %email,
-            url = %verify_url,
-            "NATS not configured, verification email not sent (token stored)",
-        );
+        tracing::warn!("NATS not configured, verification email not sent (token stored)",);
     }
 
     Ok(())
 }
 
-fn render_verify_email_check_inbox(
-    state: &AppState,
-    email: &str,
-) -> Result<Response, axum::http::StatusCode> {
+fn render_verify_email_check_inbox(state: &AppState, email: &str) -> Result<Response, Response> {
     let html = state
         .templates
         .render(
@@ -3146,10 +3002,7 @@ fn render_verify_email_check_inbox(
                 email => email,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| internal_error(state, "render verify email check inbox", &e))?;
     Ok(Html(html).into_response())
 }
 
@@ -3184,15 +3037,7 @@ async fn verify_email_redeem(
             &token_hash,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "verify_and_consume failed for email-verify token");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "consume email verification token", &e))?;
 
     let Some((email, stored_return_to)) = consumed.map(|c| (c.email, c.return_to)) else {
         return Ok(render_verify_email_failed(&state));
@@ -3203,7 +3048,7 @@ async fn verify_email_redeem(
         .map(|r| r.to_string());
 
     if let Err(e) = state.forest_client.confirm_email_verification(&email).await {
-        tracing::error!(error = %e, email = %email, "confirm_email_verification failed");
+        let _ = record_error("confirm email verification", &e);
         return Ok(render_verify_email_failed(&state));
     }
 
@@ -3225,15 +3070,7 @@ async fn verify_email_redeem(
                 email => email,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "render email verification success", &e))?;
 
     let mut response = Html(html).into_response();
     response.headers_mut().insert(
@@ -3277,15 +3114,7 @@ async fn verify_email_resend_page(State(state): State<AppState>) -> Result<Respo
                 error => None::<String>,
             },
         )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "render resend verification email", &e))?;
     Ok(Html(html).into_response())
 }
 
@@ -3295,12 +3124,12 @@ async fn verify_email_resend_submit(
 ) -> Result<Response, Response> {
     if validate_email(&form.email).is_err() {
         tracing::info!(email = %form.email, "verify-email resend skipped: invalid email");
-        return render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response());
+        return render_verify_email_check_inbox(&state, &form.email);
     }
     if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
-        tracing::warn!(error = %e, "verify-email resend enqueue failed");
+        let _ = record_error("enqueue resent verification email", &e);
     }
-    render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response())
+    render_verify_email_check_inbox(&state, &form.email)
 }
 
 const LINK_PURPOSE_COOKIE: &str = "forage_oauth_link_user";
@@ -3463,7 +3292,6 @@ async fn disconnect_oauth_provider(
         .unlink_oauth_provider(&session.access_token, &session.user.user_id, provider)
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, provider = provider.as_str(), "unlink oauth provider failed");
             match &e {
                 forage_core::auth::AuthError::PermissionDenied(_) => error_page(
                     state,
@@ -3476,12 +3304,7 @@ async fn disconnect_oauth_provider(
                 forage_core::auth::AuthError::LastAuthMethod => {
                     Redirect::to("/settings/account?error=last_auth_method").into_response()
                 }
-                _ => error_page(
-                    state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Unlink failed",
-                    "Failed to unlink the account. Please try again.",
-                ),
+                _ => internal_error(state, "unlink OAuth provider", &e),
             }
         })?;
 
@@ -3521,7 +3344,7 @@ async fn complete_link_flow(
             format!("/settings/account?error=already_linked_{provider_str}")
         }
         Err(e) => {
-            tracing::error!(error = %e, provider = provider_str, "link oauth provider failed");
+            let _ = record_error("link OAuth provider", &e);
             format!("/settings/account?error=link_failed_{provider_str}")
         }
     };

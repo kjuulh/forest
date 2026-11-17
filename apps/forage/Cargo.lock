@@ -1031,6 +1031,7 @@ dependencies = [
  "opentelemetry_sdk",
  "pulldown-cmark",
  "qrcode",
+ "regex",
  "reqwest",
  "rsa",
  "serde",

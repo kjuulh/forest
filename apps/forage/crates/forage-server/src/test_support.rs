@@ -59,6 +59,7 @@ pub(crate) struct MockPlatformBehavior {
     pub get_project_result: Option<Result<Option<forage_core::platform::Project>, PlatformError>>,
     pub list_artifacts_result: Option<Result<Vec<Artifact>, PlatformError>>,
     pub create_organisation_result: Option<Result<String, PlatformError>>,
+    pub approval_error: Option<PlatformError>,
     pub list_members_result: Option<Result<Vec<OrgMember>, PlatformError>>,
     pub add_member_result: Option<Result<OrgMember, PlatformError>>,
     pub remove_member_result: Option<Result<(), PlatformError>>,
@@ -452,6 +453,17 @@ impl MockPlatformClient {
     pub fn with_behavior(behavior: MockPlatformBehavior) -> Self {
         Self {
             behavior: Mutex::new(behavior),
+        }
+    }
+
+    fn check_approval(&self) -> Result<(), PlatformError> {
+        let behavior = self
+            .behavior
+            .lock()
+            .map_err(|_| PlatformError::Other("approval fixture lock poisoned".into()))?;
+        match &behavior.approval_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
         }
     }
 
@@ -1080,6 +1092,7 @@ impl ForestPlatform for MockPlatformClient {
         _comment: Option<&str>,
         _force_bypass: bool,
     ) -> Result<forage_core::platform::ApprovalState, PlatformError> {
+        self.check_approval()?;
         Ok(forage_core::platform::ApprovalState {
             required_approvals: 1,
             current_approvals: 1,
@@ -1096,6 +1109,7 @@ impl ForestPlatform for MockPlatformClient {
         _target_environment: &str,
         _comment: Option<&str>,
     ) -> Result<forage_core::platform::ApprovalState, PlatformError> {
+        self.check_approval()?;
         Ok(forage_core::platform::ApprovalState {
             required_approvals: 1,
             current_approvals: 0,
@@ -1124,7 +1138,7 @@ impl ForestPlatform for MockPlatformClient {
         _release_intent_id: &str,
         _stage_id: &str,
     ) -> Result<(), PlatformError> {
-        Ok(())
+        self.check_approval()
     }
 
     async fn reject_plan_stage(
@@ -1134,7 +1148,7 @@ impl ForestPlatform for MockPlatformClient {
         _stage_id: &str,
         _reason: Option<&str>,
     ) -> Result<(), PlatformError> {
-        Ok(())
+        self.check_approval()
     }
 
     async fn get_plan_output(

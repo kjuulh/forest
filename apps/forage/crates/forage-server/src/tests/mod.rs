@@ -10,6 +10,7 @@ mod directory_tests;
 mod introspect_tests;
 mod email_verification_tests;
 mod error_block_tests;
+mod error_disclosure_tests;
 mod footer_tests;
 mod integration_tests;
 mod magic_link_tests;

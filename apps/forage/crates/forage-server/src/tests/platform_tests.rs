@@ -272,39 +272,6 @@ async fn create_org_invalid_csrf_returns_403() {
 }
 
 #[tokio::test]
-async fn create_org_grpc_failure_shows_error() {
-    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        create_organisation_result: Some(Err(PlatformError::Unavailable(
-            "connection refused".into(),
-        ))),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/orgs")
-                .header("cookie", &cookie)
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("name=my-org&_csrf=test-csrf"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Forest is temporarily unavailable"));
-    assert!(!html.contains("connection refused"));
-}
-
-#[tokio::test]
 async fn create_org_duplicate_shows_actionable_error() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         create_organisation_result: Some(Err(PlatformError::AlreadyExists(
@@ -691,37 +658,6 @@ async fn projects_list_non_member_returns_403() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn projects_list_platform_unavailable_returns_500() {
-    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        list_projects_result: Some(Err(PlatformError::Unavailable(
-            "connection refused".into(),
-        ))),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/orgs/testorg/projects")
-                .header("cookie", &cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Something went wrong"));
-    assert!(html.contains("connection refused"));
 }
 
 #[tokio::test]
