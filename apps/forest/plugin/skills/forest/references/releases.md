@@ -86,7 +86,7 @@ A green release says the destination provider reported success. That is good evi
 
 ## Terraform destinations
 
-- `forest release drift -e <env> [-d <dest>] [-q]` runs a refresh-only plan against the last successful artifact. It exits 0 when in sync, 2 on drift and 1 when the check couldn't run; it changes nothing.
+- `forest release drift -e <env> [-d <dest>] [-q]` runs a refresh-only plan against the last successful artifact. It changes nothing. Through v0.3.18 it exits 0 when in sync, 2 on drift and 1 when the check couldn't run; a destination type without a drift check counts as in sync, and drift outranks a failed check, so 0 does not mean every destination was checked. After v0.3.18 it exits 0 only when every destination was checked and is in sync, 2 on drift with no failed check, and 1 when any result is empty, unsupported or failed, which outranks drift elsewhere. Tell them apart by the exit-status line in `forest release drift --help`: the newer one says "every destination checked".
 - `forest state list|versions|pull|unlock|env -e <env>` reaches the state outside a release. It needs **Admin**, every call is audited, and `pull`/`env` expose secrets. Use these only when the user asks, and never paste the output.
 - Plan approval applies exactly the saved plan. If state moved since, the deploy fails as stale; re-run the release and review the new plan.
 

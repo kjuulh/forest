@@ -120,7 +120,26 @@ forest release drift -e prod -d prod/eu-west-1/core # one destination
 
 For each destination the server takes the artifact of that destination's last successful deploy and runs `terraform plan -refresh-only -detailed-exitcode -lock=false` against it. It changes nothing: no state write, no lock, so it can't block or be blocked by a release.
 
-The exit status is `0` when in sync, `2` when something drifted (the refresh-only plan is printed), and `1` when the check couldn't run. So a scheduled CI job can alert on `2` without parsing anything.
+The exit status is `0` only when at least one destination was checked and every
+result is in sync. It is `2` when drift was found and no check failed (the
+refresh-only plan is printed unless `--quiet` is set). It is `1` for an empty,
+unsupported, unknown or failed result, or an RPC failure. An incomplete check
+takes precedence over drift elsewhere; unsupported destination types are not a
+clean result.
+
+That is the behaviour after v0.3.18. Through v0.3.18 an unsupported destination
+type counts as in sync and drift outranks a failed check, so `0` does not mean
+every destination was checked. The exit-status line of `forest release drift
+--help` says which one a CLI has.
+
+In CI, check that `forest release --help` lists `drift` before relying on it:
+CLIs before v0.3.14 don't have the command.
+
+The request is `forest.v1.ReleaseService/CheckDrift` with `project`
+(`organisation` and `project`), `environment`, and optional `destination`.
+The response contains per-destination status, artifact ID, output and error.
+It does not annotate, apply or release anything. An environment without a
+successful deploy has no comparison baseline and fails.
 
 The check runs synchronously in the request. Scheduling it and showing the result in forage are follow-ups.
 
