@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET updated_at = now()\n         WHERE release_id = $1 AND status = 'QUEUED'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "792730b7dd2b5d9ba315d44ad25bc5a60fa13916fb1bf7d69c75dbc6e857c3a0"
+}

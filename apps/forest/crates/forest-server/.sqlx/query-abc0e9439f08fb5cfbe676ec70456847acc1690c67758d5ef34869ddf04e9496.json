@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET status = 'CANCELLED'\n              WHERE project_id = $1 AND status IN ('QUEUED', 'ASSIGNED', 'RUNNING')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "abc0e9439f08fb5cfbe676ec70456847acc1690c67758d5ef34869ddf04e9496"
+}

@@ -167,6 +167,15 @@ impl SchedulerInner {
             }
         }
 
+        if crate::services::plan_guard::waits_for_outstanding_plan(
+            &self.release_event_store.db,
+            &release_state,
+        )
+        .await
+        {
+            return Ok(());
+        }
+
         let branch: Option<String> = sqlx::query_scalar(
             "SELECT a.ref->>'commit_branch'
              FROM release_intents i

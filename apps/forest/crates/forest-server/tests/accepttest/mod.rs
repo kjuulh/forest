@@ -16,6 +16,7 @@ mod oauth_client_token_scope;
 mod oauth_device_flow;
 mod oauth_flow;
 mod oauth_unlink;
+mod plan_guard;
 mod policy_enforcement;
 mod registration_domain;
 mod release_destination_scoping;

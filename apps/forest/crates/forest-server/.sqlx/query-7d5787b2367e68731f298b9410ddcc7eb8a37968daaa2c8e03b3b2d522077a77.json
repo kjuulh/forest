@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                rs.release_id, rs.release_intent_id, rs.project_id,\n                rs.destination_id, rs.artifact_id\n             FROM release_states rs\n             WHERE rs.status = 'QUEUED'\n               AND NOT EXISTS (\n                   SELECT 1 FROM release_states active\n                   WHERE active.project_id = rs.project_id\n                     AND active.destination_id = rs.destination_id\n                     AND active.status IN ('ASSIGNED', 'RUNNING')\n               )\n             ORDER BY rs.queued_at\n             LIMIT $1\n             FOR UPDATE SKIP LOCKED",
+  "query": "SELECT release_id, release_intent_id, stage_id, mode, status, queued_at\n         FROM release_states\n         WHERE release_intent_id = ANY($1) AND destination_id = $2",
   "describe": {
     "columns": [
       {
@@ -27,50 +27,63 @@
       },
       {
         "ordinal": 2,
-        "name": "project_id",
-        "type_info": "Uuid",
+        "name": "stage_id",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "release_states",
-            "name": "project_id"
+            "name": "stage_id"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "destination_id",
-        "type_info": "Uuid",
+        "name": "mode",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "release_states",
-            "name": "destination_id"
+            "name": "mode"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "artifact_id",
-        "type_info": "Uuid",
+        "name": "status",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "release_states",
-            "name": "artifact_id"
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "queued_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "queued_at"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "UuidArray",
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "dc5b2d31b77ef8976a9af7273fa5e5c1477c44367ec8394e7738e1007400e8fc"
+  "hash": "7d5787b2367e68731f298b9410ddcc7eb8a37968daaa2c8e03b3b2d522077a77"
 }

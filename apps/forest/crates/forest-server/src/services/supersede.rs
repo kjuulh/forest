@@ -119,7 +119,7 @@ pub async fn collapse_queue(
         return Ok(Verdict::Proceed);
     };
 
-    let queue = pending_for_target(event_store, project_id, destination_id).await?;
+    let queue = pending_for_target(event_store, project_id, destination_id, candidate).await?;
     let plan = plan(candidate, &queue, config.same_branch_only);
 
     if plan.supersessions.is_empty() && plan.verdict == Verdict::Proceed {
@@ -206,6 +206,7 @@ async fn pending_for_target(
     event_store: &ReleaseEventStore,
     project_id: Uuid,
     destination_id: Uuid,
+    candidate: Uuid,
 ) -> anyhow::Result<Vec<Pending>> {
     let rows = sqlx::query!(
         r#"SELECT
@@ -220,9 +221,11 @@ async fn pending_for_target(
           WHERE rs.project_id = $1
             AND rs.destination_id = $2
             AND rs.status = 'QUEUED'
+            AND rs.mode = (SELECT c.mode FROM release_states c WHERE c.release_id = $3)
           ORDER BY rs.queued_at ASC, rs.release_id ASC"#,
         project_id,
         destination_id,
+        candidate,
     )
     .fetch_all(&event_store.db)
     .await

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) as \"count!\"\n               FROM release_states rs\n               JOIN release_logs rl\n                 ON rl.release_intent_id = rs.release_intent_id\n                AND rl.destination_id = rs.destination_id\n               CROSS JOIN jsonb_array_elements(rl.log_lines) line\n               WHERE rs.release_id = $1\n                 AND rl.release_attempt <> rs.release_id\n                 AND rl.sequence = 0\n                 AND line->>'line' LIKE 'forest: waiting for release % before planning'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cee4ec7ebd03f407206d038e69f26b9b2decf40e6279336331f70fa3e8914434"
+}

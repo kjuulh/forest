@@ -2,6 +2,8 @@ use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+pub const PLAN_RETENTION_DAYS: i32 = 7;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedPlan {
     pub work_dir: String,
@@ -54,10 +56,13 @@ impl TerraformPlanStore {
             .context("insert plan")?;
         }
 
-        sqlx::query!("DELETE FROM terraform_plans WHERE created_at < now() - interval '7 days'")
-            .execute(&mut *tx)
-            .await
-            .context("prune old plans")?;
+        sqlx::query!(
+            "DELETE FROM terraform_plans WHERE created_at < now() - make_interval(days => $1)",
+            PLAN_RETENTION_DAYS,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("prune old plans")?;
 
         tx.commit().await.context("commit save plans")?;
         Ok(())

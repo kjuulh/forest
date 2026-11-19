@@ -558,7 +558,7 @@ impl ReleaseEventStore {
                      AND active.destination_id = rs.destination_id
                      AND active.status IN ('ASSIGNED', 'RUNNING')
                )
-             ORDER BY rs.queued_at
+             ORDER BY rs.updated_at, rs.queued_at, rs.release_id
              LIMIT $1
              FOR UPDATE SKIP LOCKED",
             limit,

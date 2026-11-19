@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states\n                SET updated_at = now() - ($2 || ' seconds')::interval,\n                    queued_at = now() - ($2 || ' seconds')::interval\n              WHERE release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f42c2e17486246f8878702f93016ea2302014b704703be3c00fafec3549095ad"
+}

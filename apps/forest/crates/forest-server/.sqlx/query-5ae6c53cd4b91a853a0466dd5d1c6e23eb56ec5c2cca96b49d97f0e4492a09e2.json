@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM release_logs\n               WHERE release_intent_id = $1 AND destination_id = $2 AND log_lines @> $3\n           ) as \"logged!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "logged!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5ae6c53cd4b91a853a0466dd5d1c6e23eb56ec5c2cca96b49d97f0e4492a09e2"
+}

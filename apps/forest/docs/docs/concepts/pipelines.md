@@ -47,6 +47,13 @@ forest release reject  <slug> -o my-org -p my-service -r "<what to change>"
 
 For `forest/terraform@1` destinations, what you approve is what gets applied. The plan stage saves the binary plan with the provider lock file, and the deploy stage of the same release applies **that file** without planning again. If the state changed in between, terraform refuses the stale plan and the deploy fails; re-run the release and review the new plan. Saved plans are deleted once their apply is attempted, and pruned after 7 days if never applied.
 
+So that one release's apply doesn't make another's saved plan stale, a plan stage for a `forest/terraform@1` destination waits while another release of the same project holds that destination:
+
+- its plan for the destination finished, the saved plan is under 7 days old, and its deploy stage has not finished yet (still pending behind other stages, queued or running); or
+- its plan for the destination was queued earlier and is still queued or running.
+
+The waiting plan step stays `QUEUED` and its log shows `forest: waiting for release <slug> to apply its plan for <destination> before planning`. It plans against fresh state once that deploy finishes, or once the other plan is rejected, cancelled (for example because an upstream deploy failed), superseded, discarded, or older than 7 days. A plan still awaiting approval holds later plans for the same destination until someone approves or rejects it. Deploy stages, releases without a plan stage, and destination types that save no plan never wait for this. (Server behaviour after v0.3.18.)
+
 A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's terraform destinations, and its output starts with a `DESTROY PLAN` banner. It can never be auto-approved. Resources with `prevent_destroy` make it fail, which is the intended outcome for anything holding data.
 
 ## Starting a pipeline

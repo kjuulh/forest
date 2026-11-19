@@ -42,7 +42,7 @@ forest project policy create -o my-org -p my-service \
 
 ### Supersede pending
 
-Older releases still queued for an environment collapse to the newest:
+Older releases still queued for an environment collapse to the newest. After v0.3.18 (server-side), queued plan steps collapse only against other queued plans and queued deploys only against other deploys, so a plan held behind another release's apply is never superseded by that release's deploy:
 
 ```bash
 forest project policy create -o my-org -p my-service \

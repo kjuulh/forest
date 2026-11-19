@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n              rs.release_id,\n              rs.queued_at,\n              (SELECT a.ref ->> 'commit_branch'\n                 FROM annotations a\n                WHERE a.artifact_id = rs.artifact_id\n                ORDER BY a.created DESC\n                LIMIT 1) as \"branch?\"\n           FROM release_states rs\n          WHERE rs.project_id = $1\n            AND rs.destination_id = $2\n            AND rs.status = 'QUEUED'\n          ORDER BY rs.queued_at ASC, rs.release_id ASC",
+  "query": "SELECT\n              rs.release_id,\n              rs.queued_at,\n              (SELECT a.ref ->> 'commit_branch'\n                 FROM annotations a\n                WHERE a.artifact_id = rs.artifact_id\n                ORDER BY a.created DESC\n                LIMIT 1) as \"branch?\"\n           FROM release_states rs\n          WHERE rs.project_id = $1\n            AND rs.destination_id = $2\n            AND rs.status = 'QUEUED'\n            AND rs.mode = (SELECT c.mode FROM release_states c WHERE c.release_id = $3)\n          ORDER BY rs.queued_at ASC, rs.release_id ASC",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,7 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Uuid",
         "Uuid"
       ]
     },
@@ -44,5 +45,5 @@
       null
     ]
   },
-  "hash": "b3b7410e21db67534f4a00bdc68af762924aac5276b33ba2be07b6d575bc5f95"
+  "hash": "d188f383a1124aab61655e00dfd359557b237a940f02ff8ba7cc2cc024af8b9d"
 }
