@@ -626,33 +626,33 @@ async fn tokens_page(
         .await
         .unwrap_or_default();
 
-    let html = state
-        .templates
-        .render(
-            "pages/tokens.html.jinja",
-            context! {
-                title => "API Tokens - Forest",
-                description => "Manage your personal access tokens",
-                user => context! { username => session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                tokens => tokens.iter().map(|t| context! {
-                    token_id => t.token_id,
-                    name => t.name,
-                    created_at => t.created_at,
-                    last_used => t.last_used,
-                    expires_at => t.expires_at,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                created_token => None::<String>,
-                active_tab => "tokens",
-            },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+    Ok(render_tokens(&state, &session, tokens, None))
+}
 
-    Ok(Html(html).into_response())
+fn render_tokens(
+    state: &AppState,
+    session: &Session,
+    tokens: Vec<forage_core::auth::PersonalAccessToken>,
+    created_token: Option<String>,
+) -> Response {
+    let page = crate::views::account::TokensPage {
+        chrome: crate::views::account::chrome(
+            state,
+            session,
+            crate::views::account::first_org(session),
+            "API Tokens - Forest",
+            "Manage your personal access tokens",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        created_token,
+        tokens,
+    };
+    let html = Html(crate::views::pages::tokens::render(&page));
+    if page.created_token.is_some() {
+        ([(axum::http::header::CACHE_CONTROL, "no-store")], html).into_response()
+    } else {
+        html.into_response()
+    }
 }
 
 #[derive(Deserialize)]
@@ -689,33 +689,7 @@ async fn create_token_submit(
         .await
         .unwrap_or_default();
 
-    let html = state
-        .templates
-        .render(
-            "pages/tokens.html.jinja",
-            context! {
-                title => "API Tokens - Forest",
-                description => "Manage your personal access tokens",
-                user => context! { username => session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                tokens => tokens.iter().map(|t| context! {
-                    token_id => t.token_id,
-                    name => t.name,
-                    created_at => t.created_at,
-                    last_used => t.last_used,
-                    expires_at => t.expires_at,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                created_token => Some(created.raw_token),
-                active_tab => "tokens",
-            },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
-
-    Ok(Html(html).into_response())
+    Ok(render_tokens(&state, &session, tokens, Some(created.raw_token)))
 }
 
 async fn delete_token_submit(
@@ -794,7 +768,7 @@ async fn account_page(
         mfa_enabled,
         flash_message(query.flash.as_deref()),
         error_message(query.error.as_deref()),
-        Some(slack_dm_context(&state, &session, &prefs, &slack_links).await),
+        slack_dm_context(&state, &session, &prefs, &slack_links).await,
     )
 }
 
@@ -806,7 +780,8 @@ async fn slack_dm_context(
     session: &Session,
     prefs: &[forage_core::platform::NotificationPreference],
     slack_links: &[SlackUserLink],
-) -> minijinja::Value {
+) -> Option<crate::views::account::SlackDm> {
+    use crate::views::account::{DmRoute, DmRow, SlackDm};
     use forage_core::integrations::baseline::{
         notification_type_to_forest, explicit_slack_preferences, MappingStatus, PersonalPreference,
         DM_NOTIFICATION_TYPES,
@@ -854,7 +829,12 @@ async fn slack_dm_context(
                 _ => ("unknown", "Couldn't check with Slack right now".to_string()),
             }
         };
-        routes.push(context! { org => org, team_name => team_name, state => route_state, label => label });
+        routes.push(DmRoute {
+            org: org.clone(),
+            team_name,
+            reachable: route_state == "reachable",
+            label,
+        });
     }
 
     let rows: Vec<_> = DM_NOTIFICATION_TYPES
@@ -869,16 +849,16 @@ async fn slack_dm_context(
                 (1, Some(false)) => "off",
                 _ => "varies",
             };
-            context! {
-                key => notification_type_to_forest(nt).unwrap_or_default(),
-                label => super::integrations::notification_type_label(nt),
-                mode => personal.as_str(),
-                org_default => org_default,
+            DmRow {
+                key: notification_type_to_forest(nt).unwrap_or_default().to_string(),
+                label: super::integrations::notification_type_label(nt).to_string(),
+                mode: personal,
+                org_default,
             }
         })
         .collect();
 
-    context! { connected => !teams.is_empty(), rows => rows, routes => routes }
+    (!teams.is_empty()).then_some(SlackDm { rows, routes })
 }
 
 fn flash_message(flash: Option<&str>) -> Option<&'static str> {
@@ -929,72 +909,54 @@ fn render_account(
     session: &Session,
     error: Option<&str>,
     notification_prefs: &[forage_core::platform::NotificationPreference],
-    slack_links: &[SlackUserLink],
+    _slack_links: &[SlackUserLink],
     linked_accounts: &[forage_core::auth::LinkedIdentity],
     mfa_enabled: bool,
     flash: Option<&str>,
     oauth_error: Option<&str>,
-    slack_dm: Option<minijinja::Value>,
+    slack_dm: Option<crate::views::account::SlackDm>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/account.html.jinja",
-            context! {
-                title => "Account Settings - Forest",
-                description => "Manage your account settings",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                    profile_picture_url => &session.user.profile_picture_url,
-                    mfa_enabled => mfa_enabled,
-                    emails => session.user.emails.iter().map(|e| context! {
-                        email => &e.email,
-                        verified => e.verified,
-                    }).collect::<Vec<_>>(),
-                },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                error => error,
-                active_tab => "account",
-                enabled_prefs => notification_prefs.iter()
-                    .filter(|p| p.enabled)
-                    .map(|p| format!("{}|{}", p.notification_type, p.channel))
-                    .collect::<Vec<_>>(),
-                has_slack_oauth => state.slack_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_google_oauth => state.google_oauth_config.is_some(),
-                slack_links => slack_links.iter().map(|l| context! {
-                    id => &l.id,
-                    team_id => &l.team_id,
-                    team_name => &l.team_name,
-                    slack_user_id => &l.slack_user_id,
-                    slack_username => &l.slack_username,
-                }).collect::<Vec<_>>(),
-                linked_accounts => linked_accounts.iter().map(|l| context! {
-                    provider => l.provider.as_str(),
-                    provider_display => l.provider.display_name(),
-                    external_id => &l.external_id,
-                    display_name => &l.display_name,
-                    email => &l.email,
-                    avatar_url => &l.avatar_url,
-                    subtitle => &l.subtitle,
-                    linked_at => &l.linked_at,
-                    disconnect_key => &l.disconnect_key,
-                }).collect::<Vec<_>>(),
-                has_github_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::GitHub),
-                has_google_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::Google),
-                flash => flash,
-                oauth_error => oauth_error,
-                slack_dm => slack_dm,
-            },
-        )
-        .map_err(|e| {
-            internal_error(state, "template error", &e)
-        })?;
+    use crate::views::account::{
+        back_link, chrome, first_org, AccountPage, CliPreference, LinkedAccount, LinkedAccounts,
+    };
+    use forage_core::auth::LinkedProvider;
 
-    Ok(Html(html).into_response())
+    let has_github_oauth = state.github_oauth_config.is_some();
+    let has_google_oauth = state.google_oauth_config.is_some();
+    let has_slack_oauth = state.slack_config.is_some();
+    let linked = (has_github_oauth || has_google_oauth || has_slack_oauth || !linked_accounts.is_empty())
+        .then(|| LinkedAccounts {
+            accounts: linked_accounts.iter().map(LinkedAccount::from_identity).collect(),
+            link_github: has_github_oauth
+                && !linked_accounts.iter().any(|l| l.provider == LinkedProvider::GitHub),
+            link_google: has_google_oauth
+                && !linked_accounts.iter().any(|l| l.provider == LinkedProvider::Google),
+            add_slack: has_slack_oauth,
+        });
+    let (back_href, back_label) = back_link(first_org(session));
+    let page = AccountPage {
+        chrome: chrome(
+            state,
+            session,
+            first_org(session),
+            "Account Settings - Forest",
+            "Manage your account settings",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        username: session.user.username.clone(),
+        profile_picture_url: session.user.profile_picture_url.clone(),
+        emails: session.user.emails.clone(),
+        mfa_enabled,
+        back_href,
+        back_label,
+        error: error.map(Into::into),
+        flash: flash.map(Into::into),
+        oauth_error: oauth_error.map(Into::into),
+        linked,
+        slack_dm,
+        cli_prefs: CliPreference::all(notification_prefs),
+    };
+    Ok(Html(crate::views::pages::account::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -1317,27 +1279,24 @@ async fn mfa_setup_start(
 
     let qr_svg = generate_qr_svg(&setup.provisioning_uri);
 
-    let html = state
-        .templates
-        .render(
-            "pages/mfa_setup.html.jinja",
-            context! {
-                title => "Set up two-factor authentication - Forest",
-                description => "Scan the QR code with your authenticator app",
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                mfa_id => &setup.mfa_id,
-                provisioning_uri => &setup.provisioning_uri,
-                secret => &setup.secret,
-                qr_svg => qr_svg,
-                active_tab => "account",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::account::MfaSetupPage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            crate::views::account::first_org(&session),
+            "Set up two-factor authentication - Forest",
+            "Scan the QR code with your authenticator app",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        mfa_id: setup.mfa_id,
+        secret: setup.secret,
+        qr_svg: (!qr_svg.is_empty()).then(|| sedge_rt::Trusted(qr_svg)),
+    };
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Html(crate::views::pages::mfa_setup::render(&page)),
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]

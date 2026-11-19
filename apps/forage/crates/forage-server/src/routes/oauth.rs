@@ -41,27 +41,18 @@ async fn authorized_apps_page(
         .await
         .map_err(|e| internal_error(&state, "list oauth grants", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/authorized_apps.html.jinja",
-            context! {
-                title => "Authorized applications - Forest",
-                description => "Apps you've granted access to your account",
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "authorized-apps",
-                grants => grants.iter().map(|g| context! {
-                    app_id => &g.app_id,
-                    name => &g.name,
-                    scopes => &g.scopes,
-                }).collect::<Vec<_>>(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::account::AuthorizedAppsPage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            crate::views::account::first_org(&session),
+            "Authorized applications - Forest",
+            "Apps you've granted access to your account",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        grants,
+    };
+    Ok(Html(crate::views::pages::authorized_apps::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]

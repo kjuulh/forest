@@ -419,24 +419,7 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
     Ok(Html(html).into_response())
 }
 
-struct NotifRelease {
-    org: String,
-    project: String,
-    slug: String,
-    title: String,
-    description: Option<String>,
-    version: Option<String>,
-    branch: Option<String>,
-    commit_sha: Option<String>,
-    commit_message: Option<String>,
-    source_user: Option<String>,
-    created_at: String,
-    summary_status: String,
-    env_groups: Vec<minijinja::Value>,
-    pipeline_stages: Vec<minijinja::Value>,
-    has_pipeline: bool,
-    destinations: Vec<minijinja::Value>,
-}
+use crate::views::account::NotificationRelease as NotifRelease;
 
 async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRelease> {
     let orgs = &session.user.orgs;
@@ -534,7 +517,8 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
 
                 let env_groups = build_env_groups(&matching_states);
 
-                let mut pipeline_stages: Vec<minijinja::Value> = Vec::new();
+                let mut pipeline_stages: Vec<crate::views::account::NotificationStage> =
+                    Vec::new();
                 if let Some(run_stages) = intent_stages_by_artifact.get(aid) {
                     let sorted = topo_sort_run_stages(run_stages);
                     for rs in sorted {
@@ -546,17 +530,12 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                         } else {
                             base_status
                         };
-                        pipeline_stages.push(context! {
-                            id => rs.stage_id,
-                            stage_type => rs.stage_type,
-                            environment => rs.environment.clone().unwrap_or_default(),
-                            duration_seconds => rs.duration_seconds,
-                            status => display_status,
-                            started_at => rs.started_at,
-                            completed_at => rs.completed_at,
-                            error_message => rs.error_message,
-                            wait_until => rs.wait_until,
-                            approval_status => rs.approval_status,
+                        pipeline_stages.push(crate::views::account::NotificationStage {
+                            stage_type: rs.stage_type.clone(),
+                            environment: rs.environment.clone().unwrap_or_default(),
+                            duration_seconds: rs.duration_seconds,
+                            status: display_status.to_string(),
+                            started_at: rs.started_at.clone(),
                         });
                     }
                 }
@@ -564,21 +543,17 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                 let project_has_pipeline = pipelines_by_project.contains_key(project);
                 let has_pipeline = !pipeline_stages.is_empty() || project_has_pipeline;
 
-                let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
-                    .into_iter()
-                    .map(|ds| {
-                        context! {
-                            name => ds.destination_name,
-                            environment => ds.environment,
-                            status => ds.status,
-                            error_message => ds.error_message,
-                            queued_at => ds.queued_at,
-                            started_at => ds.started_at,
-                            completed_at => ds.completed_at,
-                            queue_position => ds.queue_position,
-                        }
-                    })
-                    .collect();
+                let destinations: Vec<crate::views::account::NotificationDestination> =
+                    dedupe_destinations(&matching_states)
+                        .into_iter()
+                        .map(|ds| crate::views::account::NotificationDestination {
+                            name: ds.destination_name.clone(),
+                            environment: ds.environment.clone(),
+                            status: ds.status.clone().unwrap_or_default(),
+                            completed_at: ds.completed_at.clone(),
+                            queue_position: ds.queue_position,
+                        })
+                        .collect();
 
                 releases.push(NotifRelease {
                     org: org.name.clone(),
@@ -621,32 +596,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
 
     releases.truncate(50);
     releases
-}
-
-fn notifications_to_values(releases: Vec<NotifRelease>) -> Vec<minijinja::Value> {
-    releases
-        .into_iter()
-        .map(|r| {
-            context! {
-                org => r.org,
-                project => r.project,
-                slug => r.slug,
-                title => r.title,
-                description => r.description,
-                version => r.version,
-                branch => r.branch,
-                commit_sha => r.commit_sha,
-                commit_message => r.commit_message,
-                source_user => r.source_user,
-                created_at => r.created_at,
-                summary_status => r.summary_status,
-                env_groups => r.env_groups,
-                pipeline_stages => r.pipeline_stages,
-                has_pipeline => r.has_pipeline,
-                destinations => r.destinations,
-            }
-        })
-        .collect()
 }
 
 #[derive(Deserialize)]
@@ -713,38 +662,24 @@ async fn render_notifications(
     current_org: Option<String>,
 ) -> Result<Response, Response> {
     let releases = fetch_notifications(&state, &session).await;
-    let release_values = notifications_to_values(releases);
 
     if query._partial.is_some() {
-        let html = state
-            .templates
-            .render(
-                "components/notifications_list.html.jinja",
-                context! { releases => release_values },
-            )
-            .map_err(|e| internal_error(&state, "template error", &e))?;
-        return Ok(Html(html).into_response());
+        let partial = crate::views::account::NotificationsListPartial { releases };
+        return Ok(Html(crate::views::pages::notifications_list::render(&partial)).into_response());
     }
 
-    let orgs = &session.user.orgs;
-    let html = state
-        .templates
-        .render(
-            "pages/notifications.html.jinja",
-            context! {
-                title => "Notifications - Forest",
-                description => "Your release activity",
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => current_org,
-                orgs => orgs_context(orgs),
-                releases => release_values,
-                active_tab => "notifications",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::account::NotificationsPage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            current_org.as_deref(),
+            "Notifications - Forest",
+            "Your release activity",
+        ),
+        releases,
+        script: state.templates.asset_href("js/notifications.js"),
+    };
+    Ok(Html(crate::views::pages::notifications::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -1409,7 +1344,7 @@ fn dedupe_destinations<'a>(
 
 fn build_env_groups(
     matching_states: &[&forage_core::platform::DestinationState],
-) -> Vec<minijinja::Value> {
+) -> Vec<crate::views::account::EnvGroup> {
     let mut env_best: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     let mut unique_envs = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1452,9 +1387,9 @@ fn build_env_groups(
             .collect();
         if !envs_in.is_empty() {
             let ds = if gs == "ASSIGNED" { "RUNNING" } else { gs };
-            env_groups.push(context! {
-                status => ds,
-                envs => envs_in,
+            env_groups.push(crate::views::account::EnvGroup {
+                status: ds,
+                envs: envs_in.into_iter().map(String::from).collect(),
             });
         }
     }
@@ -1566,38 +1501,28 @@ async fn user_profile(
 
     let profile_data = build_user_profile_data(&state, &session, orgs, &username).await;
 
-    let html = state
-        .templates
-        .render(
-            "pages/user_profile.html.jinja",
-            context! {
-                title => format!("{} - Forest", profile.username),
-                description => format!("Profile for {}", profile.username),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => orgs.first().map(|o| &o.name),
-                orgs => orgs_context(orgs),
-                profile => context! {
-                    username => profile.username,
-                    user_id => profile.user_id,
-                    profile_picture_url => profile.profile_picture_url,
-                    created_at => profile.created_at,
-                },
-                heatmap => profile_data.heatmap,
-                recent_releases => profile_data.recent_releases,
-                contributed_projects => profile_data.contributed_projects,
-                active_tab => "",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::account::UserProfilePage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            crate::views::account::first_org(&session),
+            format!("{} - Forest", profile.username),
+            format!("Profile for {}", profile.username),
+        ),
+        username: profile.username,
+        profile_picture_url: profile.profile_picture_url,
+        created_at: profile.created_at,
+        heatmap: profile_data.heatmap,
+        recent_releases: profile_data.recent_releases,
+        contributed_projects: profile_data.contributed_projects,
+    };
+    Ok(Html(crate::views::pages::user_profile::render(&page)).into_response())
 }
 
 struct UserProfileData {
-    heatmap: minijinja::Value,
-    recent_releases: Vec<minijinja::Value>,
-    contributed_projects: Vec<minijinja::Value>,
+    heatmap: crate::views::account::Heatmap,
+    recent_releases: Vec<crate::views::account::ProfileRelease>,
+    contributed_projects: Vec<crate::views::account::ContributedProject>,
 }
 
 async fn build_user_profile_data(
@@ -1619,7 +1544,6 @@ async fn build_user_profile_data(
     struct RecentRelease {
         org: String,
         project: String,
-        slug: String,
         version: Option<String>,
         branch: Option<String>,
         commit_sha: Option<String>,
@@ -1666,7 +1590,6 @@ async fn build_user_profile_data(
                 all_releases.push(RecentRelease {
                     org: org.name.clone(),
                     project: project.clone(),
-                    slug: artifact.slug.clone(),
                     version: artifact.git_ref.as_ref().and_then(|r| r.version.clone()),
                     branch: artifact.git_ref.as_ref().and_then(|r| r.branch.clone()),
                     commit_sha: artifact.git_ref.as_ref().map(|r| r.commit_sha.clone()),
@@ -1686,65 +1609,39 @@ async fn build_user_profile_data(
 
     all_releases.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     all_releases.truncate(10);
-    let recent_releases: Vec<minijinja::Value> = all_releases
+    let recent_releases: Vec<crate::views::account::ProfileRelease> = all_releases
         .into_iter()
-        .map(|r| {
-            context! {
-                org => r.org,
-                project => r.project,
-                slug => r.slug,
-                version => r.version,
-                branch => r.branch,
-                commit_sha => r.commit_sha.as_deref().map(|s| &s[..s.len().min(7)]),
-                created_at => r.created_at,
-            }
+        .map(|r| crate::views::account::ProfileRelease {
+            org: r.org,
+            project: r.project,
+            version: r.version,
+            branch: r.branch,
+            commit_sha: r
+                .commit_sha
+                .as_deref()
+                .map(|s| s[..s.len().min(7)].to_string()),
+            created_at: r.created_at,
         })
         .collect();
 
     let mut contributed_projects: Vec<((String, String), u32)> =
         project_release_counts.into_iter().collect();
     contributed_projects.sort_by(|a, b| b.1.cmp(&a.1));
-    let contributed_projects: Vec<minijinja::Value> = contributed_projects
-        .into_iter()
-        .map(|((org, project), count)| {
-            context! {
-                org => org,
-                project => project,
-                release_count => count,
-            }
-        })
-        .collect();
+    let contributed_projects: Vec<crate::views::account::ContributedProject> =
+        contributed_projects
+            .into_iter()
+            .map(|((org, project), release_count)| {
+                crate::views::account::ContributedProject {
+                    org,
+                    project,
+                    release_count,
+                }
+            })
+            .collect();
 
     let max_count = day_counts.values().copied().max().unwrap_or(0);
 
-    let mut weeks: Vec<minijinja::Value> = Vec::new();
-    let mut current = grid_start;
-    let grid_end = grid_start + chrono::Duration::days(53 * 7 - 1);
-
-    let mut week_days: Vec<minijinja::Value> = Vec::new();
-    while current <= grid_end && current <= today {
-        let count = day_counts.get(&current).copied().unwrap_or(0);
-        let opacity = contribution_opacity(count, max_count);
-        let in_range = current >= grid_start && current <= today;
-
-        week_days.push(context! {
-            date => current.format("%Y-%m-%d").to_string(),
-            count => count,
-            opacity => opacity,
-            in_range => in_range,
-        });
-
-        if current.weekday() == chrono::Weekday::Sat || current == today {
-            weeks.push(minijinja::Value::from_serialize(&week_days));
-            week_days = Vec::new();
-        }
-        current += chrono::Duration::days(1);
-    }
-    if !week_days.is_empty() {
-        weeks.push(minijinja::Value::from_serialize(&week_days));
-    }
-
-    let mut month_labels: Vec<minijinja::Value> = Vec::new();
+    let mut month_by_col: HashMap<usize, String> = HashMap::new();
     let mut last_month = None;
     let mut col = 0usize;
     let mut d = grid_start;
@@ -1753,35 +1650,50 @@ async fn build_user_profile_data(
             let m = d.month();
             if last_month != Some(m) {
                 last_month = Some(m);
-                let label = d.format("%b").to_string();
-                month_labels.push(context! { col => col, label => label });
+                month_by_col.insert(col, d.format("%b").to_string());
             }
             col += 1;
         }
         d += chrono::Duration::days(1);
     }
 
-    let heatmap = context! {
-        weeks => weeks,
-        month_labels => month_labels,
-        total => total_contributions,
-        max_count => max_count,
-    };
+    let mut weeks: Vec<crate::views::account::HeatmapWeek> = Vec::new();
+    let mut current = grid_start;
+    let grid_end = grid_start + chrono::Duration::days(53 * 7 - 1);
+
+    let mut week_days: Vec<crate::views::account::HeatmapDay> = Vec::new();
+    while current <= grid_end && current <= today {
+        let count = day_counts.get(&current).copied().unwrap_or(0);
+        week_days.push(crate::views::account::HeatmapDay {
+            date: current.format("%Y-%m-%d").to_string(),
+            count,
+            level: crate::views::account::contribution_level(count, max_count),
+            in_range: current >= grid_start && current <= today,
+        });
+
+        if current.weekday() == chrono::Weekday::Sat || current == today {
+            weeks.push(crate::views::account::HeatmapWeek {
+                month: month_by_col.remove(&weeks.len()),
+                days: std::mem::take(&mut week_days),
+            });
+        }
+        current += chrono::Duration::days(1);
+    }
+    if !week_days.is_empty() {
+        weeks.push(crate::views::account::HeatmapWeek {
+            month: month_by_col.remove(&weeks.len()),
+            days: week_days,
+        });
+    }
 
     UserProfileData {
-        heatmap,
+        heatmap: crate::views::account::Heatmap {
+            total: total_contributions,
+            weeks,
+        },
         recent_releases,
         contributed_projects,
     }
-}
-
-fn contribution_opacity(count: u32, max_count: u32) -> String {
-    if count == 0 || max_count == 0 {
-        return "0".to_string();
-    }
-    let ratio = (count as f64).sqrt() / (max_count as f64).sqrt();
-    let opacity = 0.15 + ratio * 0.85;
-    format!("{:.2}", opacity.clamp(0.15, 1.0))
 }
 
 struct ArtifactWithProject {

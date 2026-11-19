@@ -1,4 +1,5 @@
 pub mod about;
+pub mod account;
 pub mod chrome;
 pub mod format;
 pub mod org_settings;

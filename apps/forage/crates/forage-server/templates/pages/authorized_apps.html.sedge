@@ -1,0 +1,38 @@
+use forage_ui::components::CsrfField;
+use forage_ui::layouts::Shell;
+use crate::views::account::{revoke_action, revoke_confirm};
+props crate::views::account::AuthorizedAppsPage { chrome, csrf_token, grants };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12">
+    <div class="mb-8">
+      <h1 class="text-2xl font-bold">Authorized applications</h1>
+      <p class="text-sm text-gray-500 mt-1">Third-party apps you've granted access to your Forest account.</p>
+    </div>
+
+    {if !grants.is_empty() {
+      <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {for grant in grants.iter() {
+          <div class="flex items-center justify-between px-5 py-4">
+            <div>
+              <div class="font-medium text-gray-900">{grant.name}</div>
+              <div class="flex gap-1 mt-1">
+                {for scope in grant.scopes.iter() {
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{scope}</span>
+                }}
+              </div>
+            </div>
+            <form method="POST" action={revoke_action(grant)} data-confirm={revoke_confirm(grant)}>
+              <CsrfField token={csrf_token.as_str()} name="_csrf" />
+              <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50">Revoke</button>
+            </form>
+          </div>
+        }}
+      </div>
+    } else {
+      <div class="text-center border border-dashed border-gray-200 rounded-lg py-16">
+        <p class="text-sm text-gray-500">You haven't authorized any applications.</p>
+      </div>
+    }}
+  </section>
+</Shell>

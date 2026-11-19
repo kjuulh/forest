@@ -1,0 +1,139 @@
+use forage_ui::components::{Icon, Timeago};
+use crate::views::account::{present, user_href, NotificationRelease};
+component EnvPill(children: Html) {
+<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100">{children}</span>
+}
+component Pulse() {
+<span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
+}
+component NotificationSummary(r: &NotificationRelease) {
+{if r.has_stages() {
+  <Icon name="cog" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
+  {for stage in r.pipeline_stages.iter().filter(|s| s.stage_type == "deploy") {
+    <EnvPill><span class="w-1.5 h-1.5 rounded-full {stage.deploy_dot()}"></span>{stage.environment}</EnvPill>
+  }}
+  <span class="text-xs text-gray-400">{r.stages_done()}</span>
+} else if r.has_pipeline {
+  <Icon name="cog" class="w-3.5 h-3.5 text-purple-400 shrink-0" />
+  {if r.all_deployed() {
+    <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" />
+    <span class="text-gray-500 text-sm">Deployed</span>
+  } else {
+    <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" />
+    <span class="text-blue-600 text-sm">Queued</span>
+  }}
+} else if !r.env_groups.is_empty() {
+  {for group in r.env_groups.iter() {
+    {match group.status {
+      "RUNNING" => { <Pulse /><span class="text-yellow-700 text-sm">Deploying to</span> }
+      "QUEUED" => { <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" /><span class="text-blue-600 text-sm">Queued for</span> }
+      "FAILED" => { <Icon name="x-circle" class="w-4 h-4 text-red-500 shrink-0" /><span class="text-red-600 text-sm">Failed on</span> }
+      "SUCCEEDED" => { <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" /><span class="text-gray-500 text-sm">Deployed to</span> }
+      _ => { {""} }
+    }}
+    {for env in group.envs.iter() { <EnvPill>{env}</EnvPill> }}
+  }}
+} else {
+  <Icon name="clock" class="w-4 h-4 text-gray-300 shrink-0" />
+  <span class="text-gray-400 text-sm">Pending</span>
+}}
+}
+component NotificationDetails(r: &NotificationRelease) {
+<div class="px-4 py-3 border-t border-gray-100 space-y-3">
+  {if let Some(description) = present(&r.description) { <p class="text-sm text-gray-700">{description}</p> }}
+  <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
+    <span class="font-mono text-gray-400">{r.slug}</span>
+    {if let Some(version) = present(&r.version) { <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">{version}</span> }}
+  </div>
+</div>
+{if r.has_stages() {
+  <div class="border-t border-gray-100">
+    {for (i, stage) in r.pipeline_stages.iter().enumerate() {
+      <div class={stage.row_classes(i + 1 == r.pipeline_stages.len())}>
+        {match stage.status.as_str() {
+          "SUCCEEDED" => { <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" /> }
+          "RUNNING" => { <Pulse /> }
+          "QUEUED" => { <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" /> }
+          "FAILED" => { <Icon name="x-circle" class="w-4 h-4 text-red-500 shrink-0" /> }
+          _ => { <Icon name="circle" class="w-4 h-4 text-gray-300 shrink-0" /> }
+        }}
+        {if stage.stage_type == "deploy" {
+          <span class={stage.deploy_tone()}>{stage.deploy_label()}</span>
+          <EnvPill>{stage.environment}</EnvPill>
+        } else if stage.stage_type == "wait" {
+          <span class={stage.wait_tone()}>{stage.wait_label()}</span>
+        }}
+        {if let Some(started) = present(&stage.started_at) { <Timeago value={started} class="text-xs text-gray-400 tabular-nums" /> }}
+        <span class="ml-auto flex items-center gap-1 text-xs text-gray-400 shrink-0">
+          <Icon name="cog" class="w-3 h-3" />
+          pipeline
+        </span>
+      </div>
+    }}
+  </div>
+}}
+{for (i, dest) in r.destinations.iter().enumerate() {
+  <div class={dest.row_classes(i + 1 == r.destinations.len())}>
+    {match dest.status.as_str() {
+      "SUCCEEDED" => { <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" /> }
+      "RUNNING" | "ASSIGNED" => { <Pulse /> }
+      "QUEUED" => { <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" /> }
+      "FAILED" => { <Icon name="x-circle" class="w-4 h-4 text-red-500 shrink-0" /> }
+      _ => { <Icon name="check-circle" class="w-4 h-4 text-gray-300 shrink-0" /> }
+    }}
+    <EnvPill>{dest.environment}</EnvPill>
+    <span class="text-gray-400 text-xs">{dest.name}</span>
+    {match dest.status.as_str() {
+      "SUCCEEDED" => { <span class="text-xs text-green-600">Deployed</span> }
+      "RUNNING" => { <span class="text-xs text-yellow-600">Deploying</span> }
+      "QUEUED" => { <span class="text-xs text-blue-600">{dest.queued_label()}</span> }
+      "FAILED" => { <span class="text-xs text-red-600">Failed</span> }
+      _ => { {""} }
+    }}
+    {if let Some(done) = present(&dest.completed_at) { <Timeago value={done} class="text-xs text-gray-400 ml-auto" /> }}
+  </div>
+}}
+}
+component NotificationsList(releases: &[NotificationRelease]) {
+{if !releases.is_empty() {
+  <div class="space-y-3">
+    {for r in releases.iter() {
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <span class="w-2.5 h-2.5 rounded-full {r.status_dot()} shrink-0"></span>
+            <a href={r.href()} class="font-medium text-gray-900 hover:text-black truncate">{r.headline()}</a>
+          </div>
+          <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 flex-wrap">
+            <a href={r.project_href()} class="hover:underline">{r.org}/{r.project}</a>
+            {if let Some(branch) = present(&r.branch) {
+              <span class="flex items-center gap-1"><Icon name="tag" class="w-3.5 h-3.5" />{branch}</span>
+            }}
+            {if let Some(sha) = present(&r.commit_sha) { <span class="font-mono">{sha}</span> }}
+            <Timeago value={r.created_at.as_str()} />
+            {if let Some(user) = present(&r.source_user) {
+              <span class="flex items-center gap-1">
+                <Icon name="user" class="w-3.5 h-3.5" />
+                <a href={user_href(user)} class="hover:underline">{user}</a>
+              </span>
+            }}
+          </div>
+        </div>
+        <details class="border-t border-gray-100 group" data-slug={r.slug} open={r.open()}>
+          <summary class="px-4 py-2 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50 flex-wrap">
+            <NotificationSummary r={r} />
+            <Icon name="chevron-right" class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90" />
+          </summary>
+          <NotificationDetails r={r} />
+        </details>
+      </div>
+    }}
+  </div>
+} else {
+  <div class="text-center py-16">
+    <Icon name="bell" class="w-12 h-12 text-gray-300 mx-auto mb-4" />
+    <p class="text-gray-500">No release activity yet.</p>
+    <p class="text-sm text-gray-400 mt-1">Releases you create will appear here with their deployment status.</p>
+  </div>
+}}
+}
