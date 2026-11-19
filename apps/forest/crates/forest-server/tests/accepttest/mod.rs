@@ -9,6 +9,7 @@ mod device_login;
 mod email_verification;
 mod fixtures;
 mod global_tools_flow;
+mod not_found_status;
 mod notification_preferences;
 mod notification_recipient;
 mod oauth_apps;

@@ -13,6 +13,12 @@ use crate::{
     services::{artifact_staging_registry::ArtifactID, destination_selector},
 };
 
+/// What a caller asked for doesn't exist. The gRPC layer answers it with
+/// NOT_FOUND, so a mistyped slug or project is not reported as a server fault.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct NotFound(pub String);
+
 #[derive(Clone)]
 pub struct ReleaseRegistry {
     db: PgPool,
@@ -685,7 +691,7 @@ impl ReleaseRegistry {
         .context("get annotation (db)")?;
 
         let Some(rec) = rec else {
-            anyhow::bail!("failed to find annotation with slug: {}", slug);
+            return Err(NotFound(format!("no release has the slug '{slug}'")).into());
         };
 
         Ok(ReleaseAnnotation {
@@ -1066,9 +1072,10 @@ impl ReleaseRegistry {
             organisation,
             project
         )
-        .fetch_one(&self.db)
+        .fetch_optional(&self.db)
         .await
-        .context("project not found")?;
+        .context("get project id (db)")?
+        .ok_or_else(|| NotFound(format!("project not found: {organisation}/{project}")))?;
 
         Ok(rec.id)
     }

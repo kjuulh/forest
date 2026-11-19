@@ -185,7 +185,16 @@ pub trait GrpcErrorExt<T> {
 
 impl<T> GrpcErrorExt<T> for anyhow::Result<T> {
     fn to_internal_error(self) -> Result<T, tonic::Status> {
-        self.inspect_err(|e| tracing::error!(error = %e, "grpc internal error: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))
+        self.map_err(|e| {
+            if let Some(not_found) = e
+                .chain()
+                .find_map(|c| c.downcast_ref::<crate::services::release_registry::NotFound>())
+            {
+                tracing::debug!("grpc not found: {e:#}");
+                return tonic::Status::not_found(not_found.to_string());
+            }
+            tracing::error!(error = %e, "grpc internal error: {e:#}");
+            tonic::Status::internal(e.to_string())
+        })
     }
 }
