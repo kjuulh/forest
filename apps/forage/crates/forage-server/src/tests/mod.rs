@@ -27,6 +27,7 @@ mod org_settings_pages_tests;
 mod pages_tests;
 mod platform_tests;
 mod policy_pipeline_pages_tests;
+mod project_pages_tests;
 mod project_settings_tests;
 mod registry_tests;
 mod release_detail_tests;

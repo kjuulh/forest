@@ -17,8 +17,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{error_page, internal_error, report_error, warn_default};
 use crate::auth::{self, Session};
-use crate::manifest_view::ManifestView;
-use crate::pretty_json;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -248,18 +246,6 @@ fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
         .collect()
 }
 
-fn project_metadata_to_context(m: &forage_core::platform::ProjectMetadata) -> minijinja::Value {
-    context! {
-        git_url => &m.git_url,
-        homepage => &m.homepage,
-        docs_url => &m.docs_url,
-        support_url => &m.support_url,
-        domain => &m.domain,
-        owner => &m.owner,
-        has_any => !m.is_empty(),
-    }
-}
-
 #[allow(clippy::result_large_err)]
 fn require_org_membership<'a>(
     state: &AppState,
@@ -298,6 +284,32 @@ fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     }
 }
 
+fn render_onboarding(
+    state: &AppState,
+    session: &Session,
+    join_offers: Vec<forage_core::platform::JoinOffer>,
+    error: Option<String>,
+) -> String {
+    let page = crate::views::projects::OnboardingPage {
+        chrome: crate::views::chrome::signed_in(
+            state,
+            session,
+            crate::views::chrome::Page {
+                title: "Get Started - Forest".into(),
+                description: "Create your first organisation".into(),
+                org: None,
+                project: None,
+                projects: Vec::new(),
+                tab: forage_ui::chrome::Tab::Dashboard,
+            },
+        ),
+        csrf_token: session.csrf_token.clone(),
+        join_offers,
+        error,
+    };
+    crate::views::pages::onboarding::render(&page)
+}
+
 async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
 
@@ -310,39 +322,13 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
                 .await,
         );
 
-        let html = state
-            .templates
-            .render(
-                "pages/onboarding.html.jinja",
-                context! {
-                    title => "Get Started - Forest",
-                    description => "Create your first organisation",
-                    user => context! { username => session.user.username },
-                    csrf_token => &session.csrf_token,
-                    active_tab => "dashboard",
-                    join_offers => join_offers.iter().map(|o| context! {
-                        organisation_id => &o.organisation_id,
-                        organisation_name => &o.organisation_name,
-                        matched_domain => &o.matched_domain,
-                    }).collect::<Vec<_>>(),
-                },
-            )
-            .map_err(|e| internal_error(&state, "template error", &e))?;
+        let html = render_onboarding(&state, &session, join_offers, None);
         return Ok(Html(html).into_response());
     }
 
     const RECENT_ACTIVITY_LIMIT: usize = 10;
 
-    struct ActivityItem {
-        org_name: String,
-        project_name: String,
-        slug: String,
-        title: String,
-        created_at: String,
-        dest_envs: Vec<String>,
-    }
-
-    let mut activity: Vec<ActivityItem> = Vec::new();
+    let mut activity: Vec<crate::views::projects::ActivityItem> = Vec::new();
     let mut first_org_projects: Vec<String> = Vec::new();
     for org in orgs {
         let projects = warn_default(
@@ -381,9 +367,9 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
                     .filter(|d| seen_envs.insert(d.environment.clone()))
                     .map(|d| d.environment.clone())
                     .collect();
-                activity.push(ActivityItem {
-                    org_name: org.name.clone(),
-                    project_name: project.clone(),
+                activity.push(crate::views::projects::ActivityItem {
+                    org: org.name.clone(),
+                    project: project.clone(),
                     slug: artifact.slug,
                     title: artifact.context.title,
                     created_at: artifact.created_at,
@@ -396,20 +382,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
     activity.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     activity.truncate(RECENT_ACTIVITY_LIMIT);
 
-    let recent_activity: Vec<_> = activity
-        .iter()
-        .map(|item| {
-            context! {
-                org_name => &item.org_name,
-                project_name => &item.project_name,
-                slug => &item.slug,
-                title => &item.title,
-                created_at => &item.created_at,
-                dest_envs => &item.dest_envs,
-            }
-        })
-        .collect();
-
     let join_offers = warn_default(
         "dashboard: list_join_offers",
         state
@@ -418,28 +390,31 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/dashboard.html.jinja",
-            context! {
-                title => "Dashboard - Forest",
-                description => "Your Forest dashboard",
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => orgs.first().map(|o| &o.name),
-                orgs => orgs_context(orgs),
-                projects => first_org_projects,
-                recent_activity => recent_activity,
-                active_tab => "dashboard",
-                join_offers => join_offers.iter().map(|o| context! {
-                    organisation_id => &o.organisation_id,
-                    organisation_name => &o.organisation_name,
-                    matched_domain => &o.matched_domain,
-                }).collect::<Vec<_>>(),
+    let page = crate::views::projects::DashboardPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: "Dashboard - Forest".into(),
+                description: "Your Forest dashboard".into(),
+                org: orgs.first().map(|o| o.name.as_str()),
+                project: None,
+                projects: first_org_projects,
+                tab: forage_ui::chrome::Tab::Dashboard,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        csrf_token: session.csrf_token.clone(),
+        join_offers,
+        orgs: orgs
+            .iter()
+            .map(|o| crate::views::projects::OrgCard {
+                name: o.name.clone(),
+                role: o.role.clone(),
+            })
+            .collect(),
+        recent_activity: activity,
+    };
+    let html = crate::views::pages::dashboard::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -803,22 +778,15 @@ async fn create_org_submit(
     }
 
     if !validate_slug(&form.name) {
-        let html = state
-            .templates
-            .render(
-                "pages/onboarding.html.jinja",
-                context! {
-                    title => "Get Started - Forest",
-                    description => "Create your first organisation",
-                    user => context! { username => session.user.username },
-                    csrf_token => &session.csrf_token,
-                    active_tab => "dashboard",
-                    error => "Invalid organisation name. Use lowercase letters, numbers, and hyphens only.",
-                },
-            )
-            .map_err(|e| {
-                internal_error(&state, "template error", &e)
-            })?;
+        let html = render_onboarding(
+            &state,
+            &session,
+            Vec::new(),
+            Some(
+                "Invalid organisation name. Use lowercase letters, numbers, and hyphens only."
+                    .into(),
+            ),
+        );
         return Ok(Html(html).into_response());
     }
 
@@ -845,20 +813,7 @@ async fn create_org_submit(
         }
         Err(e) => {
             let error = create_org_error_message(&form.name, &e);
-            let html = state
-                .templates
-                .render(
-                    "pages/onboarding.html.jinja",
-                    context! {
-                        title => "Get Started - Forest",
-                        description => "Create your first organisation",
-                        user => context! { username => session.user.username },
-                        csrf_token => &session.csrf_token,
-                        active_tab => "dashboard",
-                        error => error,
-                    },
-                )
-                .map_err(|e| internal_error(&state, "render organisation error", &e))?;
+            let html = render_onboarding(&state, &session, Vec::new(), Some(error));
             Ok(Html(html).into_response())
         }
     }
@@ -878,23 +833,24 @@ async fn projects_list(
         .await
         .map_err(|e| internal_error(&state, "list_projects", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/projects.html.jinja",
-            context! {
-                title => format!("{org} - Projects - Forest"),
-                description => format!("Projects in {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                projects => projects,
-                active_tab => "projects",
+    let page = crate::views::projects::ProjectsPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("{org} - Projects - Forest"),
+                description: format!("Projects in {org}"),
+                org: Some(&org),
+                project: None,
+                projects: projects.clone(),
+                tab: forage_ui::chrome::Tab::Projects,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        projects,
+        filter_js: state.templates.asset_href("js/project-filter.js"),
+    };
+    let html = crate::views::pages::projects::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -917,16 +873,6 @@ async fn project_detail(
         ));
     }
 
-    let component_versions_fut = async {
-        match state.registry_client.as_ref() {
-            Some(registry) => {
-                registry
-                    .list_component_versions(&session.access_token, &org, &project)
-                    .await
-            }
-            None => Ok(vec![]),
-        }
-    };
     let comp_detail_fut = async {
         match state.registry_client.as_ref() {
             Some(registry) => registry
@@ -936,17 +882,13 @@ async fn project_detail(
             None => None,
         }
     };
-    let (artifacts, projects, environments, component_versions, comp_detail, project_info) = tokio::join!(
+    let (artifacts, projects, comp_detail, project_info) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
         state
             .platform_client
             .list_projects(&session.access_token, &org),
-        state
-            .platform_client
-            .list_environments(&session.access_token, &org),
-        component_versions_fut,
         comp_detail_fut,
         state
             .platform_client
@@ -954,8 +896,6 @@ async fn project_detail(
     );
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
-    let environments = warn_default("list_environments", environments);
-    let component_versions = warn_default("list_component_versions", component_versions);
     let project_info: Option<forage_core::platform::Project> = match project_info {
         Ok(p) => p,
         Err(e) => {
@@ -964,97 +904,67 @@ async fn project_detail(
         }
     };
 
-    let mut sorted_envs = environments.clone();
-    sorted_envs.sort_by_key(|e| e.sort_order);
-    let env_options: Vec<minijinja::Value> = if !sorted_envs.is_empty() {
-        sorted_envs
-            .iter()
-            .map(|e| context! { name => e.name })
-            .collect()
-    } else {
-        let mut env_seen = std::collections::HashSet::new();
-        artifacts
-            .iter()
-            .flat_map(|a| a.destinations.iter())
-            .filter(|d| env_seen.insert(d.environment.clone()))
-            .map(|d| context! { name => d.environment })
-            .collect()
+    let has_timeline = !artifacts.is_empty();
+    let (summary, versions, comp_readme) = match comp_detail {
+        Some(d) => (Some(d.summary), d.versions, d.readme),
+        None => (None, Vec::new(), String::new()),
     };
-
-    let project_has_timeline = !artifacts.is_empty();
-
-    let comp_summary = comp_detail.as_ref().map(|d| d.summary.clone());
-    let comp_versions = comp_detail
-        .as_ref()
-        .map(|d| d.versions.clone())
-        .unwrap_or_default();
-    let project_readme = project_info
+    let readme = project_info
         .as_ref()
         .map(|p| p.readme.as_str())
-        .unwrap_or("");
-    let comp_readme_html = if !project_readme.is_empty() {
-        super::render_markdown(project_readme)
-    } else {
-        comp_detail
-            .as_ref()
-            .filter(|d| !d.readme.is_empty())
-            .map(|d| super::render_markdown(&d.readme))
-            .unwrap_or_default()
-    };
-    let project_description = project_info
+        .filter(|r| !r.is_empty())
+        .or(Some(comp_readme.as_str()).filter(|r| !r.is_empty()))
+        .map(super::render_markdown)
+        .filter(|html| !html.is_empty())
+        .map(sedge_rt::Trusted);
+    let description = project_info
         .as_ref()
         .map(|p| p.description.clone())
         .filter(|d| !d.is_empty())
         .or_else(|| {
-            comp_summary
+            summary
                 .as_ref()
                 .map(|s| s.description.clone())
                 .filter(|d| !d.is_empty())
         })
         .unwrap_or_default();
-    let project_metadata_ctx = project_info
+    let about = project_info
         .as_ref()
-        .map(|p| project_metadata_to_context(&p.metadata));
-    let manifest_raw = comp_detail
-        .as_ref()
-        .map(|d| d.manifest_json.clone())
+        .map(|p| crate::views::projects::about(&p.metadata))
         .unwrap_or_default();
-    let manifest_html = if manifest_raw.is_empty() {
-        String::new()
-    } else {
-        pretty_json::tokenize(&manifest_raw)
-    };
-    let manifest_view = ManifestView::parse(&manifest_raw);
+    let is_tool = summary.as_ref().is_some_and(|s| s.shape.is_tool());
+    let show_get_started = versions.is_empty() && readme.is_none() && !has_timeline;
 
-    let html = state
-        .templates
-        .render(
-            "pages/project_detail.html.jinja",
-            context! {
-                title => format!("{project} - {org} - Forest"),
-                description => format!("Project {project} in {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_name => &project,
-                projects => projects,
-                current_role => &current_role,
-                active_tab => "project_overview",
-                env_options => env_options,
-                component_versions => component_versions,
-                summary => comp_summary,
-                comp_versions => &comp_versions,
-                readme_html => comp_readme_html,
-                project_description => &project_description,
-                project_metadata => project_metadata_ctx,
-                manifest_html => manifest_html,
-                manifest => manifest_view,
-                project_has_timeline => project_has_timeline,
+    let page = crate::views::projects::ProjectDetailPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("{project} - {org} - Forest"),
+                description: format!("Project {project} in {org}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectOverview,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        username: session.user.username.clone(),
+        role: current_role,
+        description,
+        summary,
+        versions,
+        readme,
+        about,
+        has_timeline,
+        prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+        highlight_js: state.templates.asset_href("js/readme-highlight.js"),
+        is_tool,
+        show_get_started,
+    };
+    let html = crate::views::pages::project_detail::render(&page);
 
     Ok(Html(html).into_response())
 }

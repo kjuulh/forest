@@ -12,6 +12,7 @@ expression: html
 <meta name="description" content="Release triggers for api in acme">
 <link rel="stylesheet" href="/static/css/style.css?v=dev">
 <script src="/static/js/ui.js?v=dev" defer></script>
+
 </head>
 <body class="bg-white text-gray-900 antialiased flex flex-col min-h-screen">
 <nav class="border-b border-gray-200 pt-3">

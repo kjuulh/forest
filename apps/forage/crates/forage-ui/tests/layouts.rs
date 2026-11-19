@@ -30,6 +30,7 @@ fn shell_for_a_signed_in_project_page() {
     let body = |out: &mut String| out.push_str("<p>content</p>");
     let html = Shell {
         chrome: &chrome(),
+        head: None,
         scripts: None,
         children: &body,
     }
@@ -46,6 +47,7 @@ fn shell_for_a_visitor() {
     };
     let html = Shell {
         chrome: &chrome,
+        head: None,
         scripts: None,
         children: &body,
     }

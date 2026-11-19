@@ -433,25 +433,24 @@ async fn project_components(
         .await;
     let projects = warn_default("list_projects", projects);
 
-    let html = state
-        .templates
-        .render(
-            "pages/project_components.html.jinja",
-            context! {
-                title => format!("Components - {project} - {org} - Forest"),
-                description => format!("Published components for {project}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_name => &project,
-                projects => projects,
-                versions => versions,
-                active_tab => "project_components",
+    let page = crate::views::projects::ProjectComponentsPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Components - {project} - {org} - Forest"),
+                description: format!("Published components for {project}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectComponents,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        versions,
+    };
+    let html = crate::views::pages::project_components::render(&page);
 
     Ok(Html(html).into_response())
 }

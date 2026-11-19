@@ -25,6 +25,7 @@ fn sedge(chrome: &Chrome) -> String {
     Shell {
         chrome,
         children: &body,
+        head: None,
         scripts: None,
     }
     .render_to_string()

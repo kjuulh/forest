@@ -1,7 +1,7 @@
 use crate::chrome::{Chrome, Viewer};
 use crate::components::{Icon, Tabs, CsrfField};
 use crate::format::timeago;
-component Shell(chrome: &Chrome, scripts: Option<Html>, children: Html) {
+component Shell(chrome: &Chrome, head: Option<Html>, scripts: Option<Html>, children: Html) {
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,6 +12,7 @@ component Shell(chrome: &Chrome, scripts: Option<Html>, children: Html) {
   <meta name="description" content={chrome.description}>
   <link rel="stylesheet" href="/static/css/style.css?v={chrome.assets.css_hash}">
   <script src="/static/js/ui.js?v={chrome.assets.ui_js_hash}" defer></script>
+  {if let Some(head) = head { {head} }}
 </head>
 <body class="bg-white text-gray-900 antialiased flex flex-col min-h-screen">
   {if let Some(viewer) = &chrome.viewer {
