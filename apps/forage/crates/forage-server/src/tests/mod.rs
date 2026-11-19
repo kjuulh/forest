@@ -22,6 +22,7 @@ mod oauth_e2e_tests;
 mod oauth_flow_tests;
 mod oauth_tests;
 mod org_rules_tests;
+mod org_settings_pages_tests;
 mod pages_tests;
 mod platform_tests;
 mod project_settings_tests;

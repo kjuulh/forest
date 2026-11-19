@@ -1,5 +1,6 @@
 use forage_ui::chrome::{BuildStamp, Chrome, Tab, Viewer};
-use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::layouts::{OrgSettings, ProjectSettings, Shell};
+use forage_ui::org_settings::OrgSection;
 use forage_ui::project_settings::Section;
 use sedge_rt::Render;
 
@@ -79,4 +80,18 @@ fn project_settings_section_and_sub_page() {
     }
     .render_to_string();
     insta::assert_snapshot!(format!("{section}\n=====\n{sub}"));
+}
+
+#[test]
+fn org_settings_layout_with_the_sidebar_and_mobile_pills() {
+    let body = |out: &mut String| out.push_str("<p>content</p>");
+    let out = OrgSettings {
+        org: "acme",
+        section: OrgSection::Developers,
+        children: &body,
+    }
+    .render_to_string();
+    assert_eq!(out.matches(r#"aria-current="page""#).count(), 2, "{out}");
+    assert!(out.contains("<p>content</p>"), "{out}");
+    insta::assert_snapshot!(out);
 }

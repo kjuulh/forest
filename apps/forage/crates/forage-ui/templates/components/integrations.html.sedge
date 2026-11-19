@@ -1,0 +1,85 @@
+use crate::AlertKind;
+use crate::format::urlencode;
+component IntegrationIcon(kind: &str, class: &str = "w-5 h-5 text-gray-600") {
+{match *kind {
+  "webhook" => { <svg class={class} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" /></svg> }
+  "slack" => { <svg class={class} viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg> }
+  "github" => { <svg class={class} viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg> }
+  "discord" => { <svg class={class} viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg> }
+  "email" => { <svg class={class} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg> }
+  _ => { <svg class={class} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg> }
+}}
+}
+component IntegrationLogo(kind: &str, box_class: &str = "w-10 h-10", icon_class: &str = "w-5 h-5 text-gray-600") {
+<div class="{box_class} rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
+  <IntegrationIcon kind={*kind} class={*icon_class} />
+</div>
+}
+component ActivePill(enabled: bool) {
+{if *enabled {
+  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Active</span>
+} else {
+  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">Paused</span>
+}}
+}
+component Flash(kind: AlertKind = AlertKind::Error, children: Html) {
+<div class="mb-6 px-4 py-3 text-sm border rounded-lg {kind.classes()}">{children}</div>
+}
+component SectionLabel(class: &str = "mb-3", children: Html) {
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide {class}">{children}</h2>
+}
+component IntegrationCard(kind: &str, name: &str, description: &str, href: Option<&str>) {
+{if let Some(href) = href {
+  <a href={*href} class="group border border-gray-200 rounded-lg p-5 hover:border-gray-300 hover:shadow-sm transition-all">
+    <div class="flex items-start gap-4">
+      <IntegrationLogo kind={*kind} box_class="w-12 h-12 group-hover:border-gray-300" icon_class="w-6 h-6 text-gray-600" />
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-gray-900">{name}</span>
+        </div>
+        <p class="text-sm text-gray-500 mt-1">{description}</p>
+      </div>
+    </div>
+  </a>
+} else {
+  <div class="border border-gray-200 rounded-lg p-5 opacity-60">
+    <div class="flex items-start gap-4">
+      <IntegrationLogo kind={*kind} box_class="w-12 h-12" icon_class="w-6 h-6 text-gray-400" />
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-gray-500">{name}</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">Coming soon</span>
+        </div>
+        <p class="text-sm text-gray-400 mt-1">{description}</p>
+      </div>
+    </div>
+  </div>
+}}
+}
+component Steps(title: &str, children: Html) {
+<div class="mb-8 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+  <h3 class="text-sm font-semibold text-gray-700 mb-2">{title}</h3>
+  <ul class="text-sm text-gray-600 space-y-1.5">
+    {children}
+  </ul>
+</div>
+}
+component Step(n: u32, children: Html) {
+<li class="flex items-start gap-2">
+  <span class="text-gray-400 mt-0.5">{*n}.</span>
+  <span>{children}</span>
+</li>
+}
+component InstallField(name: &str, label: &str, kind: &str = "text", placeholder: &str = "", required: bool = false, optional: bool = false, mono: bool = false, hint: Html) {
+<div>
+  <label for={*name} class="block text-sm font-medium text-gray-700 mb-1">{label}{if *optional { {" "}<span class="font-normal text-gray-400">(optional)</span> }}</label>
+  <input type={*kind} id={*name} name={*name} placeholder={*placeholder} required={*required}
+    class="w-full px-3 py-2 text-sm{if *mono { " font-mono" } else { "" }} border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+  <p class="text-xs text-gray-400 mt-1">{hint}</p>
+</div>
+}
+component BackToIntegrations(org: &str) {
+<div class="mb-8">
+  <a href="/orgs/{urlencode(org)}/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">← All integrations</a>
+</div>
+}

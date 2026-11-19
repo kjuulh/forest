@@ -397,24 +397,20 @@ async fn install_github_page(
     Query(query): Query<ErrorQuery>,
 ) -> Result<Response, Response> {
     admin_org(&state, &session, &org)?;
-    let html = state
-        .templates
-        .render(
-            "pages/install_github.html.jinja",
-            context! {
-                title => format!("Connect GitHub - {} - Forest", org),
-                description => "Connect a GitHub organisation",
-                user => context! { username => &session.user.username, user_id => &session.user.user_id },
-                current_org => &org,
-                orgs => orgs_ctx(&session),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                has_github_app => state.github_app.is_some(),
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::org_settings::InstallGithubPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Connect GitHub - {} - Forest", org),
+            "Connect a GitHub organisation".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        error: query.error,
+        has_github_app: state.github_app.is_some(),
+    };
+    Ok(Html(crate::views::pages::install_github::render(&page)).into_response())
 }
 
 async fn start_github_install(

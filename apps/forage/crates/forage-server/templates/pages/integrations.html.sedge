@@ -1,0 +1,51 @@
+use forage_ui::{AlertKind, components::{ActivePill, Flash, Icon, IntegrationCard, IntegrationLogo, SectionLabel}};
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use crate::views::org_settings::{integration_href, integrations_href, message};
+props crate::views::org_settings::IntegrationsPage { chrome, org, error, integrations };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Integrations}>
+    <div class="mb-8">
+      <h2 class="text-lg font-bold">Integrations</h2>
+      <p class="text-sm text-gray-500 mt-1">Connect tools and services to receive deployment notifications.</p>
+    </div>
+    {if let Some(error) = message(error) {
+      <Flash kind={AlertKind::Error}>{error}</Flash>
+    }}
+    {if !integrations.is_empty() {
+      <div class="mb-12">
+        <SectionLabel class="mb-4">Installed</SectionLabel>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {for integ in integrations.iter() {
+            <a href={integration_href(org, &integ.id)} class="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors first:rounded-t-lg last:rounded-b-lg">
+              <div class="flex items-center gap-4">
+                <IntegrationLogo kind={integ.kind.as_str()} />
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-gray-900">{integ.name}</span>
+                    <ActivePill enabled={integ.enabled} />
+                  </div>
+                  <div class="text-sm text-gray-500 mt-0.5">{integ.kind.display_name()} · {integ.events()}</div>
+                </div>
+              </div>
+              <div class="text-gray-400">
+                <Icon name="chevron-right" class="w-5 h-5" />
+              </div>
+            </a>
+          }}
+        </div>
+      </div>
+    }}
+    <div>
+      <SectionLabel class="mb-4">Available integrations</SectionLabel>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <IntegrationCard kind="webhook" name="Webhook" description="Send HTTP POST notifications to any URL when deployments happen. Supports HMAC-SHA256 payload signing and custom headers." href={Some(format!("{}/install/webhook", integrations_href(org)).as_str())} />
+        <IntegrationCard kind="slack" name="Slack" description="Post deployment notifications directly to Slack channels. Rich formatting with release details, status, and quick links." href={Some(format!("{}/install/slack", integrations_href(org)).as_str())} />
+        <IntegrationCard kind="github" name="GitHub organisation" description="Connect your GitHub organisation once to see which members' releases can be attributed to them for individual notifications." href={Some(format!("{}/install/github", integrations_href(org)).as_str())} />
+        <IntegrationCard kind="discord" name="Discord" description="Send deployment updates to Discord channels via webhook. Includes embeds with release metadata and status." href={None} />
+        <IntegrationCard kind="email" name="Email" description="Email notifications for deployment events. Configure recipients and digest frequency per project." href={None} />
+      </div>
+    </div>
+  </OrgSettings>
+</Shell>

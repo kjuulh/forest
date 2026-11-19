@@ -689,25 +689,18 @@ async fn org_settings(
     let current_org = require_org_membership(&state, orgs, &org)?;
     let current_role = current_org.role.clone();
 
-    let html = state
-        .templates
-        .render(
-            "pages/org_settings.html.jinja",
-            context! {
-                title => format!("{org} - Settings - Forest"),
-                description => format!("Settings for {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                current_role => &current_role,
-                active_tab => "settings",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_settings::OrgSettingsPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("{org} - Settings - Forest"),
+            format!("Settings for {org}"),
+        ),
+        org: org.clone(),
+        role: current_role,
+    };
+    Ok(Html(crate::views::pages::org_settings::render(&page)).into_response())
 }
 
 async fn redirect_usage(Path(org): Path<String>) -> Redirect {

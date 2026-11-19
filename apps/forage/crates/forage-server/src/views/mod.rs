@@ -8,3 +8,4 @@ pub use compiled::*;
 pub mod chrome;
 pub mod models;
 pub mod release;
+pub mod org_settings;

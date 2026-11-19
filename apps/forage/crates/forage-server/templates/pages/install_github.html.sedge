@@ -1,0 +1,30 @@
+use forage_ui::AlertKind;
+use forage_ui::components::{BackToIntegrations, CsrfField, Flash, IntegrationLogo};
+use forage_ui::layouts::Shell;
+use crate::views::org_settings::{integrations_href, message};
+props crate::views::org_settings::InstallGithubPage { chrome, org, csrf_token, error, has_github_app };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12 max-w-2xl">
+    <BackToIntegrations org={org} />
+    <div class="flex items-center gap-3 mb-2">
+      <IntegrationLogo kind="github" box_class="w-10 h-10" icon_class="w-6 h-6 text-gray-600" />
+      <h1 class="text-2xl font-bold">Connect a GitHub organisation</h1>
+    </div>
+    <p class="text-sm text-gray-500 mb-6">Install the Forest GitHub App on your GitHub organisation once. Forest then shows which of its members can have the releases they author on GitHub attributed to them, so the right person gets individual notifications.</p>
+    {if let Some(error) = message(error) { <Flash kind={AlertKind::Error}>{error}</Flash> }}
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-6">
+      <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">Permission requested:</span> Organization members, read-only. No repository, code or email access.</div>
+      <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">Who can connect:</span> an admin of this Forest organisation who is also an owner of the GitHub organisation. Forest verifies both before connecting.</div>
+      <div class="px-4 py-3 text-sm text-gray-700"><span class="font-medium">What it never does:</span> create Forest accounts, add anyone to this organisation, change roles or sign-in methods, or treat GitHub membership as Forest membership. A GitHub organisation can be connected to one Forest organisation only.</div>
+    </div>
+    {if *has_github_app {
+      <form method="POST" action="{integrations_href(org)}/github">
+        <CsrfField token={csrf_token} name="_csrf" />
+        <button type="submit" class="inline-flex items-center gap-2 px-5 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-sm">Install on GitHub</button>
+      </form>
+    } else {
+      <div class="px-4 py-3 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg">GitHub organisation connections are not configured on this server yet.</div>
+    }}
+  </section>
+</Shell>
