@@ -1,0 +1,160 @@
+use crate::chrome::{Chrome, Viewer};
+use crate::components::{Icon, Tabs, CsrfField};
+use crate::format::timeago;
+component Shell(chrome: &Chrome, scripts: Option<Html>, children: Html) {
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{chrome.title}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
+  <meta name="description" content={chrome.description}>
+  <link rel="stylesheet" href="/static/css/style.css?v={chrome.assets.css_hash}">
+  <script src="/static/js/ui.js?v={chrome.assets.ui_js_hash}" defer></script>
+</head>
+<body class="bg-white text-gray-900 antialiased flex flex-col min-h-screen">
+  {if let Some(viewer) = &chrome.viewer {
+    <ViewerNav viewer={viewer} />
+  } else {
+    <PublicNavBar show_marketing_links={chrome.public.show_marketing_links()} />
+  }}
+  <main class="flex-1 pb-16">
+    {children}
+  </main>
+  <footer class="border-t border-gray-200 mt-auto">
+    <div class="max-w-6xl mx-auto px-4 py-4 text-xs text-gray-400 flex flex-wrap gap-x-2">
+      <span>© 2026 Forest</span>
+      {if !chrome.build.commit.is_empty() {
+        <span aria-hidden="true">·</span>
+        <span><code class="font-mono">{chrome.build.commit}</code></span>
+      }}
+      {if !chrome.build.time.is_empty() {
+        <span aria-hidden="true">·</span>
+        <span>built <time datetime={chrome.build.time}>{timeago(&chrome.build.time)}</time></span>
+      }}
+      <span aria-hidden="true">·</span>
+      <span>page __FOREST_RENDER_MS__</span>
+      <span id="client-load-time" hidden><span aria-hidden="true">·</span> load <span id="client-load-ms"></span></span>
+    </div>
+  </footer>
+  {if chrome.viewer.is_some() {
+    <script type="module" src="/static/js/fuzzy-switcher.js"></script>
+  }}
+  {if let Some(scripts) = scripts { {scripts} }}
+</body>
+</html>
+}
+component ViewerNav(viewer: &Viewer) {
+<nav class="border-b border-gray-200 pt-3">
+  <div class="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm min-w-0">
+      <a href="/dashboard" class="text-lg font-bold tracking-tight shrink-0">forest</a>
+      {if let Some(org) = &viewer.current_org {
+        <span class="text-gray-300">/</span>
+        {if viewer.orgs.len() > 1 {
+          <details class="relative" data-fuzzy-switcher data-fuzzy-label="Search organisations">
+            <summary class="font-medium text-gray-900 hover:text-black cursor-pointer list-none">
+              {org}
+              <Icon name="chevron-down" class="inline w-3 h-3 ml-0.5 text-gray-400" />
+            </summary>
+            <div class="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-md shadow-lg z-20">
+              <div data-fuzzy-list class="max-h-80 overflow-y-auto py-1">
+                {for o in viewer.orgs.iter() {
+                  <a href={viewer.org_href(o)} aria-current={if o == org { Some("page") } else { None }} class={if o == org { "block px-3 py-1.5 text-sm hover:bg-gray-50 font-medium bg-gray-50" } else { "block px-3 py-1.5 text-sm hover:bg-gray-50" }}>{o}</a>
+                }}
+              </div>
+            </div>
+          </details>
+        } else {
+          <a href={viewer.org_href(org)} class="font-medium text-gray-900 hover:text-black">{org}</a>
+        }}
+        {if !viewer.projects.is_empty() {
+          <span class="text-gray-300 desktop-only">/</span>
+          <details class="relative desktop-only" data-fuzzy-switcher data-fuzzy-label="Search projects">
+            <summary class="font-medium text-gray-900 hover:text-black cursor-pointer list-none truncate">
+              {viewer.project.as_deref().unwrap_or("Select project")}
+              <Icon name="chevron-down" class="inline w-3 h-3 ml-0.5 text-gray-400" />
+            </summary>
+            <div class="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-md shadow-lg z-20">
+              <div data-fuzzy-list class="max-h-80 overflow-y-auto py-1">
+                {for p in viewer.projects.iter() {
+                  {let here = viewer.project.as_deref() == Some(p.as_str());}
+                  <a href={viewer.project_href(p)} aria-current={if here { Some("page") } else { None }} class={if here { "block px-3 py-1.5 text-sm hover:bg-gray-50 font-medium bg-gray-50" } else { "block px-3 py-1.5 text-sm hover:bg-gray-50" }}>{p}</a>
+                }}
+              </div>
+            </div>
+          </details>
+        } else if let Some(project) = &viewer.project {
+          <span class="text-gray-300 desktop-only">/</span>
+          <a href={viewer.project_href(project)} class="font-medium text-gray-900 hover:text-black truncate desktop-only">{project}</a>
+        }}
+      }}
+    </div>
+    <div class="flex items-center gap-3 shrink-0">
+      <a href={viewer.notifications_href()} class="text-gray-400 hover:text-gray-900 relative" title="Notifications">
+        <Icon name="bell" class="w-5 h-5" />
+      </a>
+      <details class="relative desktop-only">
+        <summary class="text-sm text-gray-500 hover:text-gray-900 cursor-pointer list-none">
+          {viewer.username}
+          <Icon name="chevron-down" class="inline w-3 h-3 ml-0.5 text-gray-400" />
+        </summary>
+        <div class="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 py-1">
+          <a href="/settings/account" class="block px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Account</a>
+          <a href="/settings/tokens" class="block px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Tokens</a>
+          <a href="/settings/authorized-apps" class="block px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Authorized apps</a>
+          <div class="border-t border-gray-100 my-1"></div>
+          <form method="POST" action="/logout">
+            <CsrfField token={viewer.csrf_token} name="_csrf" />
+            <button type="submit" class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Sign out</button>
+          </form>
+        </div>
+      </details>
+      <button type="button" data-toggle="mobile-menu" aria-controls="mobile-menu" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
+        <Icon name="menu" class="w-6 h-6" />
+      </button>
+    </div>
+  </div>
+  <div id="mobile-menu" class="hidden border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+    {if let Some(project) = &viewer.project {
+      <div class="text-xs text-gray-500">
+        {if let Some(org) = &viewer.current_org { {org}{" /"} }} {project}
+      </div>
+    }}
+    <a href="/settings/account" class="block text-sm text-gray-700 hover:text-gray-900 py-1">{viewer.username}</a>
+    <form method="POST" action="/logout">
+      <CsrfField token={viewer.csrf_token} name="_csrf" />
+      <button type="submit" class="text-sm text-gray-500 hover:text-gray-900 py-1">Sign out</button>
+    </form>
+  </div>
+  <div class="max-w-6xl mx-auto px-4 mt-2">
+    <Tabs items={viewer.tabs().as_slice()} />
+  </div>
+</nav>
+}
+component PublicNavBar(show_marketing_links: bool) {
+<nav class="border-b border-gray-200">
+  <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+    <a href="/" class="text-xl font-bold tracking-tight">forest</a>
+    <div class="flex items-center gap-6">
+      {if *show_marketing_links {
+        <a href="/pricing" class="text-sm text-gray-600 hover:text-gray-900 desktop-only">Pricing</a>
+        <a href="/components" class="text-sm text-gray-600 hover:text-gray-900 desktop-only">Components</a>
+      }}
+      <a href="/login" class="text-sm font-medium px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800">Sign in</a>
+      {if *show_marketing_links {
+        <button type="button" data-toggle="marketing-mobile-menu" aria-controls="marketing-mobile-menu" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
+          <Icon name="menu" class="w-6 h-6" />
+        </button>
+      }}
+    </div>
+  </div>
+  {if *show_marketing_links {
+    <div id="marketing-mobile-menu" class="hidden border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+      <a href="/pricing" class="block text-sm text-gray-600 hover:text-gray-900 py-1">Pricing</a>
+      <a href="/components" class="block text-sm text-gray-600 hover:text-gray-900 py-1">Components</a>
+    </div>
+  }}
+</nav>
+}

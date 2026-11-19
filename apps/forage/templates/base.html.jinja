@@ -6,15 +6,8 @@
     <title>{{ title }}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
     <meta name="description" content="{{ description }}">
-    <style>
-        /* Hide body until Tailwind loads to prevent FOUC */
-        body { opacity: 0; }
-        body.ready { opacity: 1; }
-        /* Cap SVG size before Tailwind loads */
-        svg { max-width: 1.5em; max-height: 1.5em; }
-    </style>
-    <link rel="stylesheet" href="/static/css/style.css?v={{ css_hash }}" onload="document.body.classList.add('ready')">
-    <noscript><style>body{opacity:1!important}</style></noscript>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ css_hash }}">
+    <script src="/static/js/ui.js?v={{ ui_js_hash }}" defer></script>
 </head>
 <body class="bg-white text-gray-900 antialiased flex flex-col min-h-screen">
     {% if user is defined and user %}
@@ -84,7 +77,7 @@
                         </form>
                     </div>
                 </details>
-                <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
+                <button type="button" data-toggle="mobile-menu" aria-controls="mobile-menu" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
                     </svg>
@@ -133,7 +126,7 @@
                 {% endif %}
                 <a href="/login" class="text-sm font-medium px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800">Sign in</a>
                 {% if show_marketing_links %}
-                <button type="button" onclick="document.getElementById('marketing-mobile-menu').classList.toggle('hidden')" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
+                <button type="button" data-toggle="marketing-mobile-menu" aria-controls="marketing-mobile-menu" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
                     </svg>
@@ -170,35 +163,6 @@
             <span id="client-load-time" hidden><span aria-hidden="true">&middot;</span> load <span id="client-load-ms"></span></span>
         </div>
     </footer>
-    <script>
-    // Total navigation time as the browser saw it — the other half of the
-    // story from the server's own figure, and the one that includes network,
-    // parse and asset load.
-    (function () {
-        try {
-            var nav = performance.getEntriesByType('navigation')[0];
-            if (!nav) return;
-            var render = function () {
-                var ms = nav.duration;
-                if (!ms || ms <= 0) return;
-                document.getElementById('client-load-ms').textContent =
-                    ms >= 10 ? Math.round(ms) + 'ms' : ms.toFixed(1) + 'ms';
-                document.getElementById('client-load-time').hidden = false;
-            };
-            // `duration` is only final once loadEventEnd has happened.
-            if (document.readyState === 'complete') render();
-            else window.addEventListener('load', function () { setTimeout(render, 0); });
-        } catch (e) {}
-    })();
-    </script>
-    <script>
-    document.querySelectorAll('time[datetime]').forEach(function(el) {
-        try {
-            var d = new Date(el.getAttribute('datetime'));
-            if (!isNaN(d)) el.title = d.toLocaleString();
-        } catch(e) {}
-    });
-    </script>
     {% if user is defined and user %}
     <script type="module" src="/static/js/fuzzy-switcher.js"></script>
     {% endif %}

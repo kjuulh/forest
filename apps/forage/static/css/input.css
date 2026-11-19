@@ -6,6 +6,11 @@
 @source "../js/*.js";
 @source "../../frontend/src";
 
+svg {
+  max-width: 1.5em;
+  max-height: 1.5em;
+}
+
 @utility text-2xs {
   font-size: 11px;
   line-height: 14px;

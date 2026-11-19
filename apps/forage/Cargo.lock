@@ -1053,6 +1053,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rsa",
+ "sedge-rt",
  "serde",
  "serde_json",
  "sha2",

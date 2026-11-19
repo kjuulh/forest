@@ -2,6 +2,27 @@
   if (window.__forageUi) return;
   window.__forageUi = true;
 
+  function localiseTimes() {
+    document.querySelectorAll("time[datetime]").forEach(function (el) {
+      var d = new Date(el.getAttribute("datetime"));
+      if (!isNaN(d)) el.title = d.toLocaleString();
+    });
+  }
+
+  function showLoadTime() {
+    var nav = performance.getEntriesByType("navigation")[0];
+    var slot = document.getElementById("client-load-ms");
+    if (!nav || !slot || !(nav.duration > 0)) return;
+    var ms = nav.duration;
+    slot.textContent = ms >= 10 ? Math.round(ms) + "ms" : ms.toFixed(1) + "ms";
+    document.getElementById("client-load-time").hidden = false;
+  }
+
+  localiseTimes();
+  document.addEventListener("sedx:load", localiseTimes);
+  if (document.readyState === "complete") showLoadTime();
+  else window.addEventListener("load", function () { setTimeout(showLoadTime, 0); });
+
   document.addEventListener("click", function (event) {
     var copy = event.target.closest("[data-copy]");
     if (copy) {

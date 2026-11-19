@@ -7,6 +7,8 @@ use sha2::Digest;
 #[derive(Clone)]
 pub struct TemplateEngine {
     env: Environment<'static>,
+    assets: forage_ui::chrome::Assets,
+    build: forage_ui::chrome::BuildStamp,
 }
 
 impl TemplateEngine {
@@ -43,13 +45,21 @@ impl TemplateEngine {
         });
 
         env.add_global("css_hash", "dev");
+        env.add_global("ui_js_hash", "dev");
         env.add_global("components_js_hash", "dev");
 
         let build = crate::build_info::BuildInfo::from_env();
-        env.add_global("build_commit", build.commit);
-        env.add_global("build_time", build.build_time);
+        env.add_global("build_commit", build.commit.clone());
+        env.add_global("build_time", build.build_time.clone());
 
-        Ok(Self { env })
+        Ok(Self {
+            env,
+            assets: forage_ui::chrome::Assets::default(),
+            build: forage_ui::chrome::BuildStamp {
+                commit: build.commit,
+                time: build.build_time,
+            },
+        })
     }
 
     pub fn new() -> anyhow::Result<Self> {
@@ -69,11 +79,30 @@ impl TemplateEngine {
             }
         }
 
-        self.env.add_global("css_hash", asset_hash("static/css/style.css"));
-        self.env.add_global(
-            "components_js_hash",
-            asset_hash("static/js/components/forage-components.js"),
-        );
+        self.assets = forage_ui::chrome::Assets {
+            css_hash: asset_hash("static/css/style.css"),
+            ui_js_hash: asset_hash("static/js/ui.js"),
+            components_js_hash: asset_hash("static/js/components/forage-components.js"),
+        };
+        self.env
+            .add_global("css_hash", self.assets.css_hash.clone());
+        self.env
+            .add_global("ui_js_hash", self.assets.ui_js_hash.clone());
+        self.env
+            .add_global("components_js_hash", self.assets.components_js_hash.clone());
+    }
+
+    pub fn assets(&self) -> &forage_ui::chrome::Assets {
+        &self.assets
+    }
+
+    pub fn build_stamp(&self) -> &forage_ui::chrome::BuildStamp {
+        &self.build
+    }
+
+    #[cfg(test)]
+    pub fn render_str(&self, source: &str, ctx: minijinja::Value) -> anyhow::Result<String> {
+        Ok(self.env.render_str(source, ctx)?)
     }
 
     pub fn render(&self, template: &str, ctx: minijinja::Value) -> anyhow::Result<String> {

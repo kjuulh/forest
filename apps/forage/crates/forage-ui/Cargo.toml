@@ -5,12 +5,12 @@ edition = "2024"
 description = "Forage's shared UI: typed sedge components, the page shell and the formatting they use"
 
 [dependencies]
-sedge-rt = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "a65801397851703ee774faa87e5986c30afbdc44" }
+sedge-rt.workspace = true
 chrono.workspace = true
 urlencoding = "2.1.3"
 
 [build-dependencies]
-sedge-gen = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "a65801397851703ee774faa87e5986c30afbdc44" }
+sedge-gen.workspace = true
 
 [dev-dependencies]
 insta = "1"

@@ -1,8 +1,10 @@
+pub mod chrome;
 pub mod format;
+pub mod project_settings;
 pub mod templates;
 mod tone;
 
-pub use templates::components;
+pub use templates::{components, layouts};
 pub use tone::{AlertKind, Tone};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
