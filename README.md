@@ -158,12 +158,15 @@ which compete with this one rather than redirecting to it. The skill lives in
 
 ## Deploying forest and forage
 
-Pushes to `main` build `ghcr.io/understory-io/{forest,forage}:latest` and then
-force a new deployment of the matching ECS services in **both** platform
-accounts — `platform-dev` (`618060699933`) and `platform-prod`
-(`462774209206`), `eu-west-1`. Both jobs live in
-[`.github/workflows/ci.yaml`](.github/workflows/ci.yaml); the deploy job waits
-for both image builds, so the two services never roll onto mismatched images.
+Pushes to `main` build `ghcr.io/understory-io/{forest,forage}:latest`, pin
+each to a digest, and roll the matching ECS services out **dev first**:
+`platform-dev` (`618060699933`), then a health check of
+`forest.development.understory.sh` and `registry.api.forest.development.understory.sh`,
+then `platform-prod` (`462774209206`) with the same digests, `eu-west-1`.
+**A dev deploy or health check that fails stops prod from being touched.**
+The jobs live in [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) and
+[`deploy-ecs.yml`](.github/workflows/deploy-ecs.yml); deploys wait for both
+image builds, so the two services never roll onto mismatched images.
 
 Both accounts pin `:latest`, and this job is the only thing that moves it, so
 deploying both is what keeps them in step. dev was manual until DATA-668 and

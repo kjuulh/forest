@@ -1,0 +1,114 @@
+name: deploy to ECS
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      account:
+        type: string
+        required: true
+      key_id_secret:
+        type: string
+        required: true
+      secret_key_secret:
+        type: string
+        required: true
+      role_arn_var:
+        type: string
+        required: true
+      service:
+        type: string
+        required: true
+      image:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.service }}
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: platform-${{ inputs.environment }}-deploy-${{ inputs.service }}
+      cancel-in-progress: false
+
+    env:
+      AWS_REGION: eu-west-1
+      ECS_CLUSTER: infrastructure-platform
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets[inputs.key_id_secret] }}
+          aws-secret-access-key: ${{ secrets[inputs.secret_key_secret] }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars[inputs.role_arn_var] }}
+          role-session-name: forest-ci-deploy
+          role-duration-seconds: "3600"
+
+      - name: Verify the target account
+        run: |
+          actual=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$actual" != "${{ inputs.account }}" ]; then
+            echo "::error::expected account ${{ inputs.account }} (${{ inputs.environment }}), got $actual"
+            exit 1
+          fi
+          echo "authenticated to ${{ inputs.environment }} ($actual)"
+
+      - name: Register a task definition pinned to that digest
+        id: taskdef
+        run: |
+          # Base the new revision on the family's *latest* revision, not on the
+          # one the service happens to be running.
+          #
+          # Terraform owns everything in the task definition except the image --
+          # environment, secrets, health checks, `essential`, cpu/memory, roles
+          # -- and registers a revision when any of it changes. The service is
+          # `ignore_changes = [task_definition]`, so Terraform deliberately does
+          # not roll that revision out; this deploy is what picks it up.
+          #
+          # Basing off the running revision instead would silently discard every
+          # such change. It would have dropped the fungus health-sidecar
+          # `essential = true` fix (DATA-594/DATA-739) on the very next deploy,
+          # re-wedging a service that had never once reached steady state.
+          #
+          # Passing the bare family name returns the latest ACTIVE revision.
+          aws ecs describe-task-definition --task-definition "${{ inputs.service }}" \
+            --region "$AWS_REGION" --query 'taskDefinition' > td.json
+
+          # Swap only this service's own container image; leave sidecars alone.
+          jq --arg name "${{ inputs.service }}" --arg image "${{ inputs.image }}" '
+            .containerDefinitions = (.containerDefinitions
+              | map(if .name == $name then .image = $image else . end))
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' td.json > new-td.json
+
+          arn=$(aws ecs register-task-definition \
+            --cli-input-json file://new-td.json --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+          echo "registered $arn"
+
+      - name: Deploy that revision
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "${{ inputs.service }}" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" \
+            --region "$AWS_REGION" \
+            --query 'service.deployments[0].[id,status,taskDefinition]' \
+            --output text
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "${{ inputs.service }}" \
+            --region "$AWS_REGION"
