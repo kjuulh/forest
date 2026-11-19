@@ -13,3 +13,4 @@ pub mod project_settings;
 pub mod destinations;
 pub mod projects;
 pub mod account;
+pub mod org_pages;

@@ -11,6 +11,8 @@ pub enum OrgSection {
     Visibility,
     Rules,
     Developers,
+    Usage,
+    Compute,
 }
 
 impl OrgSection {
@@ -33,6 +35,8 @@ impl OrgSection {
             OrgSection::Visibility => "Visibility",
             OrgSection::Rules => "Rules",
             OrgSection::Developers => "Developer settings",
+            OrgSection::Usage => "Usage",
+            OrgSection::Compute => "Compute",
         }
     }
 
@@ -46,6 +50,8 @@ impl OrgSection {
             OrgSection::Visibility => format!("{base}/visibility"),
             OrgSection::Rules => format!("{base}/rules"),
             OrgSection::Developers => format!("{base}/developers"),
+            OrgSection::Usage => format!("{base}/usage"),
+            OrgSection::Compute => format!("{base}/compute"),
         }
     }
 }

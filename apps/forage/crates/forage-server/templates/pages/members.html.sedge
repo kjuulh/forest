@@ -1,0 +1,84 @@
+use forage_ui::components::{CsrfField, Timeago};
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use crate::views::org_pages::{member_href, settings_href};
+props crate::views::org_pages::MembersPage { chrome, org, csrf_token, is_admin, members };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Members}>
+    <h2 class="text-lg font-bold mb-6">Members</h2>
+    {if *is_admin {
+      <div class="mb-8 p-4 border border-gray-200 rounded-lg">
+        <h2 class="font-medium text-sm mb-3">Add member</h2>
+        <form method="POST" action={settings_href(org, "/members")} class="flex gap-3 items-end">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <div class="flex-1">
+            <label for="username" class="block text-xs text-gray-500 mb-1">Username or email</label>
+            <input type="text" id="username" name="username" required placeholder="alice or alice@example.com" class="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+          </div>
+          <div>
+            <label for="role" class="block text-xs text-gray-500 mb-1">Role</label>
+            <select id="role" name="role" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button type="submit" class="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">Add</button>
+        </form>
+      </div>
+    }}
+    <div class="border border-gray-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm min-w-full">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="text-left px-4 py-3 font-medium text-gray-500">Username</th>
+            <th class="text-left px-4 py-3 font-medium text-gray-500">Role</th>
+            <th class="text-left px-4 py-3 font-medium text-gray-500">Joined</th>
+            {if *is_admin { <th class="text-right px-4 py-3 font-medium text-gray-500">Actions</th> }}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {for member in members.iter() {
+            {let role_classes = match member.role.as_str() {
+              "owner" => "bg-purple-100 text-purple-800",
+              "admin" => "bg-blue-100 text-blue-800",
+              _ => "bg-gray-100 text-gray-800",
+            };}
+            <tr>
+              <td class="px-4 py-3 font-medium">{member.username}</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {role_classes}">{member.role}</span>
+              </td>
+              <td class="px-4 py-3 text-gray-500">
+                {match member.joined_at.as_deref().filter(|j| !j.is_empty()) {
+                  Some(joined) => { <Timeago value={joined} /> }
+                  None => { {"—"} }
+                }}
+              </td>
+              {if *is_admin {
+                <td class="px-4 py-3 text-right">
+                  {if member.role != "owner" {
+                    <div class="flex gap-2 justify-end">
+                      <form method="POST" action={member_href(org, &member.user_id, "role")} class="inline-flex gap-1">
+                        <CsrfField token={csrf_token} name="_csrf" />
+                        <select name="role" class="px-2 py-1 text-xs border border-gray-300 rounded">
+                          <option value="member" selected={member.role == "member"}>Member</option>
+                          <option value="admin" selected={member.role == "admin"}>Admin</option>
+                        </select>
+                        <button type="submit" class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Update</button>
+                      </form>
+                      <form method="POST" action={member_href(org, &member.user_id, "remove")} class="inline">
+                        <CsrfField token={csrf_token} name="_csrf" />
+                        <button type="submit" class="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">Remove</button>
+                      </form>
+                    </div>
+                  }}
+                </td>
+              }}
+            </tr>
+          }}
+        </tbody>
+      </table>
+    </div>
+  </OrgSettings>
+</Shell>

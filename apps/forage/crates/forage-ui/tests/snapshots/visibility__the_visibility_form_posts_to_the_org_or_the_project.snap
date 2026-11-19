@@ -1,0 +1,19 @@
+---
+source: crates/forage-ui/tests/visibility.rs
+expression: project
+---
+<form method="POST" action="/orgs/acme/projects/my%20api/settings/visibility" class="space-y-3">
+<input type="hidden" name="_csrf" value="tok">
+<fieldset class="space-y-2">
+<legend class="sr-only">Visibility of acme/my api</legend>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="private" checked class="mt-0.5">
+<span><span class="font-medium">Private</span> — only members of the organisation can read it.</span>
+</label>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="public" class="mt-0.5">
+<span><span class="font-medium">Public</span> — anyone can see it, even without signing in, and anyone signed in can use it. Read-only.</span>
+</label>
+</fieldset>
+<button type="submit" class="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">Save visibility</button>
+</form>

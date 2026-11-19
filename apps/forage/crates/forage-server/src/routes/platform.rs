@@ -1412,25 +1412,18 @@ async fn usage(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/usage.html.jinja",
-            context! {
-                title => format!("Usage - {org} - Forest"),
-                description => format!("Usage and plan for {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_count => projects.len(),
-                active_tab => "settings",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::UsagePage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Usage - {org} - Forest"),
+            format!("Usage and plan for {org}"),
+        ),
+        org: org.clone(),
+        project_count: projects.len(),
+    };
+    Ok(Html(crate::views::pages::usage::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -2933,31 +2926,20 @@ async fn members_page(
 
     let is_admin = current_org.role == "owner" || current_org.role == "admin";
 
-    let html = state
-        .templates
-        .render(
-            "pages/members.html.jinja",
-            context! {
-                title => format!("Members - {org} - Forest"),
-                description => format!("Members of {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                is_admin => is_admin,
-                active_tab => "settings",
-                members => members.iter().map(|m| context! {
-                    user_id => m.user_id,
-                    username => m.username,
-                    role => m.role,
-                    joined_at => m.joined_at,
-                }).collect::<Vec<_>>(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::MembersPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Members - {org} - Forest"),
+            format!("Members of {org}"),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        members,
+    };
+    Ok(Html(crate::views::pages::members::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -3113,12 +3095,6 @@ async fn remove_member_submit(
     Ok(Redirect::to(&format!("/orgs/{org}/settings/members")).into_response())
 }
 
-#[derive(Serialize)]
-struct OrgRuleProjectPreview {
-    name: String,
-    metadata: forage_core::platform::ProjectMetadata,
-}
-
 async fn org_rules_page(
     State(state): State<AppState>,
     session: Session,
@@ -3139,7 +3115,7 @@ async fn org_rules_page(
     let rule_sets = rule_sets.map_err(|e| internal_error(&state, "list_org_rule_sets", &e))?;
     let projects = warn_default("list_projects", projects);
 
-    let mut project_previews = Vec::with_capacity(projects.len());
+    let mut rule_projects = Vec::with_capacity(projects.len());
     for project_name in &projects {
         let metadata = match state
             .platform_client
@@ -3149,69 +3125,33 @@ async fn org_rules_page(
             Ok(Some(project)) => project.metadata,
             _ => Default::default(),
         };
-        project_previews.push(OrgRuleProjectPreview {
+        rule_projects.push(crate::views::org_pages::RuleProject {
             name: project_name.clone(),
             metadata,
         });
     }
-    let projects_json = serde_json::to_string(&project_previews).unwrap_or_else(|_| "[]".into());
-    let rules_json = serde_json::to_string(&rule_sets).unwrap_or_else(|_| "[]".into());
 
-    let rule_items: Vec<minijinja::Value> = rule_sets
-        .iter()
-        .map(|rule_set| {
-            let selector = &rule_set.selector;
-            let metadata_pairs: Vec<minijinja::Value> = selector
-                .metadata_match
-                .iter()
-                .map(|(key, value)| context! { key => key, value => value })
-                .collect();
-            context! {
-                name => rule_set.name,
-                enabled => rule_set.enabled,
-                include_projects => &selector.include_projects,
-                exclude_projects => &selector.exclude_projects,
-                name_regex => &selector.name_regex,
-                metadata_match => metadata_pairs,
-                tags => &selector.tags,
-                policy_count => rule_set.policies.len(),
-                trigger_count => rule_set.triggers.len(),
-                pipeline_count => rule_set.release_pipelines.len(),
-                policies_json => serde_json::to_string_pretty(&rule_set.policies).unwrap_or_else(|_| "[]".into()),
-                triggers_json => serde_json::to_string_pretty(&rule_set.triggers).unwrap_or_else(|_| "[]".into()),
-                pipelines_json => serde_json::to_string_pretty(&rule_set.release_pipelines).unwrap_or_else(|_| "[]".into()),
-                created_at => rule_set.created_at,
-                updated_at => rule_set.updated_at,
-            }
-        })
-        .collect();
-
-    let html = state
-        .templates
-        .render(
-            "pages/org_rules.html.jinja",
-            context! {
-                page_title => format!("Rules · {}", org),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                projects => &projects,
-                projects_json => projects_json,
-                rules_json => rules_json,
-                rules => rule_items,
-                is_admin => is_admin,
-                active_tab => "settings",
-                policy_example => org_policy_example(),
-                trigger_example => org_trigger_example(),
-                pipeline_example => org_pipeline_example(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::OrgRulesPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Rules - {org} - Forest"),
+            format!("Organisation rules for {org}"),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        rules: rule_sets.iter().map(Into::into).collect(),
+        rule_sets,
+        projects: rule_projects,
+        policy_example: org_policy_example(),
+        trigger_example: org_trigger_example(),
+        pipeline_example: org_pipeline_example(),
+        pipeline_builder_js: state.templates.asset_href("js/pipeline-builder.js"),
+        org_rules_js: state.templates.asset_href("js/org-rules.js"),
+    };
+    Ok(Html(crate::views::pages::org_rules::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -5185,51 +5125,6 @@ async fn compute_page(
         (vec![], vec![])
     };
 
-    let instances_ctx: Vec<minijinja::Value> = instances
-        .iter()
-        .map(|i| {
-            context! {
-                id => i.id,
-                resource_name => i.resource_name,
-                project => i.project,
-                destination => i.destination,
-                environment => i.environment,
-                image => i.image,
-                region => i.region,
-                replicas => i.replicas,
-                cpu => i.cpu,
-                memory => i.memory,
-                status => i.status,
-            }
-        })
-        .collect();
-
-    let rollouts_ctx: Vec<minijinja::Value> = rollouts
-        .iter()
-        .take(20)
-        .map(|r| {
-            let resources: Vec<minijinja::Value> = r
-                .resources
-                .iter()
-                .map(|res| {
-                    context! {
-                        name => res.name,
-                        kind => res.kind.to_string(),
-                        status => res.status.to_string(),
-                        message => res.message,
-                    }
-                })
-                .collect();
-            context! {
-                id => r.id,
-                apply_id => r.apply_id,
-                namespace => r.namespace,
-                status => r.status.to_string(),
-                resources => resources,
-            }
-        })
-        .collect();
-
     let projects = warn_default(
         "compute: list projects",
         state
@@ -5238,27 +5133,24 @@ async fn compute_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/compute.html.jinja",
-            context! {
-                title => format!("Compute - {} - Forest", org),
-                description => "Managed compute instances",
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                active_tab => "settings",
-                projects => projects,
-                instances => instances_ctx,
-                rollouts => rollouts_ctx,
-                org_name => &org,
+    let page = crate::views::org_pages::ComputePage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Compute - {org} - Forest"),
+                description: "Managed compute instances".into(),
+                org: Some(&org),
+                project: None,
+                projects,
+                tab: forage_ui::chrome::Tab::Settings,
             },
-        )
-        .map_err(|e| internal_error(&state, "compute render", &e))?;
-
-    Ok(Html(html).into_response())
+        ),
+        org: org.clone(),
+        instances,
+        rollouts: rollouts.into_iter().take(20).collect(),
+    };
+    Ok(Html(crate::views::pages::compute::render(&page)).into_response())
 }
 
 async fn rollout_detail_page(
@@ -5287,34 +5179,6 @@ async fn rollout_detail_page(
         )
     })?;
 
-    let resources_ctx: Vec<minijinja::Value> = rollout
-        .resources
-        .iter()
-        .map(|r| {
-            context! {
-                name => r.name,
-                kind => r.kind.to_string(),
-                status => r.status.to_string(),
-                message => r.message,
-            }
-        })
-        .collect();
-
-    let labels_ctx: Vec<minijinja::Value> = rollout
-        .labels
-        .iter()
-        .map(|(k, v)| context! { key => k, value => v })
-        .collect();
-
-    let rollout_ctx = context! {
-        id => rollout.id,
-        apply_id => rollout.apply_id,
-        namespace => rollout.namespace,
-        status => rollout.status.to_string(),
-        resources => resources_ctx,
-        labels => labels_ctx,
-    };
-
     let projects = warn_default(
         "rollout detail: list projects",
         state
@@ -5323,26 +5187,20 @@ async fn rollout_detail_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/rollout_detail.html.jinja",
-            context! {
-                title => format!("Rollout {} - Forest", rollout.apply_id),
-                description => "Rollout details",
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                active_tab => "settings",
-                projects => projects,
-                rollout => rollout_ctx,
-                org_name => &org,
-            },
-        )
-        .map_err(|e| internal_error(&state, "rollout detail render", &e))?;
-
-    Ok(Html(html).into_response())
+    let chrome = crate::views::chrome::signed_in(
+        &state,
+        &session,
+        crate::views::chrome::Page {
+            title: format!("Rollout {} - Forest", rollout.apply_id),
+            description: "Rollout details".into(),
+            org: Some(&org),
+            project: None,
+            projects,
+            tab: forage_ui::chrome::Tab::Settings,
+        },
+    );
+    let page = crate::views::org_pages::RolloutPage::new(chrome, org.clone(), rollout);
+    Ok(Html(crate::views::pages::rollout_detail::render(&page)).into_response())
 }
 
 async fn regions_api() -> impl IntoResponse {
@@ -5409,34 +5267,22 @@ async fn access_page_inner(
         AccessPageFlash::Info(m) => (None, Some(m)),
     };
 
-    let html = state
-        .templates
-        .render(
-            "pages/org_access.html.jinja",
-            context! {
-                title => format!("Access - {org} - Forest"),
-                description => format!("Auto-invite allowed domains for {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                is_admin => is_admin,
-                active_tab => "settings",
-                flash_error => flash_error,
-                flash_info => flash_info,
-                domains => domains.iter().map(|d| context! {
-                    domain => &d.domain,
-                    policy => &d.policy,
-                    dns_verified => d.dns_verified,
-                    dns_verification_token => &d.dns_verification_token,
-                    created_at => &d.created_at,
-                }).collect::<Vec<_>>(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::AccessPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Access - {org} - Forest"),
+            format!("Auto-invite allowed domains for {org}"),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        flash_error,
+        flash_info,
+        domains,
+    };
+    Ok(Html(crate::views::pages::org_access::render(&page)).into_response())
 }
 
 async fn add_allowed_domain_submit(

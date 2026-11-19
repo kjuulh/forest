@@ -1,0 +1,88 @@
+use forage_core::compute::RolloutStatus;
+use forage_ui::layouts::Shell;
+use crate::views::org_pages::settings_href;
+props crate::views::org_pages::RolloutPage { chrome, org, rollout, labels };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <div class="flex items-center gap-2 text-sm text-gray-500 mb-6">
+      <a href={settings_href(org, "/compute")} class="hover:text-gray-700">Compute</a>
+      <span>/</span>
+      <span class="text-gray-900 font-mono">{rollout.apply_id}</span>
+    </div>
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold">Rollout</h1>
+        {match rollout.status {
+          RolloutStatus::Succeeded => { <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">Succeeded</span> }
+          RolloutStatus::InProgress => { <span class="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">In Progress</span> }
+          RolloutStatus::Failed => { <span class="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded-full">Failed</span> }
+          other => { <span class="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{other.to_string()}</span> }
+        }}
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-8 text-sm">
+      <div>
+        <dt class="text-gray-500">Apply ID</dt>
+        <dd class="font-mono text-xs mt-0.5">{rollout.apply_id}</dd>
+      </div>
+      <div>
+        <dt class="text-gray-500">Namespace</dt>
+        <dd class="font-mono text-xs mt-0.5">{rollout.namespace}</dd>
+      </div>
+    </div>
+    <h2 class="text-lg font-semibold mb-4">Resources ({rollout.resources.len()})</h2>
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-left text-gray-500">
+          <tr>
+            <th class="px-5 py-3 font-medium">Name</th>
+            <th class="px-5 py-3 font-medium">Kind</th>
+            <th class="px-5 py-3 font-medium">Status</th>
+            <th class="px-5 py-3 font-medium">Message</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {for r in rollout.resources.iter() {
+            <tr>
+              <td class="px-5 py-3 font-medium font-mono text-gray-900">{r.name}</td>
+              <td class="px-5 py-3 text-xs font-mono text-gray-500">{r.kind.to_string()}</td>
+              <td class="px-5 py-3">
+                {match r.status {
+                  RolloutStatus::Succeeded => {
+                    <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                      <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                      Succeeded
+                    </span>
+                  }
+                  RolloutStatus::InProgress => {
+                    <span class="inline-flex items-center gap-1 text-xs font-medium text-blue-700">
+                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                      In Progress
+                    </span>
+                  }
+                  RolloutStatus::Failed => {
+                    <span class="inline-flex items-center gap-1 text-xs font-medium text-red-700">
+                      <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                      Failed
+                    </span>
+                  }
+                  other => { <span class="text-xs text-gray-500">{other.to_string()}</span> }
+                }}
+              </td>
+              <td class="px-5 py-3 text-xs text-gray-500">{r.message}</td>
+            </tr>
+          }}
+        </tbody>
+      </table>
+    </div>
+    {if !labels.is_empty() {
+      <h2 class="text-lg font-semibold mt-8 mb-4">Labels</h2>
+      <div class="flex flex-wrap gap-2">
+        {for (key, value) in labels.iter() {
+          <span class="text-xs font-mono px-2 py-1 rounded bg-gray-100 text-gray-600">{key}={value}</span>
+        }}
+      </div>
+    }}
+  </section>
+</Shell>

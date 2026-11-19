@@ -1,0 +1,287 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between mb-8">
+<div>
+<h2 class="text-lg font-bold">Organisation Rules</h2>
+<p class="text-sm text-gray-500 mt-1">Apply policies, triggers, and pipelines across matching projects in testorg.</p>
+</div>
+</div>
+<div class="space-y-4 mb-8">
+<div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+<div class="px-4 py-3 flex items-start gap-3 flex-wrap border-b border-gray-100">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+<div class="min-w-0">
+<h3 class="font-semibold truncate">retail-prod</h3>
+<p class="text-xs text-gray-500">1 policies · 0 triggers · 0 pipelines</p>
+</div>
+</div>
+<form method="POST" action="/orgs/testorg/settings/rules/retail-prod/delete" data-confirm="Delete organisation rule set retail-prod?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-sm text-red-600 hover:text-red-700">Delete</button>
+</form>
+</div>
+<div class="p-4 grid gap-4 lg:grid-cols-2">
+<div>
+<h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Project selector</h4>
+<div class="space-y-2 text-sm">
+<div><span class="text-gray-500">Name regex:</span> <code>^sh</code></div>
+<div><span class="text-gray-500">Tags:</span>
+<code class="ml-1 px-1 py-0.5 bg-gray-100 rounded">web</code>
+</div>
+<div><span class="text-gray-500">Include:</span> shop</div>
+<div><span class="text-gray-500">Exclude:</span> sandbox</div>
+<div><span class="text-gray-500">Metadata:</span>
+<code class="ml-1 px-1 py-0.5 bg-gray-100 rounded">domain=retail</code>
+</div>
+
+</div>
+</div>
+<div>
+<h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Matching projects</h4>
+<div class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm" data-rule-preview="retail-prod">Calculating preview…</div>
+</div>
+<details class="text-sm lg:col-span-2">
+<summary class="cursor-pointer font-medium">Rule payload</summary>
+<div class="mt-3 grid gap-3">
+<div>
+<div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Policies</div>
+<pre class="overflow-x-auto rounded bg-gray-950 text-gray-100 p-3 text-xs">[
+  {
+    &quot;name&quot;: &quot;prod-main-only&quot;,
+    &quot;enabled&quot;: true,
+    &quot;config&quot;: {
+      &quot;BranchRestriction&quot;: {
+        &quot;target_environment&quot;: &quot;prod&quot;,
+        &quot;branch_pattern&quot;: &quot;^main$&quot;
+      }
+    }
+  }
+]</pre>
+</div>
+<div>
+<div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Triggers</div>
+<pre class="overflow-x-auto rounded bg-gray-950 text-gray-100 p-3 text-xs">[]</pre>
+</div>
+<div>
+<div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Pipelines</div>
+<pre class="overflow-x-auto rounded bg-gray-950 text-gray-100 p-3 text-xs">[]</pre>
+</div>
+</div>
+</details>
+</div>
+</div>
+</div>
+<div class="border border-gray-200 rounded-lg p-5 bg-white">
+<h3 class="font-semibold mb-1">Create rule set</h3>
+<p class="text-sm text-gray-500 mb-5">Selectors are additive: exact project names, metadata, tags, and a project-name regex all narrow the matching set. Leave selectors empty to target every project.</p>
+<form id="org-rule-form" method="POST" action="/orgs/testorg/settings/rules" class="space-y-5">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<div class="grid gap-4 md:grid-cols-2">
+<label class="block">
+<span class="text-sm font-medium">Name</span>
+<input name="name" required class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="default-release-rules">
+</label>
+<label class="flex items-end gap-2 text-sm">
+<input type="checkbox" name="enabled" checked class="rounded border-gray-300">
+              Enabled
+            </label>
+<label class="block">
+<span class="text-sm font-medium">Include projects</span>
+<textarea name="include_projects" rows="2" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="api, worker"></textarea>
+</label>
+<label class="block">
+<span class="text-sm font-medium">Exclude projects</span>
+<textarea name="exclude_projects" rows="2" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="experimental"></textarea>
+</label>
+<label class="block">
+<span class="text-sm font-medium">Name regex</span>
+<input name="name_regex" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="^(api|worker)-">
+</label>
+<label class="block">
+<span class="text-sm font-medium">Tags</span>
+<input name="tags" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="web, postgres">
+</label>
+</div>
+<label class="block">
+<span class="text-sm font-medium">Metadata match</span>
+<textarea name="metadata_match" rows="3" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono" placeholder="domain=retail
+owner=platform"></textarea>
+<span class="text-xs text-gray-500">One key=value pair per line. Keys match project metadata such as domain, owner, or support_url.</span>
+</label>
+<div>
+<div class="flex items-center justify-between gap-3 mb-2">
+<span class="text-sm font-medium">Project preview</span>
+<span class="text-xs text-gray-500">Computed locally from current project metadata.</span>
+</div>
+<div id="new-rule-preview" class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm">Fill selectors to preview matching projects.</div>
+</div>
+<div class="grid gap-4">
+<section class="rounded-lg border border-gray-200 p-4">
+<h4 class="font-medium mb-3">Policy</h4>
+<div class="space-y-3">
+<label class="block">
+<span class="text-sm font-medium">Policy name</span>
+<input id="org-policy-name" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="prod-main-only">
+</label>
+<label class="block">
+<span class="text-sm font-medium">Type</span>
+<select id="org-policy-type" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white">
+<option value="branch_restriction">Branch Restriction</option>
+<option value="soak_time">Soak Time</option>
+<option value="approval">Approval Required</option>
+<option value="supersede_pending">Supersede Pending</option>
+</select>
+</label>
+<div id="org-policy-soak-fields" class="hidden space-y-3">
+<input id="org-policy-source-env" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Source environment, e.g. dev">
+<input id="org-policy-soak-target-env" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
+<input id="org-policy-duration" type="number" min="1" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Soak duration seconds, e.g. 1800">
+</div>
+<div id="org-policy-branch-fields" class="space-y-3">
+<input id="org-policy-branch-pattern" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono" placeholder="Branch pattern, e.g. ^main$">
+<input id="org-policy-branch-target-env" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
+</div>
+<div id="org-policy-approval-fields" class="hidden space-y-3">
+<input id="org-policy-approval-target-env" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
+<input id="org-policy-approvals" type="number" min="1" value="1" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Required approvals">
+</div>
+<div id="org-policy-supersede-fields" class="hidden space-y-3">
+<input id="org-policy-supersede-target-env" disabled class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
+<label class="flex items-center gap-2 text-sm">
+<input id="org-policy-supersede-same-branch" type="checkbox" disabled class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                    Same branch only
+                  </label>
+<p class="text-xs text-gray-500">Deploys the newest pending release for a destination and marks the ones it overtook superseded. A deploy already running finishes first.</p>
+</div>
+</div>
+</section>
+<section class="rounded-lg border border-gray-200 p-4">
+<h4 class="font-medium mb-3">Trigger</h4>
+<div class="space-y-3">
+<input id="org-trigger-name" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono" placeholder="Trigger name (optional)">
+<div id="org-trigger-pattern-rows" class="space-y-2"></div>
+<button type="button" id="org-add-pattern-btn" class="text-sm text-gray-500 hover:text-gray-900">+ Add filter</button>
+<input id="org-trigger-target-envs" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environments, e.g. dev,prod">
+<input id="org-trigger-target-dests" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target destinations, optional">
+<label class="flex items-center gap-2 text-sm"><input id="org-trigger-force" type="checkbox" class="rounded border-gray-300"> Force release</label>
+<label class="flex items-center gap-2 text-sm"><input id="org-trigger-pipeline" type="checkbox" class="rounded border-gray-300"> Use release pipeline</label>
+</div>
+</section>
+<section class="rounded-lg border border-gray-200 p-4">
+<h4 class="font-medium mb-3">Pipeline</h4>
+<label class="block mb-3">
+<span class="text-sm font-medium">Pipeline name</span>
+<input id="org-pipeline-name" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="prod-pipeline">
+</label>
+<pipeline-builder data-target="org-pipeline-stages"></pipeline-builder>
+<textarea id="org-pipeline-stages" hidden></textarea>
+</section>
+</div>
+<details class="rounded-lg border border-gray-200 p-4">
+<summary class="cursor-pointer text-sm font-medium">Advanced JSON payload</summary>
+<p class="text-xs text-gray-500 mt-2 mb-3">The builders above write these arrays on submit. Edit JSON directly when a rule set needs multiple policies, triggers, or pipelines.</p>
+<div class="grid gap-4">
+<label class="block">
+<span class="text-sm font-medium">Policies JSON</span>
+<textarea name="policies_json" rows="10" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono" placeholder="[
+  {
+    &quot;name&quot;: &quot;prod-main-only&quot;,
+    &quot;enabled&quot;: true,
+    &quot;config&quot;: {
+      &quot;BranchRestriction&quot;: {
+        &quot;target_environment&quot;: &quot;prod&quot;,
+        &quot;branch_pattern&quot;: &quot;^main$&quot;
+      }
+    }
+  }
+]"></textarea>
+</label>
+<label class="block">
+<span class="text-sm font-medium">Triggers JSON</span>
+<textarea name="triggers_json" rows="10" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono" placeholder="[
+  {
+    &quot;name&quot;: &quot;main-woodpecker-to-dev&quot;,
+    &quot;enabled&quot;: true,
+    &quot;branch_pattern&quot;: &quot;^main$&quot;,
+    &quot;title_pattern&quot;: null,
+    &quot;author_pattern&quot;: null,
+    &quot;commit_message_pattern&quot;: null,
+    &quot;source_type_pattern&quot;: &quot;woodpecker&quot;,
+    &quot;target_environments&quot;: [
+      &quot;dev&quot;
+    ],
+    &quot;target_destinations&quot;: [],
+    &quot;force_release&quot;: true,
+    &quot;use_pipeline&quot;: false
+  }
+]"></textarea>
+</label>
+<label class="block">
+<span class="text-sm font-medium">Pipelines JSON</span>
+<textarea name="pipelines_json" rows="10" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono" placeholder="[
+  {
+    &quot;name&quot;: &quot;dev-to-prod&quot;,
+    &quot;enabled&quot;: true,
+    &quot;stages&quot;: [
+      {
+        &quot;id&quot;: &quot;deploy-dev&quot;,
+        &quot;depends_on&quot;: [],
+        &quot;config&quot;: {
+          &quot;Deploy&quot;: {
+            &quot;environment&quot;: &quot;dev&quot;
+          }
+        }
+      },
+      {
+        &quot;id&quot;: &quot;prod-soak&quot;,
+        &quot;depends_on&quot;: [
+          &quot;deploy-dev&quot;
+        ],
+        &quot;config&quot;: {
+          &quot;Wait&quot;: {
+            &quot;duration_seconds&quot;: 1800
+          }
+        }
+      },
+      {
+        &quot;id&quot;: &quot;deploy-prod&quot;,
+        &quot;depends_on&quot;: [
+          &quot;prod-soak&quot;
+        ],
+        &quot;config&quot;: {
+          &quot;Deploy&quot;: {
+            &quot;environment&quot;: &quot;prod&quot;
+          }
+        }
+      }
+    ]
+  }
+]"></textarea>
+</label>
+</div>
+</details>
+<button type="submit" class="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">Create rule set</button>
+</form>
+</div>
+</div>
+</div>
+</section>
+</main>

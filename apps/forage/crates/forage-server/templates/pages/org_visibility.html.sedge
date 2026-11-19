@@ -1,0 +1,36 @@
+use forage_ui::components::{VisibilityAdminOnlyNote, VisibilityForm, VisibilityReadOnlyNote, VisibilityState};
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use crate::views::org_settings::message;
+props crate::views::org_pages::OrgVisibilityPage { chrome, org, csrf_token, org_public, can_change, flash_error };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Visibility}>
+    <div class="space-y-6 max-w-2xl">
+      <div>
+        <h2 class="text-lg font-bold mb-1">Visibility</h2>
+        <p class="text-sm text-gray-500">Who outside {org} can read the components it publishes.</p>
+      </div>
+      {if let Some(error) = message(flash_error) {
+        <div role="alert" class="p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800">{error}</div>
+      }}
+      <div class="p-4 border border-gray-200 rounded-lg space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-500">Organisation</span>
+          <VisibilityState public={*org_public} />
+        </div>
+        {if *org_public {
+          <p class="text-sm text-gray-700">Every component {org} publishes, now and later, is visible to anyone, even without signing in, and usable by anyone signed in, whatever each component's own setting says.</p>
+        } else {
+          <p class="text-sm text-gray-700">Only members can read {org}'s components, except components that are made public one by one in their project settings.</p>
+        }}
+      </div>
+      <VisibilityReadOnlyNote />
+      {if *can_change {
+        <VisibilityForm org={org} project={None} csrf_token={csrf_token} public={*org_public} />
+      } else {
+        <VisibilityAdminOnlyNote />
+      }}
+    </div>
+  </OrgSettings>
+</Shell>

@@ -6,10 +6,9 @@ use axum::routing::get;
 use axum_extra::extract::Form;
 use forage_core::platform::{PlatformError, validate_slug, validate_visibility};
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error, orgs_context, report_error, require_org_membership};
+use super::{error_page, internal_error, report_error, require_org_membership, warn_default};
 use crate::auth::{self, Session};
 use crate::state::AppState;
 
@@ -137,25 +136,21 @@ async fn render_org(
         None => (StatusCode::OK, None),
     };
 
-    let html = state
-        .templates
-        .render(
-            "pages/org_visibility.html.jinja",
-            context! {
-                title => format!("Visibility - {org} - Forest"),
-                description => format!("Who can read {org}'s components"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                active_tab => "settings",
-                org_public => visibility.organisation_is_public(),
-                can_change => visibility.can_change,
-                flash_error => flash_error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+    let page = crate::views::org_pages::OrgVisibilityPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Visibility - {org} - Forest"),
+            format!("Who can read {org}'s components"),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        org_public: visibility.organisation_is_public(),
+        can_change: visibility.can_change,
+        flash_error,
+    };
+    let html = crate::views::pages::org_visibility::render(&page);
 
     Ok((status, Html(html)).into_response())
 }
@@ -213,29 +208,36 @@ async fn render_project(
         None => (StatusCode::OK, None),
     };
 
-    let html = state
-        .templates
-        .render(
-            "pages/project_visibility.html.jinja",
-            context! {
-                title => format!("Visibility - {project} - {org} - Forest"),
-                description => format!("Who can read {org}/{project}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                org_public => visibility.organisation_is_public(),
-                project_public => visibility.project_is_public(),
-                component_public => visibility.component_is_public(),
-                can_change => visibility.can_change,
-                flash_error => flash_error,
+    let projects = warn_default(
+        "project visibility: list projects",
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org)
+            .await,
+    );
+    let page = crate::views::org_pages::ProjectVisibilityPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Visibility - {project} - {org} - Forest"),
+                description: format!("Who can read {org}/{project}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        org_public: visibility.organisation_is_public(),
+        project_public: visibility.project_is_public(),
+        component_public: visibility.component_is_public(),
+        can_change: visibility.can_change,
+        flash_error,
+    };
+    let html = crate::views::pages::project_visibility::render(&page);
 
     Ok((status, Html(html)).into_response())
 }

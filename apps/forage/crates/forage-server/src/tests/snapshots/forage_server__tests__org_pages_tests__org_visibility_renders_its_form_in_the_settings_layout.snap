@@ -1,0 +1,59 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="space-y-6 max-w-2xl">
+<div>
+<h2 class="text-lg font-bold mb-1">Visibility</h2>
+<p class="text-sm text-gray-500">Who outside testorg can read the components it publishes.</p>
+</div>
+
+<div class="p-4 border border-gray-200 rounded-lg space-y-3">
+<div class="flex items-center justify-between">
+<span class="text-sm text-gray-500">Organisation</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">Private</span>
+</div>
+<p class="text-sm text-gray-700">Only members can read testorg's components, except components that are made public one by one in their project settings.</p>
+</div>
+<p class="text-sm text-gray-600">
+<strong>Public is read-only.</strong> A public component is listed on the public registry
+  pages, with its readme, versions and manifest, for anyone to see, <em>including people who are
+  not signed in</em>. Anyone signed in to Forest can also resolve and download it. Publishing,
+  unpublishing and every other change still need membership of the organisation. The
+  organisation's releases, destinations, members and settings are not shared.
+</p>
+<form method="POST" action="/orgs/testorg/settings/visibility" class="space-y-3">
+<input type="hidden" name="_csrf" value="test-csrf">
+<fieldset class="space-y-2">
+<legend class="sr-only">Visibility of testorg</legend>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="private" checked class="mt-0.5">
+<span><span class="font-medium">Private</span> — only members of the organisation can read it.</span>
+</label>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="public" class="mt-0.5">
+<span><span class="font-medium">Public</span> — anyone can see it, even without signing in, and anyone signed in can use it. Read-only.</span>
+</label>
+</fieldset>
+<button type="submit" class="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">Save visibility</button>
+</form>
+</div>
+</div>
+</div>
+</section>
+</main>

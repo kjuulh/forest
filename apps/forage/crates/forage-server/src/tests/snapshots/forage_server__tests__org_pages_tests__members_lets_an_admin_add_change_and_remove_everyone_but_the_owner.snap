@@ -1,0 +1,92 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<h2 class="text-lg font-bold mb-6">Members</h2>
+<div class="mb-8 p-4 border border-gray-200 rounded-lg">
+<h2 class="font-medium text-sm mb-3">Add member</h2>
+<form method="POST" action="/orgs/testorg/settings/members" class="flex gap-3 items-end">
+<input type="hidden" name="_csrf" value="test-csrf">
+<div class="flex-1">
+<label for="username" class="block text-xs text-gray-500 mb-1">Username or email</label>
+<input type="text" id="username" name="username" required placeholder="alice or alice@example.com" class="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label for="role" class="block text-xs text-gray-500 mb-1">Role</label>
+<select id="role" name="role" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+<option value="member">Member</option>
+<option value="admin">Admin</option>
+</select>
+</div>
+<button type="submit" class="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">Add</button>
+</form>
+</div>
+<div class="border border-gray-200 rounded-lg overflow-x-auto">
+<table class="w-full text-sm min-w-full">
+<thead class="bg-gray-50 border-b border-gray-200">
+<tr>
+<th class="text-left px-4 py-3 font-medium text-gray-500">Username</th>
+<th class="text-left px-4 py-3 font-medium text-gray-500">Role</th>
+<th class="text-left px-4 py-3 font-medium text-gray-500">Joined</th>
+<th class="text-right px-4 py-3 font-medium text-gray-500">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-100">
+<tr>
+<td class="px-4 py-3 font-medium">testuser</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">owner</span>
+</td>
+<td class="px-4 py-3 text-gray-500">
+<time datetime="2026-01-01T00:00:00Z" class="">01 Jan 2026</time>
+</td>
+<td class="px-4 py-3 text-right">
+
+</td>
+</tr><tr>
+<td class="px-4 py-3 font-medium">alice</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">admin</span>
+</td>
+<td class="px-4 py-3 text-gray-500">
+—
+</td>
+<td class="px-4 py-3 text-right">
+<div class="flex gap-2 justify-end">
+<form method="POST" action="/orgs/testorg/settings/members/user-456/role" class="inline-flex gap-1">
+<input type="hidden" name="_csrf" value="test-csrf">
+<select name="role" class="px-2 py-1 text-xs border border-gray-300 rounded">
+<option value="member">Member</option>
+<option value="admin" selected>Admin</option>
+</select>
+<button type="submit" class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Update</button>
+</form>
+<form method="POST" action="/orgs/testorg/settings/members/user-456/remove" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">Remove</button>
+</form>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+</main>

@@ -6,10 +6,9 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use forage_core::platform::{OAuthApp, PlatformError, validate_slug};
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error, orgs_context, report_error};
+use super::{error_page, internal_error, report_error};
 use crate::auth::Session;
 use crate::state::AppState;
 
@@ -95,19 +94,6 @@ fn flash_for(err: &PlatformError) -> Option<String> {
             Some(report_error("OAuth application settings", err))
         }
         _ => None,
-    }
-}
-
-fn app_context(app: &OAuthApp) -> minijinja::Value {
-    context! {
-        app_id => &app.app_id,
-        name => &app.name,
-        description => &app.description,
-        homepage_url => &app.homepage_url,
-        client_id => &app.client_id,
-        redirect_uris => &app.redirect_uris,
-        scopes => &app.scopes,
-        grant_types => &app.grant_types,
     }
 }
 
@@ -223,28 +209,19 @@ async fn list_apps(
         .await
         .map_err(|e| internal_error(&state, "list oauth apps", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/developers.html.jinja",
-            context! {
-                title => format!("Developer settings - {org} - Forest"),
-                description => "Manage OAuth applications",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                apps => apps.iter().map(app_context).collect::<Vec<_>>(),
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DevelopersPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Developer settings - {org} - Forest"),
+            "Manage OAuth applications".into(),
+        ),
+        org: org.clone(),
+        error: query.error,
+        apps,
+    };
+    Ok(Html(crate::views::pages::developers::render(&page)).into_response())
 }
 
 async fn new_app_page(
@@ -257,27 +234,19 @@ async fn new_app_page(
     require_admin(&state, cached_org)?;
     require_oauth_client(&state)?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/developer_app_new.html.jinja",
-            context! {
-                title => format!("New OAuth app - {org} - Forest"),
-                description => "Register a new OAuth application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DeveloperAppNewPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("New OAuth app - {org} - Forest"),
+            "Register a new OAuth application".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        error: query.error,
+    };
+    Ok(Html(crate::views::pages::developer_app_new::render(&page)).into_response())
 }
 
 async fn create_app(
@@ -323,6 +292,7 @@ async fn create_app(
         &org,
         &created.app,
         Some(&created.client_secret),
+        None,
     )
 }
 
@@ -330,6 +300,7 @@ async fn app_detail(
     State(state): State<AppState>,
     session: Session,
     Path((org, app_id)): Path<(String, String)>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Response, Response> {
     let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
     require_admin(&state, cached_org)?;
@@ -348,7 +319,7 @@ async fn app_detail(
             other => internal_error(&state, "get oauth app", &other),
         })?;
 
-    render_app_detail(&state, &session, &org, &app, None)
+    render_app_detail(&state, &session, &org, &app, None, query.error)
 }
 
 fn render_app_detail(
@@ -357,28 +328,23 @@ fn render_app_detail(
     org: &str,
     app: &OAuthApp,
     client_secret: Option<&str>,
+    error: Option<String>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/developer_app.html.jinja",
-            context! {
-                title => format!("{} - Developer settings - Forest", app.name),
-                description => "OAuth application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                app => app_context(app),
-                client_secret => client_secret,
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DeveloperAppPage {
+        chrome: crate::views::org_settings::chrome(
+            state,
+            session,
+            org,
+            format!("{} - Developer settings - Forest", app.name),
+            "OAuth application".into(),
+        ),
+        org: org.to_string(),
+        csrf_token: session.csrf_token.clone(),
+        app: app.clone(),
+        client_secret: client_secret.map(Into::into),
+        error,
+    };
+    Ok(Html(crate::views::pages::developer_app::render(&page)).into_response())
 }
 
 async fn update_app(
@@ -445,6 +411,7 @@ async fn rotate_secret(
         &org,
         &rotated.app,
         Some(&rotated.client_secret),
+        None,
     )
 }
 

@@ -1,0 +1,78 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<h2 class="text-lg font-bold mb-6">Compute</h2>
+<p class="text-sm text-gray-500 mb-6">Managed container instances deployed through forage/containers destinations. Pay-as-you-go compute — no cluster setup required.</p>
+<div class="border border-gray-200 rounded-lg overflow-hidden">
+<table class="w-full text-sm">
+<thead class="bg-gray-50 text-left text-gray-500">
+<tr>
+<th class="px-5 py-3 font-medium">Project / Destination</th>
+<th class="px-5 py-3 font-medium">Image</th>
+<th class="px-5 py-3 font-medium">Region</th>
+<th class="px-5 py-3 font-medium">Replicas</th>
+<th class="px-5 py-3 font-medium">Resources</th>
+<th class="px-5 py-3 font-medium">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-100">
+<tr class="hover:bg-gray-50">
+<td class="px-5 py-3">
+<a href="/orgs/testorg/projects/my-api" class="font-medium text-gray-900 hover:text-blue-600">my-api</a>
+<span class="text-gray-400">/</span>
+<span class="text-sm font-mono text-gray-600">prod-eu</span>
+<span class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">prod</span>
+</td>
+<td class="px-5 py-3 text-gray-600 font-mono text-xs">registry/web:1</td>
+<td class="px-5 py-3">
+<span class="inline-flex items-center gap-1 text-xs font-mono">
+<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+eu-west-1
+</span>
+</td>
+<td class="px-5 py-3 text-gray-600 font-mono">2</td>
+<td class="px-5 py-3 text-xs text-gray-500 font-mono">250m / 256Mi</td>
+<td class="px-5 py-3">
+<span class="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 bg-yellow-50 px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                        Pending
+                      </span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 class="text-lg font-semibold mt-10 mb-4">Recent Rollouts</h2>
+<div class="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+<a href="/orgs/testorg/settings/compute/rollouts/ID" class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 block">
+<div class="flex items-center gap-3 min-w-0">
+<span class="w-2 h-2 rounded-full bg-gray-400 shrink-0"></span>
+<span class="text-sm font-medium font-mono text-gray-900 truncate">apply-1</span>
+<span class="text-xs text-gray-400">2 resources</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-xs text-gray-400">pending</span>
+<svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</div>
+</a>
+</div>
+</div>
+</div>
+</section>
+</main>

@@ -1,0 +1,48 @@
+use forage_ui::components::{VisibilityAdminOnlyNote, VisibilityForm, VisibilityReadOnlyNote, VisibilityState};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::project_settings::Section;
+use crate::views::org_pages::settings_href;
+use crate::views::org_settings::message;
+props crate::views::org_pages::ProjectVisibilityPage { chrome, org, project, csrf_token, org_public, project_public, component_public, can_change, flash_error };
+
+{let description = format!("Who outside {org} can read this component");}
+{let org_visibility_href = settings_href(org, "/visibility");}
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Visibility} description={description.as_str()}>
+    <div class="space-y-6 max-w-2xl">
+      {if let Some(error) = message(flash_error) {
+        <div role="alert" class="p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800">{error}</div>
+      }}
+      <div class="p-4 border border-gray-200 rounded-lg">
+        <dl class="text-sm space-y-3">
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-500">Visible outside the organisation</dt>
+            <dd><VisibilityState public={*component_public} /></dd>
+          </div>
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-500">This component's own setting</dt>
+            <dd><VisibilityState public={*project_public} /></dd>
+          </div>
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-500">Organisation <a href={org_visibility_href.as_str()} class="underline hover:text-gray-900">{org}</a></dt>
+            <dd><VisibilityState public={*org_public} /></dd>
+          </div>
+        </dl>
+      </div>
+      {if *org_public {
+        <div class="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-900">
+          This component is public through the organisation: {org} is public, so every
+          component it publishes is visible to anyone, even without signing in. Setting this component to private
+          does not make it private while the organisation is public. Change that in the
+          <a href={org_visibility_href.as_str()} class="underline font-medium">organisation's visibility settings</a>.
+        </div>
+      }}
+      <VisibilityReadOnlyNote />
+      {if *can_change {
+        <VisibilityForm org={org} project={Some(project.as_str())} csrf_token={csrf_token} public={*project_public} />
+      } else {
+        <VisibilityAdminOnlyNote />
+      }}
+    </div>
+  </ProjectSettings>
+</Shell>

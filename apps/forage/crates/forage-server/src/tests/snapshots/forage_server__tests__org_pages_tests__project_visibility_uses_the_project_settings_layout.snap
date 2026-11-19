@@ -1,0 +1,92 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-6xl mx-auto px-4 pt-10">
+<div class="flex items-center justify-between gap-4 flex-wrap mb-4">
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+
+<a href="/orgs/testorg/projects" class="hover:text-gray-900 hover:underline">testorg</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/widget" class="hover:text-gray-900 hover:underline">widget</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/widget/settings" class="hover:text-gray-900 hover:underline">Settings</a><span class="text-gray-300" aria-hidden="true">›</span>
+<span class="text-gray-900">Visibility</span>
+</nav>
+<a href="/orgs/testorg/projects/widget" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+  Back to widget
+</a>
+</div>
+<div class="mb-8">
+<h1 class="font-mono text-2xl tracking-tight leading-tight">
+<span class="text-gray-500">testorg</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">widget</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
+</h1>
+<p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
+</div>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Project settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/projects/widget/settings/triggers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/widget/settings/policies" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/widget/settings/pipelines" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/widget/settings/visibility" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/projects/widget/settings/triggers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/widget/settings/policies" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/widget/settings/pipelines" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/widget/settings/visibility" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="mb-6">
+<h2 class="text-lg font-bold">Visibility</h2>
+<p class="text-sm text-gray-500 mt-1">Who outside testorg can read this component</p>
+</div>
+<div class="space-y-6 max-w-2xl">
+
+<div class="p-4 border border-gray-200 rounded-lg">
+<dl class="text-sm space-y-3">
+<div class="flex items-center justify-between">
+<dt class="text-gray-500">Visible outside the organisation</dt>
+<dd><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Public</span></dd>
+</div>
+<div class="flex items-center justify-between">
+<dt class="text-gray-500">This component's own setting</dt>
+<dd><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">Private</span></dd>
+</div>
+<div class="flex items-center justify-between">
+<dt class="text-gray-500">Organisation <a href="/orgs/testorg/settings/visibility" class="underline hover:text-gray-900">testorg</a></dt>
+<dd><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Public</span></dd>
+</div>
+</dl>
+</div>
+<div class="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-900">
+          This component is public through the organisation: testorg is public, so every
+          component it publishes is visible to anyone, even without signing in. Setting this component to private
+          does not make it private while the organisation is public. Change that in the
+          <a href="/orgs/testorg/settings/visibility" class="underline font-medium">organisation's visibility settings</a>.
+        </div>
+<p class="text-sm text-gray-600">
+<strong>Public is read-only.</strong> A public component is listed on the public registry
+  pages, with its readme, versions and manifest, for anyone to see, <em>including people who are
+  not signed in</em>. Anyone signed in to Forest can also resolve and download it. Publishing,
+  unpublishing and every other change still need membership of the organisation. The
+  organisation's releases, destinations, members and settings are not shared.
+</p>
+<form method="POST" action="/orgs/testorg/projects/widget/settings/visibility" class="space-y-3">
+<input type="hidden" name="_csrf" value="test-csrf">
+<fieldset class="space-y-2">
+<legend class="sr-only">Visibility of testorg/widget</legend>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="private" checked class="mt-0.5">
+<span><span class="font-medium">Private</span> — only members of the organisation can read it.</span>
+</label>
+<label class="flex items-start gap-2 text-sm">
+<input type="radio" name="visibility" value="public" class="mt-0.5">
+<span><span class="font-medium">Public</span> — anyone can see it, even without signing in, and anyone signed in can use it. Read-only.</span>
+</label>
+</fieldset>
+<button type="submit" class="px-4 py-2 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">Save visibility</button>
+</form>
+</div>
+</div>
+</div>
+</section>
+</main>
