@@ -2645,6 +2645,43 @@ async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
 }
 
 #[tokio::test]
+async fn edit_trigger_page_leaves_unset_patterns_empty() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    for field in [
+        "title_pattern",
+        "author_pattern",
+        "commit_message_pattern",
+        "source_type_pattern",
+    ] {
+        assert!(
+            html.contains(&format!("name=\"{field}\" value=\"\"")),
+            "{field} should render empty"
+        );
+    }
+    assert!(!html.contains("value=\"none\""));
+}
+
+#[tokio::test]
 async fn edit_trigger_submit_with_non_url_safe_name_resolves_id_to_name() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
