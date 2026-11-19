@@ -1,0 +1,13 @@
+---
+source: crates/forage-server/src/tests/catalogue_pages_tests.rs
+expression: main_snapshot(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container py-12">
+<div class="flex items-center justify-between mb-8">
+<h1 class="text-2xl font-bold">Continuous deployment</h1>
+</div>
+<script src="/static/js/timeline-prefetch.js?v=HASH" data-timeline-url="/api/orgs/testorg/timeline"></script>
+<release-timeline org="testorg"></release-timeline>
+</section>
+</main>

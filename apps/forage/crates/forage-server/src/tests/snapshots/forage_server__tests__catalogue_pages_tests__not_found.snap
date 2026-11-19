@@ -1,0 +1,12 @@
+---
+source: crates/forage-server/src/tests/catalogue_pages_tests.rs
+expression: main_snapshot(&html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-lg mx-auto px-4 pt-24 text-center">
+<p class="text-6xl font-bold text-gray-300">404</p>
+<h1 class="mt-4 text-2xl font-bold">Page not found</h1>
+<p class="mt-2 text-gray-600">The page you&#39;re looking for doesn&#39;t exist.</p>
+<a href="/" class="inline-block mt-8 text-sm text-gray-500 hover:text-gray-700">&larr; Back to home</a>
+</section>
+</main>

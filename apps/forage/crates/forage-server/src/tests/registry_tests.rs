@@ -1102,8 +1102,8 @@ async fn component_detail_renders_install_block_for_tool_binary() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("forest global add testorg&#x2f;forest-hello"));
-    assert!(html.contains("forest global add testorg&#x2f;forest-hello@0.1.0"));
+    assert!(html.contains("forest global add testorg/forest-hello"));
+    assert!(html.contains("forest global add testorg/forest-hello@0.1.0"));
     assert!(html.contains("Argv-passthrough"));
     assert!(html.contains("v0.1.0"));
     assert!(html.contains("latest"));

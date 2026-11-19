@@ -12,7 +12,6 @@ use forage_core::platform::{
     UpdateTriggerInput, validate_slug,
 };
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::{Deserialize, Serialize};
 
 use super::{error_page, internal_error, report_error, warn_default};
@@ -238,12 +237,6 @@ pub fn router() -> Router<AppState> {
             get(rollout_detail_page),
         )
         .route("/api/compute/regions", get(regions_api))
-}
-
-fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
-    orgs.iter()
-        .map(|o| context! { name => o.name, role => o.role })
-        .collect()
 }
 
 #[allow(clippy::result_large_err)]
@@ -2408,38 +2401,23 @@ async fn releases_page(
     let orgs = &session.user.orgs;
     require_org_membership(&state, orgs, &org)?;
 
-    let environments = warn_default(
-        "list_environments",
-        state
-            .platform_client
-            .list_environments(&session.access_token, &org)
-            .await,
-    );
-
-    let mut sorted_envs = environments.clone();
-    sorted_envs.sort_by_key(|e| e.sort_order);
-    let env_options: Vec<minijinja::Value> = sorted_envs
-        .iter()
-        .map(|e| context! { name => e.name })
-        .collect();
-
-    let html = state
-        .templates
-        .render(
-            "pages/releases.html.jinja",
-            context! {
-                title => format!("Releases - {org} - Forest"),
-                description => format!("Deployment pipeline for {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                env_options => env_options,
-                active_tab => "releases",
+    let page = crate::views::catalogue::OrgReleasesPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Releases - {org} - Forest"),
+                description: format!("Deployment pipeline for {org}"),
+                org: Some(&org),
+                project: None,
+                projects: Vec::new(),
+                tab: forage_ui::chrome::Tab::None,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+    };
+    let html = crate::views::pages::releases::render(&page);
 
     Ok(Html(html).into_response())
 }

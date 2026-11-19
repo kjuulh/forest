@@ -1,0 +1,284 @@
+use forage_ui::components::{AboutBlock, Badge, CodeBlock, EmptyState, Icon, KindBadge, Timeago, ToolShapeBadge, VisibilityBadge};
+use forage_ui::layouts::Shell;
+use forage_ui::Tone;
+use forage_core::registry::ToolShape;
+use crate::manifest_view::ManifestView;
+use crate::views::catalogue::{opt, shape_key, version_href};
+component MetaRow(label: &str, children: Html) {
+<div>
+  <dt class="text-gray-500">{label}</dt>
+  <dd class="font-medium">{children}</dd>
+</div>
+}
+component SidebarHeading(children: Html) {
+<h3 class="text-sm font-bold mb-2">{children}</h3>
+}
+component CodeHint(children: Html) {
+<code class="text-xs bg-gray-100 px-1 rounded">{children}</code>
+}
+props crate::views::catalogue::ComponentDetailPage { chrome, summary, versions, description, readme, manifest, manifest_html, owners, about, highlight_js };
+
+<Shell chrome={chrome}>
+  <section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
+    <div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
+      <div class="mb-2">
+        <a href="/components" class="text-sm text-gray-500 hover:text-gray-900">&larr; Back to registry</a>
+      </div>
+      <div class="flex items-start justify-between mb-6 gap-4">
+        <div class="min-w-0">
+          <h1 class="font-mono text-3xl tracking-tight leading-tight">
+            <span class="text-gray-500">{summary.organisation}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{summary.name}</span>
+          </h1>
+          {if !description.is_empty() {
+            <p class="mt-1 text-gray-600">{description}</p>
+          }}
+          <div class="mt-2 flex items-center gap-2 flex-wrap">
+            {if !summary.latest_version.is_empty() { <Badge label={&format!("v{}", props.shown_version())} /> }}
+            <ToolShapeBadge shape={shape_key(summary.shape)} />
+            <KindBadge kind={summary.kind} />
+            <VisibilityBadge visibility={summary.visibility} />
+          </div>
+        </div>
+        <details class="relative shrink-0 group">
+          <summary class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 cursor-pointer list-none select-none">
+            <Icon name="terminal" class="w-4 h-4" />
+            {if props.is_tool() { Install } else { Add }}
+            <Icon name="chevron-down" class="w-3 h-3 ml-0.5" />
+          </summary>
+          <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-md shadow-lg z-10 p-4 space-y-3">
+            {if props.is_tool() {
+              <div>
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Install globally</p>
+                <CodeBlock content={&format!("forest global add {}", props.component_ref())} copyable={true} id="header-install-cmd-latest" />
+              </div>
+              {if !summary.latest_version.is_empty() {
+                <div>
+                  <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Pin to a specific version</p>
+                  <CodeBlock content={&format!("forest global add {}", props.pinned_ref())} copyable={true} id="header-install-cmd-pinned" />
+                </div>
+              }}
+            } else {
+              <div>
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Add to a project</p>
+                <CodeBlock content={&format!("forest components add {}", props.pinned_ref())} copyable={true} id="header-add-cmd" />
+              </div>
+            }}
+          </div>
+        </details>
+      </div>
+      {if let Some(readme) = readme {
+        <div class="prose max-w-none mb-8">{readme}</div>
+      } else if !props.is_tool() {
+        <div class="mb-8">
+          <EmptyState message="No README available for this component." />
+        </div>
+      }}
+      {if let Some(intro) = props.methods_intro() {
+        <div class="mb-8">
+          <h2 class="text-lg font-bold mb-3">Methods</h2>
+          {if intro {
+            <p class="text-sm text-gray-600 mb-3">This component exposes named methods alongside its tool surface. Invoke with <CodeHint>forest run &lt;method&gt;</CodeHint>.</p>
+          }}
+          <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
+            {for method in summary.methods.iter() {
+              <div class="px-4 py-2.5 font-mono text-sm">{method}</div>
+            }}
+          </div>
+        </div>
+      }}
+      {if summary.shape == ToolShape::ToolExternal {
+        <div class="mb-8">
+          <h2 class="text-lg font-bold mb-3">Upstream</h2>
+          <p class="text-sm text-gray-600 mb-3">This tool is hosted externally; Forest fetches the binary directly from the upstream URL and verifies it against the manifest's sha256.</p>
+          {if let (Some(url), Some(m)) = (props.upstream_url(), manifest.as_ref()) {
+            <dl class="text-sm space-y-2 border border-gray-200 rounded-lg p-4">
+              <div class="flex flex-col gap-1">
+                <dt class="text-xs text-gray-500 uppercase tracking-wide">URL</dt>
+                <dd><a href={url} class="font-mono text-xs text-gray-700 hover:underline break-all" rel="noopener noreferrer" target="_blank">{url}</a></dd>
+              </div>
+              {if let Some(archive) = opt(&m.archive) {
+                <div class="flex items-center justify-between">
+                  <dt class="text-xs text-gray-500 uppercase tracking-wide">Archive</dt>
+                  <dd><Badge label={archive} /></dd>
+                </div>
+              }}
+              {if let Some(binary) = opt(&m.binary_in_archive) {
+                <div class="flex items-center justify-between gap-3">
+                  <dt class="text-xs text-gray-500 uppercase tracking-wide shrink-0">Binary path</dt>
+                  <dd class="font-mono text-xs text-gray-700 break-all">{binary}</dd>
+                </div>
+              }}
+              {if let Some(sha) = opt(&m.archive_sha256) {
+                <div class="flex items-center justify-between gap-3">
+                  <dt class="text-xs text-gray-500 uppercase tracking-wide shrink-0">Archive sha256</dt>
+                  <dd class="font-mono text-xs text-gray-700" title={sha}>{ManifestView::short_sha(sha)}</dd>
+                </div>
+              }}
+            </dl>
+          } else if !summary.upstream_host.is_empty() {
+            <p class="text-sm"><span class="text-gray-500">Host:</span> <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{summary.upstream_host}</code></p>
+          }}
+        </div>
+      }}
+      {if summary.shape == ToolShape::ToolBinary {
+        <div class="mb-8">
+          <h2 class="text-lg font-bold mb-3">Invocation</h2>
+          <p class="text-sm text-gray-600">Argv-passthrough binary — <CodeHint>forest global run</CodeHint> forwards all arguments to the tool verbatim. No <CodeHint>_meta/describe</CodeHint> protocol; no methods.</p>
+        </div>
+      }}
+      {if let Some(env) = props.env_defaults() {
+        <div class="mb-8">
+          <h2 class="text-lg font-bold mb-3">Default environment</h2>
+          <p class="text-sm text-gray-600 mb-3">Shipped with the tool and applied as defaults when run via <CodeHint>forest global run</CodeHint>. A value you export in your own shell always wins.</p>
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-4 py-2 text-left font-medium">Variable</th>
+                  <th class="px-4 py-2 text-left font-medium">Default</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                {for (key, value) in env.iter() {
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs">{key}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-gray-600 break-all">{value}</td>
+                  </tr>
+                }}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }}
+      <div id="releases" class="mb-8">
+        <h2 class="text-lg font-bold mb-4">Releases</h2>
+        {if !versions.is_empty() {
+          <div class="space-y-3">
+            {for (i, v) in versions.iter().enumerate() {
+              <div class={if props.is_selected(v) { "border border-gray-200 rounded-lg p-4 bg-gray-50" } else { "border border-gray-200 rounded-lg p-4" }} id="v{v.version}">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <a href={version_href(summary, &v.version)} class="font-bold text-base hover:underline">v{v.version}</a>
+                    {if i == 0 { <Badge label="latest" tone={Tone::Green} /> }}
+                    {if !v.protocol_version.is_empty() {
+                      <span class="text-xs text-gray-400">protocol {v.protocol_version}</span>
+                    }}
+                  </div>
+                  <div class="flex gap-1.5 flex-wrap">
+                    {for platform in v.platforms.iter() { <Badge label={platform} /> }}
+                  </div>
+                </div>
+                {if !v.created_at.is_empty() {
+                  <div class="mt-1 text-xs text-gray-400">published <Timeago value={v.created_at} /></div>
+                }}
+              </div>
+            }}
+          </div>
+        } else {
+          <p class="text-sm text-gray-500">No versions published yet.</p>
+        }}
+      </div>
+      {if let Some(platforms) = props.platforms() {
+        <div class="mb-8">
+          <h2 class="text-lg font-bold mb-3">Distribution</h2>
+          <p class="text-sm text-gray-600 mb-3">Each platform ships the binary as a content-addressed blob — the sha256 below is what Forest verifies before exec.</p>
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-4 py-2 text-left font-medium">Platform</th>
+                  <th class="px-4 py-2 text-left font-medium">sha256</th>
+                  <th class="px-4 py-2 text-right font-medium">Size</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                {for (key, info) in platforms.iter() {
+                  <tr>
+                    <td class="px-4 py-2.5 font-mono text-xs">{key}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-gray-600" title={info.sha256}>{ManifestView::short_sha(&info.sha256)}</td>
+                    <td class="px-4 py-2.5 text-right text-gray-600">{ManifestView::human_size(info.size)}</td>
+                  </tr>
+                }}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }}
+      {if let Some(manifest_html) = manifest_html {
+        <div class="mb-8">
+          <details class="border border-gray-200 rounded-lg overflow-hidden">
+            <summary class="px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50 select-none">View raw manifest JSON</summary>
+            <div class="bg-gray-950 p-4 text-xs font-mono leading-relaxed text-gray-300 overflow-x-auto json-pretty"><pre>{manifest_html}</pre></div>
+          </details>
+        </div>
+      }}
+    </div>
+    <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
+      <div class="space-y-6">
+        <AboutBlock about={about} />
+        {if !props.is_tool() {
+          <div>
+            <SidebarHeading>Add to project</SidebarHeading>
+            <CodeBlock content={&format!("forest components add {}", props.pinned_ref())} copyable={true} id="install-cmd" class="text-xs" />
+          </div>
+        }}
+        <div>
+          <SidebarHeading>Source org</SidebarHeading>
+          <a href={props.source_org_href()} class="text-sm text-gray-700 hover:text-gray-900 hover:underline">{summary.organisation}'s components</a>
+        </div>
+        <div>
+          <SidebarHeading>Metadata</SidebarHeading>
+          <dl class="text-sm space-y-2">
+            <MetaRow label="Latest version">{if summary.latest_version.is_empty() { {"—"} } else { {summary.latest_version} }}</MetaRow>
+            <MetaRow label="Total versions">{summary.version_count}</MetaRow>
+            <MetaRow label="Kind">{summary.kind}</MetaRow>
+            {if let Some(shape) = props.shape_label() {
+              <MetaRow label="Shape">{shape}</MetaRow>
+            }}
+            {if !summary.created_at.is_empty() {
+              <div>
+                <dt class="text-gray-500">Created</dt>
+                <dd><Timeago value={summary.created_at} /></dd>
+              </div>
+            }}
+            {if !summary.updated_at.is_empty() {
+              <div>
+                <dt class="text-gray-500">Updated</dt>
+                <dd><Timeago value={summary.updated_at} /></dd>
+              </div>
+            }}
+          </dl>
+        </div>
+        {if !summary.contracts.is_empty() {
+          <div>
+            <SidebarHeading>Contracts</SidebarHeading>
+            <div class="flex gap-1.5 flex-wrap">
+              {for contract in summary.contracts.iter() { <Badge label={contract} /> }}
+            </div>
+          </div>
+        }}
+        {if !owners.is_empty() {
+          <div>
+            <SidebarHeading>Owners</SidebarHeading>
+            <ul class="text-sm space-y-1">
+              {for owner in owners.iter() { <li class="text-gray-600">{owner}</li> }}
+            </ul>
+          </div>
+        }}
+      </div>
+    </aside>
+  </section>
+  <:head>
+    {if readme.is_some() {
+      <link rel="stylesheet" href="/static/css/vendor/highlight-github.min.css" media="(prefers-color-scheme: light)">
+      <link rel="stylesheet" href="/static/css/vendor/highlight-github-dark.min.css" media="(prefers-color-scheme: dark)">
+    }}
+  </:head>
+  <:scripts>
+    {if readme.is_some() {
+      <script src="/static/js/vendor/highlight.min.js" defer></script>
+      <script src="/static/js/vendor/highlight-cue.js" defer></script>
+      <script src={highlight_js} defer></script>
+    }}
+  </:scripts>
+</Shell>

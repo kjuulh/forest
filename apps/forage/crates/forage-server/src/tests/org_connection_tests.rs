@@ -230,6 +230,18 @@ async fn enable_baseline(store: &InMemoryIntegrationStore, id: &str) {
     store.upsert_slack_baseline(&b).await.unwrap();
 }
 
+fn page_main(html: &str, id: &str) -> String {
+    let start = html.find("<main").unwrap();
+    let end = html.find("</main>").unwrap() + "</main>".len();
+    html[start..end].replace(id, "ID")
+}
+
+fn assert_no_inline_handlers(html: &str) {
+    for handler in [" onsubmit=", " onclick=", " style=", "<script>", "<style"] {
+        assert!(!html.contains(handler), "inline {handler}: {html}");
+    }
+}
+
 // --- baseline settings ---------------------------------------------------
 
 #[tokio::test]
@@ -443,6 +455,19 @@ async fn coverage_shows_each_member_route_without_leaking_the_directory() {
     ] {
         assert!(!body.contains(secret), "coverage leaked {secret}");
     }
+    assert!(
+        body.contains(&format!(
+            r#"<form method="POST" action="/orgs/testorg/settings/integrations/{id}/coverage" class="shrink-0">"#
+        )),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"<input type="hidden" name="_csrf" value="test-csrf">"#),
+        "{body}"
+    );
+    assert!(body.contains(r#"data-testid="coverage-gaps">2<"#), "{body}");
+    assert_no_inline_handlers(&body);
+    insta::assert_snapshot!("integration_coverage", page_main(&body, &id));
 
     let member = session_as(&w.sessions, "bob", "member", "testorg").await;
     let (s, _, _) = send(
@@ -776,7 +801,10 @@ async fn retries_and_redeliveries_update_the_same_dm_instead_of_duplicating() {
         .iter()
         .filter(|(c, _)| c == "UALICE")
         .count();
-    assert_eq!(updates, 1, "the identical redelivery leaves the DM untouched");
+    assert_eq!(
+        updates, 1,
+        "the identical redelivery leaves the DM untouched"
+    );
 }
 
 #[tokio::test]
@@ -1131,6 +1159,18 @@ async fn the_github_connection_page_shows_attribution_coverage() {
     assert!(body.contains("Linked GitHub account is a member of acme-gh"));
     assert!(body.contains("Linked GitHub account is not a member of acme-gh"));
     assert!(body.contains("No GitHub account linked to Forest"));
+    assert!(
+        body.contains(&format!(
+            r#"<form method="POST" action="/orgs/testorg/settings/integrations/{id}/delete" data-confirm="Disconnect this GitHub organisation from Forest? Uninstall the app on GitHub too to revoke its access.">"#
+        )),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"<input type="hidden" name="_csrf" value="test-csrf">"#),
+        "{body}"
+    );
+    assert_no_inline_handlers(&body);
+    insta::assert_snapshot!("github_connection", page_main(&body, &id));
 }
 
 fn github_hook(event: &str, body: &str, secret: &str) -> Request<Body> {

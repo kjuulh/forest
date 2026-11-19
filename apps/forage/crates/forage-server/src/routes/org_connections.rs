@@ -16,7 +16,6 @@ use forage_core::integrations::{
     IntegrationType,
 };
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::Deserialize;
 
 use super::integrations::{
@@ -25,6 +24,9 @@ use super::integrations::{
 use super::{error_page, internal_error};
 use crate::auth::Session;
 use crate::state::AppState;
+use crate::views::catalogue::{
+    CoverageRow, CoverageState, GithubConnectionPage, GithubHealth, IntegrationCoveragePage,
+};
 
 /// Coverage previews stop here: each member may cost a Slack lookup.
 const MAX_COVERAGE_MEMBERS: usize = 100;
@@ -61,15 +63,6 @@ pub(crate) fn new_nonce() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
-}
-
-fn orgs_ctx(session: &Session) -> Vec<minijinja::Value> {
-    session
-        .user
-        .orgs
-        .iter()
-        .map(|o| context! { name => &o.name, role => &o.role })
-        .collect()
 }
 
 fn admin_org<'a>(
@@ -209,13 +202,6 @@ async fn update_baseline(
     Ok(Redirect::to(&format!("/orgs/{org}/settings/integrations/{id}?saved=1")).into_response())
 }
 
-struct CoverageRow {
-    username: String,
-    role: String,
-    state: &'static str,
-    detail: String,
-}
-
 async fn slack_coverage(
     state: &AppState,
     session: &Session,
@@ -242,12 +228,12 @@ async fn slack_coverage(
             .flatten();
         let (row_state, detail) = if personal.is_some() {
             (
-                "reachable",
+                CoverageState::Reachable,
                 "Personal Slack link (their own choice)".to_string(),
             )
         } else if !team.baseline.directory_mapping {
             (
-                "off",
+                CoverageState::Off,
                 "Not reached: org directory mapping is off".to_string(),
             )
         } else {
@@ -257,12 +243,15 @@ async fn slack_coverage(
             };
             match profile {
                 Err(_) => (
-                    "unknown",
+                    CoverageState::Unknown,
                     "Could not check with Forest; try again".to_string(),
                 ),
-                Ok(None) => ("gap", "No longer a member".to_string()),
+                Ok(None) => (CoverageState::Gap, "No longer a member".to_string()),
                 Ok(Some(profile)) => match &state.slack_directory {
-                    None => ("unknown", "Slack directory not configured".to_string()),
+                    None => (
+                        CoverageState::Unknown,
+                        "Slack directory not configured".to_string(),
+                    ),
                     Some(slack) => {
                         match resolve_directory_match(
                             store.as_ref(),
@@ -274,17 +263,21 @@ async fn slack_coverage(
                         )
                         .await
                         {
-                            Ok(MappingStatus::Matched { .. }) => {
-                                ("reachable", "Matched by verified Forest email".to_string())
-                            }
+                            Ok(MappingStatus::Matched { .. }) => (
+                                CoverageState::Reachable,
+                                "Matched by verified Forest email".to_string(),
+                            ),
                             Ok(other) => (
-                                "gap",
+                                CoverageState::Gap,
                                 format!(
                                     "{}. They can link Slack under Account settings.",
                                     capitalise(&other.describe())
                                 ),
                             ),
-                            Err(_) => ("unknown", "Slack lookup failed; try again".to_string()),
+                            Err(_) => (
+                                CoverageState::Unknown,
+                                "Slack lookup failed; try again".to_string(),
+                            ),
                         }
                     }
                 },
@@ -329,35 +322,31 @@ async fn render_coverage(
         ));
     };
     let (rows, truncated) = slack_coverage(state, session, org, cached_org, &team, force).await?;
-    let reachable = rows.iter().filter(|r| r.state == "reachable").count();
+    let reachable = rows
+        .iter()
+        .filter(|r| r.state == CoverageState::Reachable)
+        .count();
 
-    let html = state
-        .templates
-        .render(
-            "pages/integration_coverage.html.jinja",
-            context! {
-                title => format!("Coverage - {} - Forest", integration.name),
-                description => "Who receives individual Slack notifications",
-                user => context! { username => &session.user.username, user_id => &session.user.user_id },
-                current_org => org,
-                orgs => orgs_ctx(session),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integration => context! { id => &integration.id, name => &integration.name, enabled => integration.enabled },
-                directory_mapping => team.baseline.directory_mapping,
-                total => rows.len(),
-                reachable => reachable,
-                truncated => truncated,
-                max_members => MAX_COVERAGE_MEMBERS,
-                rows => rows.iter().map(|r| context! {
-                    username => &r.username,
-                    role => &r.role,
-                    state => r.state,
-                    detail => &r.detail,
-                }).collect::<Vec<_>>(),
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
+    let page = IntegrationCoveragePage {
+        chrome: crate::views::org_settings::chrome(
+            state,
+            session,
+            org,
+            format!("Coverage - {} - Forest", integration.name),
+            "Who receives individual Slack notifications".into(),
+        ),
+        org: org.to_string(),
+        csrf_token: session.csrf_token.clone(),
+        integration_id: integration.id.clone(),
+        name: integration.name.clone(),
+        enabled: integration.enabled,
+        directory_mapping: team.baseline.directory_mapping,
+        reachable,
+        truncated,
+        max_members: MAX_COVERAGE_MEMBERS,
+        rows,
+    };
+    let html = crate::views::pages::integration_coverage::render(&page);
     Ok(Html(html).into_response())
 }
 
@@ -759,23 +748,23 @@ pub(super) async fn github_connection_page(
     let store = state.integration_store.as_ref().unwrap();
 
     let (health, member_ids, truncated) = match &state.github_app {
-        None => ("unconfigured", None, false),
+        None => (GithubHealth::Unconfigured, None, false),
         Some(app) => match app.installation(*installation_id).await {
             Ok(None) => {
                 let _ = store
                     .set_integration_enabled(org, &integration.id, false)
                     .await;
-                ("uninstalled", None, false)
+                (GithubHealth::Uninstalled, None, false)
             }
-            Ok(Some(info)) if info.suspended => ("suspended", None, false),
+            Ok(Some(info)) if info.suspended => (GithubHealth::Suspended, None, false),
             Ok(Some(_)) => match app.installation_token(*installation_id).await {
                 Ok(token) => match app.org_member_ids(&token, account_login).await {
-                    Ok((ids, truncated)) => ("healthy", Some(ids), truncated),
-                    Err(_) => ("unreachable", None, false),
+                    Ok((ids, truncated)) => (GithubHealth::Healthy, Some(ids), truncated),
+                    Err(_) => (GithubHealth::Unreachable, None, false),
                 },
-                Err(_) => ("unreachable", None, false),
+                Err(_) => (GithubHealth::Unreachable, None, false),
             },
-            Err(_) => ("unreachable", None, false),
+            Err(_) => (GithubHealth::Unreachable, None, false),
         },
     };
 
@@ -791,45 +780,48 @@ pub(super) async fn github_connection_page(
             None => None,
         };
         let (row_state, detail) = match (&profile, &member_ids) {
-            (None, _) => ("unknown", "Could not check with Forest".to_string()),
+            (None, _) => (CoverageState::Unknown, "Could not check with Forest".to_string()),
             (Some(p), _) if p.github_user_ids.is_empty() => (
-                "gap",
+                CoverageState::Gap,
                 "No GitHub account linked to Forest; releases they author on GitHub cannot be attributed to them. They can link GitHub under Account settings.".to_string(),
             ),
-            (Some(_), None) => ("unknown", "GitHub membership could not be checked".to_string()),
+            (Some(_), None) => (CoverageState::Unknown, "GitHub membership could not be checked".to_string()),
             (Some(p), Some(ids)) if p.github_user_ids.iter().any(|id| ids.contains(id)) => (
-                "reachable",
+                CoverageState::Reachable,
                 format!("Linked GitHub account is a member of {account_login}"),
             ),
             (Some(_), Some(_)) => (
-                "gap",
+                CoverageState::Gap,
                 format!("Linked GitHub account is not a member of {account_login}"),
             ),
         };
-        rows.push(context! { username => &m.username, role => &m.role, state => row_state, detail => detail });
+        rows.push(CoverageRow {
+            username: m.username.clone(),
+            role: m.role.clone(),
+            state: row_state,
+            detail,
+        });
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/github_connection.html.jinja",
-            context! {
-                title => format!("{} - Integrations - Forest", integration.name),
-                description => "GitHub organisation connection",
-                user => context! { username => &session.user.username, user_id => &session.user.user_id },
-                current_org => org,
-                orgs => orgs_ctx(session),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integration => context! { id => &integration.id, name => &integration.name, enabled => integration.enabled },
-                account_login => account_login,
-                installed_by_login => installed_by_login,
-                health => health,
-                truncated => truncated,
-                rows => rows,
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
+    let page = GithubConnectionPage {
+        chrome: crate::views::org_settings::chrome(
+            state,
+            session,
+            org,
+            format!("{} - Integrations - Forest", integration.name),
+            "GitHub organisation connection".into(),
+        ),
+        org: org.to_string(),
+        csrf_token: session.csrf_token.clone(),
+        integration_id: integration.id.clone(),
+        name: integration.name.clone(),
+        account_login: account_login.clone(),
+        installed_by_login: installed_by_login.clone(),
+        health,
+        truncated,
+        rows,
+    };
+    let html = crate::views::pages::github_connection::render(&page);
     Ok(Html(html).into_response())
 }
 

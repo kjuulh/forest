@@ -17,7 +17,6 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use forage_core::platform::validate_slug;
 use forage_core::session::CachedOrg;
-use minijinja::context;
 
 use crate::state::AppState;
 
@@ -39,20 +38,9 @@ pub fn router() -> Router<AppState> {
 }
 
 fn error_page(state: &AppState, status: StatusCode, heading: &str, message: &str) -> Response {
-    let html = state.templates.render(
-        "pages/error.html.jinja",
-        context! {
-            title => format!("{} - Forest", heading),
-            description => message,
-            status => status.as_u16(),
-            heading => heading,
-            message => message,
-        },
-    );
-    match html {
-        Ok(body) => (status, Html(body)).into_response(),
-        Err(_) => status.into_response(),
-    }
+    let html =
+        crate::views::catalogue::error_page(&state.templates, status.as_u16(), heading, message);
+    (status, Html(html)).into_response()
 }
 
 fn report_error(context: &str, err: &dyn std::fmt::Display) -> String {
@@ -204,12 +192,6 @@ pub(super) fn render_markdown(md: &str) -> String {
         })
         .clean(&html)
         .to_string()
-}
-
-fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
-    orgs.iter()
-        .map(|o| context! { name => o.name, role => o.role })
-        .collect()
 }
 
 #[allow(clippy::result_large_err)]

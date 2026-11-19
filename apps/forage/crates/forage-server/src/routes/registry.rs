@@ -1,20 +1,22 @@
+use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
-use axum::Router;
 use forage_core::platform::validate_slug;
-use minijinja::context;
 use serde::Deserialize;
 
 use super::{
-    default_unless_missing, error_page, internal_error, orgs_context, render_markdown,
-    require_org_membership, warn_default,
+    default_unless_missing, error_page, internal_error, render_markdown, require_org_membership,
+    warn_default,
 };
 use crate::auth::{MaybeSession, Session};
 use crate::manifest_view::ManifestView;
 use crate::pretty_json;
 use crate::state::AppState;
+use crate::views::catalogue::{
+    ComponentDetailPage, ComponentsPage, OrgComponentsPage, registry_chrome,
+};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -38,44 +40,32 @@ struct SearchParams {
     page: Option<i32>,
 }
 
-fn require_registry(state: &AppState) -> Result<&dyn forage_core::registry::ForestRegistry, Response> {
-    state
-        .registry_client
-        .as_deref()
-        .ok_or_else(|| {
-            error_page(
-                state,
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Registry unavailable",
-                "Component registry is not configured.",
-            )
-        })
+fn require_registry(
+    state: &AppState,
+) -> Result<&dyn forage_core::registry::ForestRegistry, Response> {
+    state.registry_client.as_deref().ok_or_else(|| {
+        error_page(
+            state,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Registry unavailable",
+            "Component registry is not configured.",
+        )
+    })
 }
 
-fn project_overview_ctx(
+fn project_overview(
     project: Option<&forage_core::platform::Project>,
     component_description: Option<&str>,
-) -> (String, Option<minijinja::Value>) {
+) -> (String, forage_ui::about::About) {
     let description = project
         .map(|p| p.description.clone())
         .filter(|d| !d.is_empty())
         .or_else(|| component_description.map(|s| s.to_string()))
         .unwrap_or_default();
-
-    let metadata_ctx = project.map(|p| {
-        let m = &p.metadata;
-        context! {
-            git_url => &m.git_url,
-            homepage => &m.homepage,
-            docs_url => &m.docs_url,
-            support_url => &m.support_url,
-            domain => &m.domain,
-            owner => &m.owner,
-            has_any => !m.is_empty(),
-        }
-    });
-
-    (description, metadata_ctx)
+    let about = project
+        .map(|p| crate::views::projects::about(&p.metadata))
+        .unwrap_or_default();
+    (description, about)
 }
 
 fn dedup_components(
@@ -88,23 +78,26 @@ fn dedup_components(
         .collect()
 }
 
-fn maybe_user_context(
-    maybe_session: &MaybeSession,
-) -> (
-    Option<minijinja::Value>,
-    Option<String>,
-    Vec<minijinja::Value>,
-    Option<String>,
-) {
-    match maybe_session.session {
-        Some(ref s) => (
-            Some(context! { username => &s.user.username }),
-            Some(s.csrf_token.clone()),
-            orgs_context(&s.user.orgs),
-            s.user.orgs.first().map(|o| o.name.clone()),
-        ),
-        None => (None, None, vec![], None),
+fn total_pages(total_count: i32, page_size: i32) -> u32 {
+    ((total_count as f64) / (page_size as f64)).ceil().max(0.0) as u32
+}
+
+fn manifest_parts(json: &str) -> (Option<ManifestView>, Option<sedge_rt::Trusted>) {
+    if json.is_empty() {
+        return (ManifestView::parse(json), None);
     }
+    (
+        ManifestView::parse(json),
+        Some(sedge_rt::Trusted(pretty_json::tokenize(json))),
+    )
+}
+
+fn readme(markdown: &str) -> Option<sedge_rt::Trusted> {
+    Some(markdown)
+        .filter(|md| !md.is_empty())
+        .map(render_markdown)
+        .filter(|html| !html.is_empty())
+        .map(sedge_rt::Trusted)
 }
 
 async fn components_search(
@@ -134,29 +127,25 @@ async fn components_search(
         .map_err(|e| internal_error(&state, "search_public_components", &e))?;
 
     let components = dedup_components(results.components);
-    let total_pages = ((results.total_count as f64) / (page_size as f64)).ceil() as i32;
-    let (user, csrf_token, orgs, current_org) = maybe_user_context(&maybe_session);
-
-    let html = state
-        .templates
-        .render(
-            "pages/components.html.jinja",
-            context! {
-                title => "Components - Forest",
-                description => "Discover and share reusable forest components.",
-                components => components,
-                query => &query,
-                filter_org => &filter_org,
-                page => page,
-                total_pages => total_pages,
-                user => user,
-                csrf_token => csrf_token,
-                orgs => orgs,
-                current_org => current_org,
-                active_tab => "components",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+    let total_pages = total_pages(results.total_count, page_size);
+    let session = maybe_session.session.as_ref();
+    let page = ComponentsPage {
+        chrome: registry_chrome(
+            &state,
+            session,
+            "Components - Forest".into(),
+            "Discover and share reusable forest components.".into(),
+        ),
+        query,
+        filter_org,
+        orgs: session
+            .map(|s| s.user.orgs.iter().map(|o| o.name.clone()).collect())
+            .unwrap_or_default(),
+        components,
+        page: page as u32,
+        total_pages,
+    };
+    let html = crate::views::pages::components::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -174,8 +163,9 @@ async fn component_detail(
         {
             Ok(projects) => {
                 if projects.iter().any(|p| p == &name) {
-                    return Ok(Redirect::to(&format!("/orgs/{org}/projects/{name}"))
-                        .into_response());
+                    return Ok(
+                        Redirect::to(&format!("/orgs/{org}/projects/{name}")).into_response()
+                    );
                 }
             }
             Err(e) => {
@@ -192,7 +182,9 @@ async fn component_detail(
         Some(ref session) => {
             let (d, p) = tokio::join!(
                 registry.get_component_detail(&session.access_token, &org, &name),
-                state.platform_client.get_project(&session.access_token, &org, &name),
+                state
+                    .platform_client
+                    .get_project(&session.access_token, &org, &name),
             );
             let project_info = match p {
                 Ok(info) => info,
@@ -203,7 +195,10 @@ async fn component_detail(
             };
             (d, project_info)
         }
-        None => (registry.get_public_component_detail(&org, &name).await, None),
+        None => (
+            registry.get_public_component_detail(&org, &name).await,
+            None,
+        ),
     };
 
     let detail = detail_res.map_err(|e| match e {
@@ -216,51 +211,31 @@ async fn component_detail(
         other => internal_error(&state, "get_component_detail", &other),
     })?;
 
-    let readme_html = if detail.readme.is_empty() {
-        String::new()
-    } else {
-        render_markdown(&detail.readme)
+    let (manifest, manifest_html) = manifest_parts(&detail.manifest_json);
+    let (description, about) = project_overview(
+        project_info.as_ref(),
+        Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
+    );
+
+    let page = ComponentDetailPage {
+        chrome: registry_chrome(
+            &state,
+            maybe_session.session.as_ref(),
+            format!("{org}/{name} - Components - Forest"),
+            detail.summary.description.clone(),
+        ),
+        readme: readme(&detail.readme),
+        summary: detail.summary,
+        versions: detail.versions,
+        selected_version: None,
+        description,
+        manifest,
+        manifest_html,
+        owners: detail.owners,
+        about,
+        highlight_js: state.templates.asset_href("js/readme-highlight.js"),
     };
-
-    let manifest_html = if detail.manifest_json.is_empty() {
-        String::new()
-    } else {
-        pretty_json::tokenize(&detail.manifest_json)
-    };
-    let manifest_view = ManifestView::parse(&detail.manifest_json);
-
-    let (user, csrf_token, orgs, current_org) = maybe_user_context(&maybe_session);
-
-    let (project_description, project_metadata_ctx) =
-        project_overview_ctx(
-            project_info.as_ref(),
-            Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
-        );
-
-    let html = state
-        .templates
-        .render(
-            "pages/component_detail.html.jinja",
-            context! {
-                title => format!("{org}/{name} - Components - Forest"),
-                description => &detail.summary.description,
-                summary => &detail.summary,
-                versions => &detail.versions,
-                readme_html => readme_html,
-                manifest_html => manifest_html,
-                manifest => manifest_view,
-                owners => &detail.owners,
-                project_description => &project_description,
-                project_metadata => project_metadata_ctx,
-                active_detail_tab => "readme",
-                user => user,
-                csrf_token => csrf_token,
-                orgs => orgs,
-                current_org => current_org,
-                active_tab => "components",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+    let html = crate::views::pages::component_detail::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -277,7 +252,9 @@ async fn component_version_detail(
             let (d, m, p) = tokio::join!(
                 registry.get_component_detail(&session.access_token, &org, &name),
                 registry.get_component_manifest(&session.access_token, &org, &name, &version),
-                state.platform_client.get_project(&session.access_token, &org, &name),
+                state
+                    .platform_client
+                    .get_project(&session.access_token, &org, &name),
             );
             let project_info = match p {
                 Ok(info) => info,
@@ -308,52 +285,31 @@ async fn component_version_detail(
     })?;
 
     let manifest_json = default_unless_missing("get_public_component_manifest", manifest_res);
-    let manifest_html = if manifest_json.is_empty() {
-        String::new()
-    } else {
-        pretty_json::tokenize(&manifest_json)
+    let (manifest, manifest_html) = manifest_parts(&manifest_json);
+    let (description, about) = project_overview(
+        project_info.as_ref(),
+        Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
+    );
+
+    let page = ComponentDetailPage {
+        chrome: registry_chrome(
+            &state,
+            maybe_session.session.as_ref(),
+            format!("{org}/{name}@{version} - Components - Forest"),
+            detail.summary.description.clone(),
+        ),
+        readme: readme(&detail.readme),
+        summary: detail.summary,
+        versions: detail.versions,
+        selected_version: Some(version),
+        description,
+        manifest,
+        manifest_html,
+        owners: detail.owners,
+        about,
+        highlight_js: state.templates.asset_href("js/readme-highlight.js"),
     };
-    let manifest_view = ManifestView::parse(&manifest_json);
-
-    let readme_html = if detail.readme.is_empty() {
-        String::new()
-    } else {
-        render_markdown(&detail.readme)
-    };
-
-    let (user, csrf_token, orgs, current_org) = maybe_user_context(&maybe_session);
-
-    let (project_description, project_metadata_ctx) =
-        project_overview_ctx(
-            project_info.as_ref(),
-            Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
-        );
-
-    let html = state
-        .templates
-        .render(
-            "pages/component_detail.html.jinja",
-            context! {
-                title => format!("{org}/{name}@{version} - Components - Forest"),
-                description => &detail.summary.description,
-                summary => &detail.summary,
-                versions => &detail.versions,
-                readme_html => readme_html,
-                manifest_html => manifest_html,
-                manifest => manifest_view,
-                owners => &detail.owners,
-                selected_version => &version,
-                project_description => &project_description,
-                project_metadata => project_metadata_ctx,
-                active_detail_tab => "readme",
-                user => user,
-                csrf_token => csrf_token,
-                orgs => orgs,
-                current_org => current_org,
-                active_tab => "components",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+    let html = crate::views::pages::component_detail::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -378,28 +334,28 @@ async fn org_components(
         .map_err(|e| internal_error(&state, "search_components", &e))?;
 
     let components = dedup_components(results.components);
-    let total_pages = ((results.total_count as f64) / (page_size as f64)).ceil() as i32;
+    let total_pages = total_pages(results.total_count, page_size);
 
-    let html = state
-        .templates
-        .render(
-            "pages/org_components.html.jinja",
-            context! {
-                title => format!("{org} - Components - Forest"),
-                description => format!("Components in {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                components => components,
-                query => &query,
-                page => page,
-                total_pages => total_pages,
-                active_tab => "components",
+    let page = OrgComponentsPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("{org} - Components - Forest"),
+                description: format!("Components in {org}"),
+                org: Some(&org),
+                project: None,
+                projects: Vec::new(),
+                tab: forage_ui::chrome::Tab::Components,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org,
+        query,
+        components,
+        page: page as u32,
+        total_pages,
+    };
+    let html = crate::views::pages::org_components::render(&page);
 
     Ok(Html(html).into_response())
 }

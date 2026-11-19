@@ -1,4 +1,0 @@
-{% macro timeline_prefetch(org, project) %}
-{% set url = ("/api/orgs/" ~ org ~ "/projects/" ~ project ~ "/timeline") if project else ("/api/orgs/" ~ org ~ "/timeline") %}
-<script src="{{ asset('js/timeline-prefetch.js') }}" data-timeline-url="{{ url }}"></script>
-{% endmacro %}

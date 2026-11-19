@@ -28,6 +28,7 @@ mod org_pages_tests;
 mod org_rules_tests;
 mod org_settings_pages_tests;
 mod pages_tests;
+mod catalogue_pages_tests;
 mod platform_tests;
 mod policy_pipeline_pages_tests;
 mod project_pages_tests;

@@ -15,3 +15,4 @@ pub mod projects;
 pub mod account;
 pub mod org_pages;
 pub mod auth;
+pub mod catalogue;

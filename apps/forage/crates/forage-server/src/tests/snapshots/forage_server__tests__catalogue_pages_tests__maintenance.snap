@@ -1,0 +1,24 @@
+---
+source: crates/forage-server/src/tests/catalogue_pages_tests.rs
+expression: "regex::Regex::new(r\"\\?v=[0-9a-z]+\").unwrap().replace_all(&html, \"?v=HASH\")"
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maintenance - Forest</title>
+<meta name="description" content="Forest is temporarily unavailable while maintenance is in progress.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/static/css/maintenance.css?v=HASH">
+</head>
+<body class="maintenance">
+<main class="maintenance-card">
+<p class="maintenance-wordmark">forest</p>
+<p class="maintenance-status">Maintenance in progress</p>
+<h1 class="maintenance-heading">We&rsquo;ll be back shortly.</h1>
+<p class="maintenance-message">The entire application is temporarily unavailable while we carry out maintenance.</p>
+<p class="maintenance-retry">Please try again in a few minutes.</p>
+</main>
+</body>
+</html>

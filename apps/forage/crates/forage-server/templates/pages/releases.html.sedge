@@ -1,0 +1,16 @@
+use forage_ui::components::TimelinePrefetch;
+use forage_ui::layouts::Shell;
+props crate::views::catalogue::OrgReleasesPage { chrome, org, prefetch_js };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+      <h1 class="text-2xl font-bold">Continuous deployment</h1>
+    </div>
+    <TimelinePrefetch org={org} project={None} src={prefetch_js} />
+    <release-timeline org={org}></release-timeline>
+  </section>
+  <:scripts>
+    <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+  </:scripts>
+</Shell>

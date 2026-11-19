@@ -1,0 +1,35 @@
+use forage_ui::components::{EmptyState, Pagination};
+use forage_ui::layouts::Shell;
+use crate::views::components::ComponentRow;
+props crate::views::catalogue::ComponentsPage { chrome, query, filter_org, components, page, total_pages };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12 pb-8">
+    <div class="mb-8">
+      <h1 class="text-2xl font-bold">Component Registry</h1>
+      <p class="mt-2 text-gray-600">Discover and share reusable forest components.</p>
+    </div>
+    <form method="GET" action="/components" class="flex gap-3 mb-8">
+      <input type="text" name="q" value={query} placeholder="Search components..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+      <select name="org" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+        <option value="">All organisations</option>
+        {for (name, selected) in props.org_options() {
+          <option value={name} selected={selected}>{name}</option>
+        }}
+      </select>
+      <button type="submit" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800">Search</button>
+    </form>
+    {if !components.is_empty() {
+      <div class="space-y-3">
+        {for c in components.iter() {
+          <ComponentRow c={c} title={&format!("{}/{}", c.organisation, c.name)} details={true} />
+        }}
+      </div>
+      <Pagination base_url="/components" page={*page} total_pages={*total_pages} params={&[("q", query.as_str()), ("org", filter_org.as_str())]} />
+    } else if !query.is_empty() {
+      <EmptyState message={&format!("No components found for \"{query}\".")} hint="Try a different search term." />
+    } else {
+      <EmptyState message="No components published yet." hint="Publish components via the forest CLI." />
+    }}
+  </section>
+</Shell>

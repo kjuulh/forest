@@ -39,7 +39,6 @@ use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use clap::Parser;
-use minijinja::context;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
@@ -47,15 +46,12 @@ use crate::forest_client::GrpcForestClient;
 use crate::state::AppState;
 use crate::templates::TemplateEngine;
 
-async fn maintenance_page(State(templates): State<TemplateEngine>) -> Response {
-    let body = match templates.render("pages/maintenance.html.jinja", context! {}) {
-        Ok(body) => body,
-        Err(err) => {
-            tracing::error!("failed to render maintenance page: {err}");
-            "<!DOCTYPE html><title>Maintenance</title><h1>Application under maintenance</h1>"
-                .to_string()
-        }
-    };
+async fn maintenance_page() -> Response {
+    use sha2::Digest;
+    let hash = format!("{:x}", sha2::Sha256::digest(MAINTENANCE_CSS.as_bytes()));
+    let body = views::pages::maintenance::render(&views::catalogue::MaintenancePage {
+        css_href: format!("{MAINTENANCE_CSS_PATH}?v={}", &hash[..12]),
+    });
 
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -68,8 +64,23 @@ async fn maintenance_page(State(templates): State<TemplateEngine>) -> Response {
         .into_response()
 }
 
+const MAINTENANCE_CSS_PATH: &str = "/static/css/maintenance.css";
+const MAINTENANCE_CSS: &str = include_str!("../../../static/css/maintenance.css");
+
+async fn maintenance_css() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        MAINTENANCE_CSS,
+    )
+        .into_response()
+}
+
 pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
     Router::new()
+        .route(MAINTENANCE_CSS_PATH, axum::routing::get(maintenance_css))
         .fallback(maintenance_page)
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -78,20 +89,13 @@ pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
 }
 
 async fn fallback_404(State(state): State<AppState>) -> Response {
-    let html = state.templates.render(
-        "pages/error.html.jinja",
-        context! {
-            title => "Not Found - Forest",
-            description => "The page you're looking for doesn't exist.",
-            status => 404u16,
-            heading => "Page not found",
-            message => "The page you're looking for doesn't exist.",
-        },
+    let html = views::catalogue::error_page(
+        &state.templates,
+        404,
+        "Page not found",
+        "The page you're looking for doesn't exist.",
     );
-    match html {
-        Ok(body) => (StatusCode::NOT_FOUND, Html(body)).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    (StatusCode::NOT_FOUND, Html(html)).into_response()
 }
 
 pub fn build_router(state: AppState) -> Router {
