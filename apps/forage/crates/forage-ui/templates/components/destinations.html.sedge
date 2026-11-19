@@ -1,0 +1,16 @@
+use crate::components::Icon;
+component EnvDot(env: &str) {
+{let color = if env.contains("preprod") || env.contains("pre-prod") { "bg-orange-500" } else if env.contains("prod") { "bg-pink-500" } else if env.contains("stag") { "bg-yellow-500" } else if env.contains("dev") { "bg-violet-500" } else { "bg-gray-400" };}
+<span class="w-2 h-2 rounded-full shrink-0 {color}"></span>
+}
+component TypeChip(name: &str, version: u64 = 0) {
+<span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{name}{if *version != 0 { {format!(" v{version}")} }}</span>
+}
+component SecretToggle(title: &str) {
+<label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title={title}>
+  <input type="checkbox" class="meta-sensitive accent-green-600">secret
+</label>
+}
+component RemoveRowButton() {
+<button type="button" class="remove-meta-row text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row"><Icon name="x" /></button>
+}

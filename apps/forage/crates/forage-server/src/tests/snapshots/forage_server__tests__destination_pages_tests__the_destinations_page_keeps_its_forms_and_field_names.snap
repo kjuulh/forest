@@ -1,0 +1,239 @@
+---
+source: crates/forage-server/src/tests/destination_pages_tests.rs
+expression: main_element(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container py-12">
+<div class="flex items-center justify-between mb-8">
+<h1 class="text-2xl font-bold">Environments &amp; Destinations</h1>
+</div>
+<div id="env-list" class="space-y-6" data-org="testorg">
+<div class="env-card border border-gray-200 rounded-lg overflow-hidden cursor-move" data-env-id="env-dev" draggable="true">
+<div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="env-drag-handle text-gray-300 select-none" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+<span class="w-2 h-2 rounded-full shrink-0 bg-violet-500"></span>
+<span class="font-medium text-gray-900">dev</span>
+<span class="text-xs text-gray-500">— dev environment</span>
+</div>
+<span class="text-xs text-gray-400">order: 0</span>
+</div>
+<div class="divide-y divide-gray-100">
+<div class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+<a href="/orgs/testorg/destinations/detail?name=app-dev" class="flex items-center gap-3 min-w-0 flex-1">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+<span class="text-sm font-medium text-gray-900">app-dev</span>
+
+<span class="text-xs text-gray-400">3 keys</span>
+<span class="text-xs text-gray-400" title="Hidden values are not included in the exported JSON">1 hidden</span>
+</a>
+<button type="button" class="export-dest text-gray-300 hover:text-gray-600 transition-colors p-1 shrink-0" title="Copy JSON to clipboard" data-name="app-dev" data-env="dev" data-type-org="" data-type-name="" data-type-version="" data-metadata="{&quot;account&quot;:&quot;1234&quot;,&quot;region&quot;:&quot;eu-west-1&quot;}" data-sensitive-keys="[&quot;api_token&quot;]">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+</button>
+</div>
+</div>
+<details class="border-t border-gray-100">
+<summary class="px-5 py-3 bg-gray-50/50 text-sm text-gray-500 cursor-pointer hover:text-gray-700 select-none">Add destination to dev</summary>
+<div class="px-5 py-4">
+<div class="mb-3">
+<details>
+<summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Import from JSON</summary>
+<div class="mt-2 space-y-2">
+<textarea id="import-json-1" rows="4" placeholder="Paste destination JSON here..." class="w-full text-xs font-mono px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"></textarea>
+<div class="flex gap-2">
+<button type="button" data-import-paste="1" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Paste from clipboard</button>
+<button type="button" data-import-apply="1" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Apply</button>
+</div>
+</div>
+</details>
+</div>
+<form method="post" action="/orgs/testorg/destinations/create" class="space-y-3" id="create-dest-form-1">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="environment" value="dev">
+<input type="hidden" name="type_organisation" id="type_organisation_1">
+<input type="hidden" name="type_name" id="type_name_1">
+<input type="hidden" name="type_version" id="type_version_1">
+<div>
+<label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+<input type="text" name="name" placeholder="e.g. my-app-prod" required class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+</div>
+<div>
+<label for="destination_type_1" class="block text-xs font-medium text-gray-600 mb-1">Destination type <span class="text-gray-400">(optional)</span></label>
+<select id="destination_type_1" data-index="1" class="dest-type-select w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white">
+<option value="">None (manual metadata only)</option>
+<option value="custom">Custom (manual metadata)</option>
+<option value="forest/terraform@2">forest/terraform v2 — Terraform workspace</option>
+</select>
+</div>
+<div id="type-fields-1" class="hidden space-y-2"></div>
+<div id="custom-fields-1" class="space-y-1">
+<label class="block text-xs font-medium text-gray-600 mb-1">Metadata <span class="text-gray-400">(key-value pairs)</span></label>
+<div class="space-y-1.5 create-meta-rows">
+<div class="flex gap-2 items-center metadata-row">
+<input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+<input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+<label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving">
+<input type="checkbox" class="meta-sensitive accent-green-600">secret
+</label>
+<button type="button" class="remove-meta-row text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+</div>
+</div>
+<button type="button" class="add-meta-row mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+  Add row
+</button>
+</div>
+<div id="extra-fields-1" class="hidden space-y-1">
+<div class="flex items-center gap-3 pt-2">
+<div class="flex-1 border-t border-gray-200"></div>
+<span class="text-xs text-gray-400">additional metadata</span>
+<div class="flex-1 border-t border-gray-200"></div>
+</div>
+<div class="space-y-1.5 extra-meta-rows"></div>
+<button type="button" class="add-meta-row mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+  Add row
+</button>
+</div>
+<div class="flex justify-end">
+<button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create destination</button>
+</div>
+</form>
+</div>
+</details>
+</div><div class="env-card border border-gray-200 rounded-lg overflow-hidden cursor-move" data-env-id="env-prod" draggable="true">
+<div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="env-drag-handle text-gray-300 select-none" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+<span class="w-2 h-2 rounded-full shrink-0 bg-pink-500"></span>
+<span class="font-medium text-gray-900">prod</span>
+<span class="text-xs text-gray-500">— prod environment</span>
+</div>
+<span class="text-xs text-gray-400">order: 10</span>
+</div>
+<div class="divide-y divide-gray-100">
+<div class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+<a href="/orgs/testorg/destinations/detail?name=app%20prod%26eu" class="flex items-center gap-3 min-w-0 flex-1">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+<span class="text-sm font-medium text-gray-900">app prod&amp;eu</span>
+<span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">terraform v2</span>
+<span class="text-xs text-gray-400">3 keys</span>
+<span class="text-xs text-gray-400" title="Hidden values are not included in the exported JSON">1 hidden</span>
+</a>
+<button type="button" class="export-dest text-gray-300 hover:text-gray-600 transition-colors p-1 shrink-0" title="Copy JSON to clipboard" data-name="app prod&amp;eu" data-env="prod" data-type-org="forest" data-type-name="terraform" data-type-version="2" data-metadata="{&quot;account&quot;:&quot;1234&quot;,&quot;region&quot;:&quot;eu-west-1&quot;}" data-sensitive-keys="[&quot;api_token&quot;]">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+</button>
+</div>
+</div>
+<details class="border-t border-gray-100">
+<summary class="px-5 py-3 bg-gray-50/50 text-sm text-gray-500 cursor-pointer hover:text-gray-700 select-none">Add destination to prod</summary>
+<div class="px-5 py-4">
+<div class="mb-3">
+<details>
+<summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Import from JSON</summary>
+<div class="mt-2 space-y-2">
+<textarea id="import-json-2" rows="4" placeholder="Paste destination JSON here..." class="w-full text-xs font-mono px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"></textarea>
+<div class="flex gap-2">
+<button type="button" data-import-paste="2" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Paste from clipboard</button>
+<button type="button" data-import-apply="2" class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Apply</button>
+</div>
+</div>
+</details>
+</div>
+<form method="post" action="/orgs/testorg/destinations/create" class="space-y-3" id="create-dest-form-2">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="environment" value="prod">
+<input type="hidden" name="type_organisation" id="type_organisation_2">
+<input type="hidden" name="type_name" id="type_name_2">
+<input type="hidden" name="type_version" id="type_version_2">
+<div>
+<label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+<input type="text" name="name" placeholder="e.g. my-app-prod" required class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+</div>
+<div>
+<label for="destination_type_2" class="block text-xs font-medium text-gray-600 mb-1">Destination type <span class="text-gray-400">(optional)</span></label>
+<select id="destination_type_2" data-index="2" class="dest-type-select w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white">
+<option value="">None (manual metadata only)</option>
+<option value="custom">Custom (manual metadata)</option>
+<option value="forest/terraform@2">forest/terraform v2 — Terraform workspace</option>
+</select>
+</div>
+<div id="type-fields-2" class="hidden space-y-2"></div>
+<div id="custom-fields-2" class="space-y-1">
+<label class="block text-xs font-medium text-gray-600 mb-1">Metadata <span class="text-gray-400">(key-value pairs)</span></label>
+<div class="space-y-1.5 create-meta-rows">
+<div class="flex gap-2 items-center metadata-row">
+<input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+<input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+<label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving">
+<input type="checkbox" class="meta-sensitive accent-green-600">secret
+</label>
+<button type="button" class="remove-meta-row text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+</div>
+</div>
+<button type="button" class="add-meta-row mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+  Add row
+</button>
+</div>
+<div id="extra-fields-2" class="hidden space-y-1">
+<div class="flex items-center gap-3 pt-2">
+<div class="flex-1 border-t border-gray-200"></div>
+<span class="text-xs text-gray-400">additional metadata</span>
+<div class="flex-1 border-t border-gray-200"></div>
+</div>
+<div class="space-y-1.5 extra-meta-rows"></div>
+<button type="button" class="add-meta-row mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+  Add row
+</button>
+</div>
+<div class="flex justify-end">
+<button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create destination</button>
+</div>
+</form>
+</div>
+</details>
+</div>
+</div>
+<div class="mt-6 border border-gray-200 rounded-lg overflow-hidden">
+<div class="px-5 py-3 bg-gray-50">
+<span class="font-medium text-gray-700">Other destinations</span>
+</div>
+<div class="divide-y divide-gray-100">
+<a href="/orgs/testorg/destinations/detail?name=stray" class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors block">
+<div class="flex items-center gap-3">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+<span class="text-sm text-gray-900">stray</span>
+<span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">legacy</span>
+<span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">terraform v2</span>
+</div>
+<svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</a>
+</div>
+</div>
+<div class="mt-8 border border-gray-200 rounded-lg overflow-hidden">
+<div class="px-5 py-3 bg-gray-50">
+<span class="font-medium text-gray-900">Create environment</span>
+</div>
+<div class="px-5 py-4">
+<form method="post" action="/orgs/testorg/destinations/environments" class="flex flex-col gap-3 sm:flex-row sm:items-end">
+<input type="hidden" name="_csrf" value="test-csrf">
+<div class="flex-1">
+<label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+<input type="text" name="name" placeholder="e.g. production" required class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+</div>
+<div class="flex-1">
+<label class="block text-xs font-medium text-gray-600 mb-1">Description <span class="text-gray-400">(optional)</span></label>
+<input type="text" name="description" placeholder="e.g. Live production environment" class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+</div>
+<div class="w-24">
+<label class="block text-xs font-medium text-gray-600 mb-1">Order</label>
+<input type="number" name="sort_order" value="0" class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+</div>
+<button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create</button>
+</form>
+</div>
+</div>
+</section>
+</main>

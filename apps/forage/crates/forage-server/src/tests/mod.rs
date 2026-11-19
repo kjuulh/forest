@@ -3,6 +3,7 @@ mod account_tests;
 mod auth_tests;
 mod auto_join_tests;
 mod avatar_tests;
+mod destination_pages_tests;
 mod destination_sensitive_tests;
 mod developer_tests;
 mod device_tests;

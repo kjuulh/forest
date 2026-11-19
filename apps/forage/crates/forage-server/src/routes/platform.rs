@@ -2659,109 +2659,32 @@ async fn destinations_page(
         org_destinations.map_err(|e| internal_error(&state, "list_destinations", &e))?;
     let projects = warn_default("list_projects", projects);
     let dest_types = warn_default("list_destination_types", dest_types);
-    let destination_types_json =
-        serde_json::to_string(&dest_types).unwrap_or_else(|_| "[]".to_string());
 
-    let destination_types: Vec<minijinja::Value> = dest_types
-        .iter()
-        .map(|t| {
-            context! {
-                organisation => &t.organisation,
-                name => &t.name,
-                version => t.version,
-                description => &t.description,
-            }
-        })
-        .collect();
-
-    let env_list: Vec<minijinja::Value> = environments
-        .iter()
-        .map(|e| {
-            let env_dests: Vec<minijinja::Value> = org_destinations
-                .iter()
-                .filter(|d| d.environment == e.name)
-                .map(|d| {
-                    let meta_entries: Vec<minijinja::Value> = d
-                        .metadata
-                        .iter()
-                        .map(|(k, v)| context! { key => k, value => v })
-                        .collect();
-                    let metadata_json = serde_json::to_string(&d.metadata).unwrap_or_default();
-                    context! {
-                        name => d.name,
-                        environment => d.environment,
-                        type_name => d.dest_type.as_ref().map(|t| t.name.clone()),
-                        type_org => d.dest_type.as_ref().map(|t| t.organisation.clone()),
-                        type_version => d.dest_type.as_ref().map(|t| t.version),
-                        metadata => meta_entries,
-                        metadata_json => metadata_json,
-                        sensitive_keys => &d.sensitive_keys,
-                        sensitive_keys_json => serde_json::to_string(&d.sensitive_keys)
-                            .unwrap_or_else(|_| "[]".to_string()),
-                        metadata_count => d.metadata.len() + d.sensitive_keys.len(),
-                    }
-                })
-                .collect();
-            context! {
-                id => e.id,
-                name => e.name,
-                description => e.description,
-                sort_order => e.sort_order,
-                destinations => env_dests,
-            }
-        })
-        .collect();
-
-    let known_envs: std::collections::HashSet<&str> =
-        environments.iter().map(|e| e.name.as_str()).collect();
-    let orphan_dests: Vec<minijinja::Value> = org_destinations
-        .iter()
-        .filter(|d| !known_envs.contains(d.environment.as_str()))
-        .map(|d| {
-            let meta_entries: Vec<minijinja::Value> = d
-                .metadata
-                .iter()
-                .map(|(k, v)| context! { key => k, value => v })
-                .collect();
-            let metadata_json = serde_json::to_string(&d.metadata).unwrap_or_default();
-            context! {
-                name => d.name,
-                environment => d.environment,
-                type_name => d.dest_type.as_ref().map(|t| t.name.clone()),
-                type_org => d.dest_type.as_ref().map(|t| t.organisation.clone()),
-                type_version => d.dest_type.as_ref().map(|t| t.version),
-                metadata => meta_entries,
-                metadata_json => metadata_json,
-                sensitive_keys => &d.sensitive_keys,
-                sensitive_keys_json => serde_json::to_string(&d.sensitive_keys)
-                    .unwrap_or_else(|_| "[]".to_string()),
-                metadata_count => d.metadata.len() + d.sensitive_keys.len(),
-            }
-        })
-        .collect();
-
-    let html = state
-        .templates
-        .render(
-            "pages/destinations.html.jinja",
-            context! {
-                title => format!("Destinations - {org} - Forest"),
-                description => format!("Deployment destinations for {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                environments => env_list,
-                orphan_destinations => orphan_dests,
-                projects => projects,
-                is_admin => is_admin,
-                active_tab => "destinations",
-                destination_types => destination_types,
-                destination_types_json => destination_types_json,
+    let page = crate::views::destinations::DestinationsPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Destinations - {org} - Forest"),
+                description: format!("Deployment destinations for {org}"),
+                org: Some(&org),
+                project: None,
+                projects,
+                tab: forage_ui::chrome::Tab::Destinations,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        environments: environments
+            .iter()
+            .map(|e| crate::views::destinations::EnvironmentGroup::new(e, &org_destinations))
+            .collect(),
+        orphans: crate::views::destinations::orphans(&environments, &org_destinations),
+        types: dest_types,
+        script: state.templates.asset_href("js/destinations.js"),
+    };
+    let html = crate::views::pages::destinations::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -3030,83 +2953,34 @@ async fn destination_detail(
             )
         })?;
 
-    let type_sensitive_keys: std::collections::BTreeSet<&str> = dest
-        .dest_type
-        .as_ref()
-        .and_then(|dt| {
-            dest_types
-                .iter()
-                .find(|t| t.organisation == dt.organisation && t.name == dt.name)
-        })
-        .map(|t| {
-            t.fields
-                .iter()
-                .filter(|f| f.sensitive)
-                .map(|f| f.name.as_str())
-                .collect()
-        })
-        .unwrap_or_default();
+    let (entries, declared_sensitive_json) =
+        crate::views::destinations::DestinationDetailPage::entries(dest, &dest_types);
 
-    let declared_sensitive_keys: Vec<&String> = dest
-        .sensitive_keys
-        .iter()
-        .filter(|k| !type_sensitive_keys.contains(k.as_str()))
-        .collect();
-
-    let mut meta_entries: Vec<minijinja::Value> = dest
-        .metadata
-        .iter()
-        .map(|(k, v)| {
-            context! {
-                key => k,
-                value => v,
-                sensitive => false,
-                type_sensitive => false,
-            }
-        })
-        .chain(dest.sensitive_keys.iter().map(|k| {
-            context! {
-                key => k,
-                value => "",
-                sensitive => true,
-                type_sensitive => type_sensitive_keys.contains(k.as_str()),
-            }
-        }))
-        .collect();
-    meta_entries.sort_by_key(|e| {
-        e.get_attr("key")
-            .ok()
-            .and_then(|k| k.as_str().map(str::to_owned))
-            .unwrap_or_default()
-    });
-
-    let html = state
-        .templates
-        .render(
-            "pages/destination_detail.html.jinja",
-            context! {
-                title => format!("{} - Destinations - {} - Forest", dest_name, org),
-                description => format!("Destination {} in {}", dest_name, org),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                is_admin => is_admin,
-                active_tab => "destinations",
-                dest_name => &dest.name,
-                dest_environment => &dest.environment,
-                dest_type_name => dest.dest_type.as_ref().map(|t| t.name.clone()),
-                dest_type_organisation => dest.dest_type.as_ref().map(|t| t.organisation.clone()),
-                dest_type_version => dest.dest_type.as_ref().map(|t| t.version),
-                metadata => meta_entries,
-                sensitive_keys => &dest.sensitive_keys,
-                declared_sensitive_keys_json =>
-                    serde_json::to_string(&declared_sensitive_keys)
-                        .unwrap_or_else(|_| "[]".to_string()),
+    let page = crate::views::destinations::DestinationDetailPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("{} - Destinations - {} - Forest", dest_name, org),
+                description: format!("Destination {} in {}", dest_name, org),
+                org: Some(&org),
+                project: None,
+                projects: Vec::new(),
+                tab: forage_ui::chrome::Tab::Destinations,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        name: dest.name.clone(),
+        environment: dest.environment.clone(),
+        dest_type: dest.dest_type.clone(),
+        entries,
+        hidden_count: dest.sensitive_keys.len(),
+        declared_sensitive_json,
+        script: state.templates.asset_href("js/destinations.js"),
+    };
+    let html = crate::views::pages::destination_detail::render(&page);
 
     Ok(Html(html).into_response())
 }

@@ -1,0 +1,145 @@
+use forage_ui::components::{CsrfField, EnvDot, Icon, RemoveRowButton, SecretToggle};
+use forage_ui::layouts::Shell;
+use crate::views::destinations::{destinations_href, plural, reveal_href, shown_type, update_href};
+props crate::views::destinations::DestinationDetailPage { chrome, org, csrf_token, is_admin, name, environment, dest_type, entries, hidden_count, declared_sensitive_json, script };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <nav class="flex items-center gap-1.5 text-sm text-gray-500 mb-6">
+      <a href={destinations_href(org)} class="hover:text-gray-900 transition-colors">Destinations</a>
+      <Icon name="chevron-right" class="w-3.5 h-3.5" />
+      <span class="text-gray-900 font-medium">{name}</span>
+    </nav>
+
+    <div class="flex items-start justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">{name}</h1>
+        <p class="text-sm text-gray-500 mt-1">
+          Environment:
+          <span class="inline-flex items-center gap-1.5">
+            <EnvDot env={environment.as_str()} />
+            <span class="font-medium text-gray-700">{environment}</span>
+          </span>
+        </p>
+      </div>
+    </div>
+
+    <div class="border border-gray-200 rounded-lg overflow-hidden mb-6">
+      <div class="px-5 py-3 bg-gray-50">
+        <span class="text-sm font-medium text-gray-900">Type</span>
+      </div>
+      <div class="px-5 py-4">
+        {if let Some(t) = shown_type(dest_type) {
+          <div class="flex items-center gap-4">
+            <div>
+              <span class="text-xs text-gray-500">Name</span>
+              <p class="text-sm font-medium text-gray-900">{t.name}</p>
+            </div>
+            {if !t.organisation.is_empty() {
+              <div>
+                <span class="text-xs text-gray-500">Organisation</span>
+                <p class="text-sm font-medium text-gray-900">{t.organisation}</p>
+              </div>
+            }}
+            {if t.version != 0 {
+              <div>
+                <span class="text-xs text-gray-500">Version</span>
+                <p class="text-sm font-medium text-gray-900">v{t.version}</p>
+              </div>
+            }}
+          </div>
+        } else {
+          <p class="text-sm text-gray-400">No type assigned</p>
+        }}
+      </div>
+    </div>
+
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+      <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-900">Metadata</span>
+        <span class="flex items-center gap-3">
+          {if *hidden_count > 0 { <span class="text-xs text-gray-400">{hidden_count} hidden</span> }}
+          {if !entries.is_empty() { <span class="text-xs text-gray-400">{plural(entries.len(), "key")}</span> }}
+        </span>
+      </div>
+
+      {if *is_admin {
+        <form method="post" action={update_href(org, name)} id="metadata-form"
+              data-declared-sensitive={declared_sensitive_json}
+              data-reveal-url={reveal_href(org, name)}>
+          <CsrfField token={csrf_token} name="_csrf" />
+          <div class="divide-y divide-gray-100" id="metadata-rows">
+            {for entry in entries.iter() {
+              <div class="px-5 py-3 flex items-center gap-3 metadata-row">
+                {if entry.sensitive {
+                  <input type="text" name="metadata_keys" value={entry.key} placeholder="key" readonly
+                    class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono bg-gray-50 text-gray-500">
+                  <input type="hidden" name="preserve_sensitive_keys" value={entry.key}>
+                  <div class="flex-1 flex items-center gap-2">
+                    <input type="text" name="metadata_values" value="" autocomplete="off"
+                      data-sensitive-key={entry.key}
+                      placeholder="hidden — leave blank to keep, or type to replace"
+                      class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <button type="button" class="reveal-btn shrink-0 text-xs px-2 py-1 border border-gray-200 rounded-md text-gray-500 hover:text-gray-900 hover:border-gray-300 transition-colors"
+                      data-key={entry.key} title="Fetch and show this value">Reveal</button>
+                  </div>
+                  {if entry.type_sensitive {
+                    <span class="shrink-0 text-xs text-gray-400" title={format!("The {} destination type declares this key a credential, so it is hidden for every destination of this type.", shown_type(dest_type).map(|t| t.name.as_str()).unwrap_or_default())}>by type</span>
+                  } else {
+                    <span class="shrink-0 text-xs text-gray-400" title="Marked a credential on this destination. Un-hiding it is deliberate: use `forest destination update --clear-sensitive`.">secret</span>
+                  }}
+                } else {
+                  <input type="text" name="metadata_keys" value={entry.key} placeholder="key"
+                    class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                  <input type="text" name="metadata_values" value={entry.value} placeholder="value"
+                    class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                  <SecretToggle title="Mark as a credential: the value is hidden after saving. This cannot be undone from the UI." />
+                }}
+                <RemoveRowButton />
+              </div>
+            }}
+            <div class="px-5 py-3 flex items-center gap-3 metadata-row">
+              <input type="text" name="metadata_keys" placeholder="key"
+                class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+              <input type="text" name="metadata_values" placeholder="value"
+                class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+              <SecretToggle title="Mark as a credential: the value is hidden after saving. This cannot be undone from the UI." />
+              <RemoveRowButton />
+            </div>
+          </div>
+          <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+            <button type="button" id="add-row-btn"
+              class="text-sm text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+              <Icon name="plus" />
+              Add row
+            </button>
+            <button type="submit"
+              class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">
+              Save metadata
+            </button>
+          </div>
+        </form>
+      } else {
+        {if !entries.is_empty() {
+          <div class="divide-y divide-gray-100">
+            {for entry in entries.iter() {
+              <div class="px-5 py-3 flex items-center gap-3">
+                <span class="flex-1 text-sm font-mono text-gray-600">{entry.key}</span>
+                {if entry.sensitive {
+                  <span class="flex-1 text-sm font-mono text-gray-400 select-none" title="Hidden — ask an admin to reveal it">••••••••</span>
+                } else {
+                  <span class="flex-1 text-sm font-mono text-gray-900">{entry.value}</span>
+                }}
+              </div>
+            }}
+          </div>
+        } else {
+          <div class="px-5 py-4 text-sm text-gray-400">No metadata</div>
+        }}
+      }}
+    </div>
+  </section>
+  <:scripts>
+    {if *is_admin { <script src={script} defer></script> }}
+  </:scripts>
+</Shell>

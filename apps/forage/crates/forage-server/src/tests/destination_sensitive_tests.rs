@@ -346,10 +346,10 @@ async fn resubmitted_set_carries_destination_keys_but_not_type_declared_ones() {
     let html = detail_html(state, &cookie, "flux-prod").await;
 
     let attr_start = html
-        .find("data-declared-sensitive='")
+        .find("data-declared-sensitive=\"")
         .expect("expected the declared-sensitive attribute on the form");
-    let rest = &html[attr_start + "data-declared-sensitive='".len()..];
-    let declared = &rest[..rest.find('\'').expect("unterminated attribute")];
+    let rest = &html[attr_start + "data-declared-sensitive=\"".len()..];
+    let declared = &rest[..rest.find('"').expect("unterminated attribute")];
 
     assert!(
         declared.contains("extra_api_key"),
