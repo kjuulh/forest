@@ -2638,7 +2638,7 @@ async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("(feat|feature)&#x2f;.*-to-platform-dev"));
+    assert!(html.contains("value=\"(feat|feature)/.*-to-platform-dev\""));
     assert!(html.contains(
         "action=\"/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555\""
     ));

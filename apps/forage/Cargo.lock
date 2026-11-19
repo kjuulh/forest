@@ -1041,6 +1041,7 @@ dependencies = [
  "futures-util",
  "hmac",
  "image",
+ "insta",
  "lettre",
  "minijinja",
  "nostatus",
@@ -1053,6 +1054,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rsa",
+ "sedge-gen",
  "sedge-rt",
  "serde",
  "serde_json",
@@ -3042,7 +3044,7 @@ dependencies = [
 [[package]]
 name = "sedge-gen"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=a65801397851703ee774faa87e5986c30afbdc44#a65801397851703ee774faa87e5986c30afbdc44"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
 dependencies = [
  "sedge-syntax",
  "serde_json",
@@ -3051,7 +3053,7 @@ dependencies = [
 [[package]]
 name = "sedge-rt"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=a65801397851703ee774faa87e5986c30afbdc44#a65801397851703ee774faa87e5986c30afbdc44"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
 dependencies = [
  "serde",
  "serde_json",
@@ -3060,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "sedge-syntax"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=a65801397851703ee774faa87e5986c30afbdc44#a65801397851703ee774faa87e5986c30afbdc44"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
 dependencies = [
  "miette",
 ]

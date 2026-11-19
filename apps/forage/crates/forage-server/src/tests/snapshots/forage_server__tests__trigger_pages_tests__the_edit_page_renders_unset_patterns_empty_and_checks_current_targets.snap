@@ -1,0 +1,105 @@
+---
+source: crates/forage-server/src/tests/trigger_pages_tests.rs
+expression: main_element(&html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-6xl mx-auto px-4 pt-10">
+<div class="flex items-center justify-between gap-4 flex-wrap mb-4">
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+
+<a href="/orgs/testorg/projects" class="hover:text-gray-900 hover:underline">testorg</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api" class="hover:text-gray-900 hover:underline">my-api</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api/settings" class="hover:text-gray-900 hover:underline">Settings</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api/settings/triggers" class="hover:text-gray-900 hover:underline">Triggers</a><span class="text-gray-300" aria-hidden="true">›</span>
+<span class="text-gray-900 truncate">main-to-dev</span>
+</nav>
+<a href="/orgs/testorg/projects/my-api/settings/triggers" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+  Back to Triggers
+</a>
+</div>
+<div class="mb-8">
+<h1 class="font-mono text-2xl tracking-tight leading-tight">
+<span class="text-gray-500">testorg</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">my-api</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
+</h1>
+<p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
+</div>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Project settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="mb-6">
+<h2 class="text-lg font-bold">main-to-dev</h2>
+<p class="text-sm text-gray-500 mt-1">Update filter patterns and targets for this trigger.</p>
+</div>
+<div class="border border-gray-200 rounded-lg p-6"><form method="post" action="/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555" class="space-y-4">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<p class="text-sm text-gray-500 mb-2">Update filter patterns. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
+<div class="space-y-3">
+<div>
+<label for="field-branch_pattern" class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+<input type="text" id="field-branch_pattern" name="branch_pattern" value="main" placeholder="e.g. main" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+</div>
+<div>
+<label for="field-title_pattern" class="block text-sm font-medium text-gray-700 mb-1">Title pattern</label>
+<input type="text" id="field-title_pattern" name="title_pattern" value="" placeholder="e.g. ^Release.*" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+</div>
+<div>
+<label for="field-author_pattern" class="block text-sm font-medium text-gray-700 mb-1">Author pattern</label>
+<input type="text" id="field-author_pattern" name="author_pattern" value="" placeholder="e.g. ci-bot" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+</div>
+<div>
+<label for="field-commit_message_pattern" class="block text-sm font-medium text-gray-700 mb-1">Commit message pattern</label>
+<input type="text" id="field-commit_message_pattern" name="commit_message_pattern" value="" placeholder="e.g. ^Merge pull request.*" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+</div>
+<div>
+<label for="field-source_type_pattern" class="block text-sm font-medium text-gray-700 mb-1">Source type pattern</label>
+<input type="text" id="field-source_type_pattern" name="source_type_pattern" value="" placeholder="e.g. github-actions" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+</div>
+</div>
+<hr class="border-gray-200">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-2">Target environments</label>
+<div class="flex flex-wrap gap-2">
+<label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+<input type="checkbox" name="target_environments" value="dev" checked class="rounded border-gray-300 text-blue-600">
+dev
+</label><label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+<input type="checkbox" name="target_environments" value="prod" class="rounded border-gray-300 text-blue-600">
+prod
+</label>
+</div>
+</div>
+<div>
+<input type="hidden" name="use_pipeline_offered" value="true">
+<div class="flex items-center gap-2">
+<input type="checkbox" id="use-pipeline" name="use_pipeline" value="true" checked class="rounded border-gray-300">
+<label for="use-pipeline" class="text-sm font-medium text-gray-700">Use release pipeline</label>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<input type="checkbox" id="force-release" name="force_release" value="true" class="rounded border-gray-300">
+<label for="force-release" class="text-sm text-gray-700">Force release (skip queue)</label>
+</div>
+<div class="flex items-center gap-3 pt-2">
+<button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Save Changes</button>
+<a href="/orgs/testorg/projects/my-api/settings/triggers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+</div>
+</form></div>
+</div>
+</div>
+</section>
+</main>

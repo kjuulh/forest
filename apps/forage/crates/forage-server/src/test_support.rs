@@ -73,6 +73,7 @@ pub(crate) struct MockPlatformBehavior {
     pub update_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
     pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
+    pub update_trigger_inputs: Option<Arc<Mutex<Vec<UpdateTriggerInput>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub list_policies_result: Option<Result<Vec<Policy>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
@@ -883,6 +884,9 @@ impl ForestPlatform for MockPlatformClient {
         let b = self.behavior.lock().unwrap();
         if let Some(calls) = &b.rule_action_calls {
             calls.lock().unwrap().push(format!("update_trigger:{name}"));
+        }
+        if let Some(inputs) = &b.update_trigger_inputs {
+            inputs.lock().unwrap().push(input.clone());
         }
         b.update_trigger_result.clone().unwrap_or(Ok(Trigger {
             id: "trigger-1".into(),

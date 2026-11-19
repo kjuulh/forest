@@ -21,6 +21,7 @@ mod serve_http;
 mod session_reaper;
 mod state;
 mod templates;
+mod views;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

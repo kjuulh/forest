@@ -3869,6 +3869,16 @@ async fn resolve_trigger_name(
     project: &str,
     id: &str,
 ) -> Result<String, Response> {
+    Ok(resolve_trigger(state, session, org, project, id).await?.name)
+}
+
+async fn resolve_trigger(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    project: &str,
+    id: &str,
+) -> Result<forage_core::platform::Trigger, Response> {
     let triggers = state
         .platform_client
         .list_triggers(&session.access_token, org, project)
@@ -3878,7 +3888,6 @@ async fn resolve_trigger_name(
     triggers
         .into_iter()
         .find(|t| t.id == id)
-        .map(|t| t.name)
         .ok_or_else(|| {
             error_page(
                 state,
@@ -3999,7 +4008,7 @@ async fn triggers_page(
         ));
     }
 
-    let (triggers, environments, destinations, pipelines) = tokio::join!(
+    let (triggers, environments, pipelines) = tokio::join!(
         state
             .platform_client
             .list_triggers(&session.access_token, &org, &project),
@@ -4008,55 +4017,13 @@ async fn triggers_page(
             .list_environments(&session.access_token, &org),
         state
             .platform_client
-            .list_destinations(&session.access_token, &org),
-        state
-            .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
     );
     let triggers = triggers.map_err(|e| internal_error(&state, "list_triggers", &e))?;
     let environments = warn_default("list_environments", environments);
-    let destinations = warn_default("list_destinations", destinations);
     let pipelines = warn_default("list_release_pipelines", pipelines);
 
     let is_admin = current_org.role == "owner" || current_org.role == "admin";
-
-    let trigger_items: Vec<minijinja::Value> = triggers
-        .iter()
-        .map(|t| {
-            context! {
-                id => t.id,
-                name => t.name,
-                enabled => t.enabled,
-                branch_pattern => t.branch_pattern,
-                title_pattern => t.title_pattern,
-                author_pattern => t.author_pattern,
-                commit_message_pattern => t.commit_message_pattern,
-                source_type_pattern => t.source_type_pattern,
-                target_environments => &t.target_environments,
-                target_destinations => &t.target_destinations,
-                force_release => t.force_release,
-                use_pipeline => t.use_pipeline,
-                created_at => t.created_at,
-                updated_at => t.updated_at,
-            }
-        })
-        .collect();
-
-    let env_options: Vec<minijinja::Value> = environments
-        .iter()
-        .map(|e| context! { name => e.name })
-        .collect();
-
-    let dest_options: Vec<minijinja::Value> = destinations
-        .iter()
-        .map(|d| context! { name => d.name, environment => d.environment })
-        .collect();
-
-    let pipeline_options: Vec<minijinja::Value> = pipelines
-        .iter()
-        .filter(|p| p.enabled)
-        .map(|p| context! { name => p.name })
-        .collect();
 
     let projects = warn_default(
         "list_projects",
@@ -4066,32 +4033,29 @@ async fn triggers_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/triggers.html.jinja",
-            context! {
-                title => format!("Triggers - {project} - {org} - Forest"),
-                description => format!("Release triggers for {project} in {org}"),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                projects => projects,
-                triggers => trigger_items,
-                environments => env_options,
-                destinations => dest_options,
-                pipelines => pipeline_options,
-                is_admin => is_admin,
+    let page = crate::views::models::TriggersPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Triggers - {project} - {org} - Forest"),
+                description: format!("Release triggers for {project} in {org}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        triggers,
+        environments: environments.into_iter().map(|e| e.name).collect(),
+        has_pipelines: pipelines.iter().any(|p| p.enabled),
+        trigger_form_js: state.templates.asset_href("js/trigger-form.js"),
+    };
+    let html = crate::views::pages::triggers::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -4329,7 +4293,7 @@ async fn edit_trigger_page(
     let environments = warn_default("list_environments", environments);
     let pipelines = warn_default("list_release_pipelines", pipelines);
 
-    let trigger = triggers.iter().find(|t| t.id == id).ok_or_else(|| {
+    let trigger = triggers.into_iter().find(|t| t.id == id).ok_or_else(|| {
         error_page(
             &state,
             StatusCode::NOT_FOUND,
@@ -4337,32 +4301,6 @@ async fn edit_trigger_page(
             "Trigger not found.",
         )
     })?;
-
-    let trigger_ctx = context! {
-        id => trigger.id,
-        name => trigger.name,
-        enabled => trigger.enabled,
-        branch_pattern => trigger.branch_pattern.as_deref().unwrap_or_default(),
-        title_pattern => trigger.title_pattern.as_deref().unwrap_or_default(),
-        author_pattern => trigger.author_pattern.as_deref().unwrap_or_default(),
-        commit_message_pattern => trigger.commit_message_pattern.as_deref().unwrap_or_default(),
-        source_type_pattern => trigger.source_type_pattern.as_deref().unwrap_or_default(),
-        target_environments => &trigger.target_environments,
-        target_destinations => &trigger.target_destinations,
-        force_release => trigger.force_release,
-        use_pipeline => trigger.use_pipeline,
-    };
-
-    let env_options: Vec<minijinja::Value> = environments
-        .iter()
-        .map(|e| context! { name => e.name })
-        .collect();
-
-    let pipeline_options: Vec<minijinja::Value> = pipelines
-        .iter()
-        .filter(|p| p.enabled)
-        .map(|p| context! { name => p.name })
-        .collect();
 
     let projects = warn_default(
         "list_projects",
@@ -4372,30 +4310,27 @@ async fn edit_trigger_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/trigger_edit.html.jinja",
-            context! {
-                title => format!("Edit trigger {} - {project} - {org} - Forest", trigger.name),
-                description => format!("Edit trigger {} for {project} in {org}", trigger.name),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                projects => projects,
-                trigger => trigger_ctx,
-                environments => env_options,
-                pipelines => pipeline_options,
+    let page = crate::views::models::TriggerEditPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Edit trigger {} - {project} - {org} - Forest", trigger.name),
+                description: format!("Edit trigger {} for {project} in {org}", trigger.name),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        trigger,
+        environments: environments.into_iter().map(|e| e.name).collect(),
+        has_pipelines: pipelines.iter().any(|p| p.enabled),
+    };
+    let html = crate::views::pages::trigger_edit::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -4419,6 +4354,8 @@ struct EditTriggerForm {
     force_release: Option<String>,
     #[serde(default)]
     use_pipeline: Option<String>,
+    #[serde(default)]
+    use_pipeline_offered: Option<String>,
 }
 
 async fn edit_trigger_submit(
@@ -4440,7 +4377,7 @@ async fn edit_trigger_submit(
         ));
     }
 
-    let name = resolve_trigger_name(&state, &session, &org, &project, &id).await?;
+    let existing = resolve_trigger(&state, &session, &org, &project, &id).await?;
 
     let has_pattern = non_empty(&form.branch_pattern).is_some()
         || non_empty(&form.title_pattern).is_some()
@@ -4479,14 +4416,17 @@ async fn edit_trigger_submit(
         commit_message_pattern: non_empty(&form.commit_message_pattern),
         source_type_pattern: non_empty(&form.source_type_pattern),
         target_environments: environments,
-        target_destinations: vec![],
+        target_destinations: existing.target_destinations,
         force_release: Some(form.force_release.as_deref() == Some("true")),
-        use_pipeline: Some(form.use_pipeline.as_deref() == Some("true")),
+        use_pipeline: form
+            .use_pipeline_offered
+            .is_some()
+            .then(|| form.use_pipeline.as_deref() == Some("true")),
     };
 
     state
         .platform_client
-        .update_trigger(&session.access_token, &org, &project, &name, &input)
+        .update_trigger(&session.access_token, &org, &project, &existing.name, &input)
         .await
         .map_err(|e| internal_error(&state, "failed to update trigger", &e))?;
 

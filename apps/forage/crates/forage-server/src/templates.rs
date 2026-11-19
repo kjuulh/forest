@@ -106,6 +106,19 @@ impl TemplateEngine {
         &self.build
     }
 
+    pub fn asset_href(&self, path: &str) -> String {
+        static HASHES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+            std::sync::LazyLock::new(Default::default);
+        let mut hashes = HASHES.lock().unwrap_or_else(|e| e.into_inner());
+        let hash = hashes.entry(path.to_string()).or_insert_with(|| {
+            match std::fs::read(Path::new("static").join(path)) {
+                Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
+                Err(_) => "dev".to_string(),
+            }
+        });
+        format!("/static/{path}?v={hash}")
+    }
+
     #[cfg(test)]
     pub fn render_str(&self, source: &str, ctx: minijinja::Value) -> anyhow::Result<String> {
         Ok(self.env.render_str(source, ctx)?)
