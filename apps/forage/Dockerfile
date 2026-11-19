@@ -1,4 +1,4 @@
-FROM rust:1.98-trixie AS chef
+FROM rust:1.100-trixie AS chef
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 

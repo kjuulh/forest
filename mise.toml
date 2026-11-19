@@ -2,7 +2,7 @@
 _.file = ".env"
 
 [tools]
-rust = "1.98.1"
+rust = "1.100.0"
 
 [tasks."local:up"]
 description = "Bring up the local stacks for both apps (postgres, etc.)"

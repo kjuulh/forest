@@ -2611,9 +2611,9 @@ dependencies = [
 
 [[package]]
 name = "mire"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "152cd9d00dceb61d6d456e8c5baffe9aaa6cc538da64e1f72b180d403fd54059"
+checksum = "b48712c382a2bccccf4740ed820e1099fbf40c724733fc14c474d488780718b9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2631,9 +2631,9 @@ dependencies = [
 
 [[package]]
 name = "mire-derive"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8b40e394d3345f17070ed457f56b55d301b527320de88ce1766eecc34d1329"
+checksum = "0bfe4e59fe9b08d5f0bd11e6e22552e749beed3fbf9fa8b4f9444612d0bc5902"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2642,9 +2642,9 @@ dependencies = [
 
 [[package]]
 name = "mire-sagas"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f210a6112ef4f1f67bedc834e3d3e2b9985340e81c75cef3e40132db4a3dfd53"
+checksum = "614dd16cea1b19cbfc68c5f0ddcb9c163a1681dec66b1140460af044c5430387"
 dependencies = [
  "anyhow",
  "chrono",
