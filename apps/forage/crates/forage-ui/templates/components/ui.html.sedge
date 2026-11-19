@@ -1,0 +1,93 @@
+use crate::{AlertKind, Tone};
+use crate::format::timeago;
+use crate::pagination_href;
+component Badge(label: &str, tone: Tone = Tone::Gray) {
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {tone.badge_classes()}">{label}</span>
+}
+component EnvBadge(env: &str) {
+<Badge label={env} tone={Tone::for_environment(env)} />
+}
+component KindBadge(kind: &str) {
+{if *kind == "binary" { <Badge label="binary" tone={Tone::Violet} /> } else { <Badge label="files" tone={Tone::Cyan} /> }}
+}
+component VisibilityBadge(visibility: &str) {
+{if *visibility == "public" { <Badge label="public" tone={Tone::Green} /> } else { <Badge label="private" tone={Tone::Gray} /> }}
+}
+component ToolShapeBadge(shape: &str) {
+{match *shape {
+  "hybrid" => { <Badge label="hybrid" tone={Tone::Pink} /> }
+  "tool_external" => { <Badge label="tool-ext" tone={Tone::Cyan} /> }
+  "component" => { <Badge label="component" tone={Tone::Gray} /> }
+  _ => { <Badge label="tool" tone={Tone::Violet} /> }
+}}
+}
+component Alert(kind: AlertKind = AlertKind::Error, children: Html) {
+<div class="mb-6 p-4 border rounded-md text-sm {kind.classes()}">{children}</div>
+}
+component ErrorBlock(message: &str, class: &str = "", short_limit: usize = 64) {
+{let text = message.trim();}
+{if text.is_empty() {
+  {""}
+} else if text.chars().count() <= *short_limit && !text.contains('\n') {
+  <p class="text-xs text-red-600 break-words {class}">{text}</p>
+} else {
+  <div class="text-xs leading-relaxed text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 max-h-80 overflow-y-auto whitespace-pre-wrap break-words {class}">{text}</div>
+}}
+}
+component EmptyState(message: &str, hint: &str = "") {
+<div class="p-6 border border-gray-200 rounded-lg text-center">
+  <p class="text-gray-600">{message}</p>
+  {if !hint.is_empty() { <p class="text-sm text-gray-400 mt-2">{hint}</p> }}
+</div>
+}
+component DashedEmpty(children: Html) {
+<div class="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500 mb-8">{children}</div>
+}
+component Pagination(base_url: &str, page: u32, total_pages: u32, params: &[(&str, &str)]) {
+{if *total_pages > 1 {
+  <nav class="mt-8 flex items-center justify-center gap-2">
+    {if *page > 1 { <a href={pagination_href(base_url, params, *page - 1)} class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Previous</a> }}
+    <span class="text-sm text-gray-500">Page {*page} of {*total_pages}</span>
+    {if *page < *total_pages { <a href={pagination_href(base_url, params, *page + 1)} class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Next</a> }}
+  </nav>
+}}
+}
+component CodeBlock(content: &str, copyable: bool, id: &str = "", class: &str = "") {
+{if *copyable {
+  <div class="relative group bg-[#0a0a0a] rounded-md text-sm font-mono text-[#d1d5db] {class}">
+    <div class="overflow-x-auto p-3 pr-12">
+      <pre id={if id.is_empty() { None } else { Some(*id) }} class="whitespace-pre">{content}</pre>
+    </div>
+    <button type="button" data-copy={*id} class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-[#1f2937] text-[#9ca3af] rounded hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">Copy</button>
+  </div>
+} else {
+  <div class="bg-[#0a0a0a] rounded-md p-3 text-sm font-mono text-[#d1d5db] overflow-x-auto {class}">
+    <pre id={if id.is_empty() { None } else { Some(*id) }} class="whitespace-pre">{content}</pre>
+  </div>
+}}
+}
+component PageHeading(title: &str, actions: Option<Html>) {
+<div class="flex items-center justify-between mb-8">
+  <h1 class="text-2xl font-bold">{title}</h1>
+  {if let Some(actions) = actions { {actions} }}
+</div>
+}
+component Timeago(value: &str, class: &str = "") {
+<time datetime={value} class={class}>{timeago(value)}</time>
+}
+component Code(children: Html) {
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">{children}</code>
+}
+component Chip(tone: Tone = Tone::Gray, children: Html) {
+<span class="{tone.chip_classes()} px-1.5 py-0.5 rounded">{children}</span>
+}
+component StatusDot(on: bool, on_label: &str = "Enabled", off_label: &str = "Disabled") {
+{if *on {
+  <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title={on_label}></span>
+} else {
+  <span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title={off_label}></span>
+}}
+}
+component Card(class: &str = "", children: Html) {
+<div class="border border-gray-200 rounded-lg {class}">{children}</div>
+}

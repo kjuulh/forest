@@ -1,0 +1,15 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700">plain</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800">ok</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-pink-100 text-pink-800">platform-prod</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-800">preprod</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700">binary</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-cyan-100 text-cyan-700">files</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800">public</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700">private</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-pink-100 text-pink-800">hybrid</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-cyan-100 text-cyan-700">tool-ext</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700">tool</span>

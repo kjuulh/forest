@@ -1,0 +1,21 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+<input type="checkbox" name="target_environments" value="platform-dev" checked class="rounded border-gray-300 text-blue-600">
+platform-dev
+</label>
+<label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+<input type="checkbox" name="target_environments" value="prod" class="rounded border-gray-300 text-blue-600">
+platform-dev
+</label>
+<div class="flex items-center gap-2">
+<input type="checkbox" id="force-release" name="force_release" value="true" class="rounded border-gray-300">
+<label for="force-release" class="text-sm text-gray-700">Force release</label>
+</div>
+<div class="flex items-center gap-2">
+<input type="checkbox" id="use-pipeline" name="use_pipeline" value="true" checked class="rounded border-gray-300">
+<label for="use-pipeline" class="text-sm font-medium text-gray-700">Use release pipeline</label>
+</div>
+<input type="hidden" name="csrf_token" value="tok&quot;en">

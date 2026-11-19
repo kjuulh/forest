@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../templates";
+@source "../../crates/forage-ui/templates";
+@source "../../crates/forage-ui/src";
 @source "../js/*.js";
 @source "../../frontend/src";
 

@@ -1,0 +1,13 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<div class="bg-[#0a0a0a] rounded-md p-3 text-sm font-mono text-[#d1d5db] overflow-x-auto ">
+<pre class="whitespace-pre">forest login</pre>
+</div>
+<div class="relative group bg-[#0a0a0a] rounded-md text-sm font-mono text-[#d1d5db] mt-2">
+<div class="overflow-x-auto p-3 pr-12">
+<pre id="cmd" class="whitespace-pre">forest login</pre>
+</div>
+<button type="button" data-copy="cmd" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-[#1f2937] text-[#9ca3af] rounded hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">Copy</button>
+</div>

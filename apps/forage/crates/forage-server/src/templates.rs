@@ -4,96 +4,6 @@ use anyhow::Context;
 use minijinja::Environment;
 use sha2::Digest;
 
-fn timeago(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-        .or_else(|_| {
-            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                .map(|d| {
-                    d.and_hms_opt(0, 0, 0)
-                        .unwrap()
-                        .and_utc()
-                        .fixed_offset()
-                })
-        })
-    else {
-        return value.to_string();
-    };
-
-    let now = chrono::Utc::now();
-    let diff = now.signed_duration_since(dt);
-
-    if diff.num_seconds() < 60 {
-        "just now".into()
-    } else if diff.num_minutes() < 60 {
-        let m = diff.num_minutes();
-        format!("{m}m ago")
-    } else if diff.num_hours() < 24 {
-        let h = diff.num_hours();
-        format!("{h}h ago")
-    } else if diff.num_days() < 30 {
-        let d = diff.num_days();
-        format!("{d}d ago")
-    } else {
-        dt.format("%d %b %Y").to_string()
-    }
-}
-
-fn timeuntil(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-    else {
-        return value.to_string();
-    };
-
-    let now = chrono::Utc::now();
-    let diff = dt.signed_duration_since(now);
-
-    if diff.num_seconds() <= 0 {
-        "now".into()
-    } else if diff.num_seconds() < 60 {
-        let s = diff.num_seconds();
-        format!("in {s}s")
-    } else if diff.num_minutes() < 60 {
-        let m = diff.num_minutes();
-        let s = diff.num_seconds() % 60;
-        if s > 0 {
-            format!("in {m}m {s}s")
-        } else {
-            format!("in {m}m")
-        }
-    } else if diff.num_hours() < 24 {
-        let h = diff.num_hours();
-        let m = diff.num_minutes() % 60;
-        if m > 0 {
-            format!("in {h}h {m}m")
-        } else {
-            format!("in {h}h")
-        }
-    } else {
-        let d = diff.num_days();
-        format!("in {d}d")
-    }
-}
-
-fn datetime(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-        .or_else(|_| {
-            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map(|d| {
-                d.and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
-                    .fixed_offset()
-            })
-        })
-    else {
-        return value.to_string();
-    };
-
-    dt.format("%d %b %Y %H:%M:%S UTC").to_string()
-}
-
 #[derive(Clone)]
 pub struct TemplateEngine {
     env: Environment<'static>,
@@ -107,11 +17,17 @@ impl TemplateEngine {
 
         let mut env = Environment::new();
         env.set_loader(minijinja::path_loader(path));
-        env.add_filter("timeago", |v: String| -> String { timeago(&v) });
-        env.add_filter("timeuntil", |v: String| -> String { timeuntil(&v) });
-        env.add_filter("datetime", |v: String| -> String { datetime(&v) });
+        env.add_filter("timeago", |v: String| -> String {
+            forage_ui::format::timeago(&v)
+        });
+        env.add_filter("timeuntil", |v: String| -> String {
+            forage_ui::format::timeuntil(&v)
+        });
+        env.add_filter("datetime", |v: String| -> String {
+            forage_ui::format::datetime(&v)
+        });
         env.add_filter("urlencode", |v: String| -> String {
-            urlencoding::encode(&v).into_owned()
+            forage_ui::format::urlencode(&v)
         });
         env.add_filter("short_sha", |v: String| -> String {
             crate::manifest_view::ManifestView::short_sha(&v)

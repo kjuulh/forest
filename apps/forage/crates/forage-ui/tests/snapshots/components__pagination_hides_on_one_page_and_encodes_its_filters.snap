@@ -1,0 +1,9 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<nav class="mt-8 flex items-center justify-center gap-2">
+<a href="/orgs/acme/releases?env=prod%20%26%20dev&amp;page=1" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Previous</a>
+<span class="text-sm text-gray-500">Page 2 of 3</span>
+<a href="/orgs/acme/releases?env=prod%20%26%20dev&amp;page=3" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Next</a>
+</nav>

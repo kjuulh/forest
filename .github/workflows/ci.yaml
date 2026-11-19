@@ -123,6 +123,48 @@ jobs:
           path: apps/forage/frontend/gallery/shots/*.png
           if-no-files-found: warn
 
+  forage-tests:
+    name: forage tests
+    needs: changes
+    if: needs.changes.outputs.forage == 'true'
+
+    runs-on:
+      group: rust
+      labels:
+        - linux-8x-amd64-001
+
+    defaults:
+      run:
+        working-directory: apps/forage
+
+    env:
+      SQLX_OFFLINE: true
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup ssh agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.HB_GITHUB_SSH_KEY }}
+      - name: Setup git for private auth
+        run: |
+          git config --global url."ssh://git@github.com".insteadOf https://github.com && \
+          mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/forage
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Test
+        run: cargo test --locked -p forage-ui -p forage-server
+
   forest-tests:
     name: forest tests
     needs: changes
@@ -284,7 +326,7 @@ jobs:
 
   build-ok:
     name: build ok
-    needs: [changes, build-and-push]
+    needs: [changes, build-and-push, forage-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -292,6 +334,7 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           BUILDS: ${{ needs['build-and-push'].result }}
+          FORAGE_TESTS: ${{ needs['forage-tests'].result }}
         run: |
           set -euo pipefail
           echo "changes=$CHANGES  build-and-push=$BUILDS"
@@ -307,6 +350,11 @@ jobs:
           # job: the app did not change, or the commit touched neither app, or
           # this is a fork PR that cannot reach the deploy key. None of those
           # is a build failure, and none of them should hold a PR shut.
+          case "$FORAGE_TESTS" in
+            success|skipped) ;;
+            *) echo "::error::forage tests reported '$FORAGE_TESTS'"; exit 1 ;;
+          esac
+
           case "$BUILDS" in
             success|skipped) echo "builds ok" ;;
             *) echo "::error::build-and-push reported '$BUILDS'"; exit 1 ;;

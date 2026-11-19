@@ -1,0 +1,7 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Save</button>
+<a href="/back" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>

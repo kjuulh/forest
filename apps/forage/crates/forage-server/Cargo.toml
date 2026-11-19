@@ -7,6 +7,7 @@ edition = "2024"
 forage-core = { path = "../forage-core" }
 forage-db = { path = "../forage-db" }
 forage-grpc = { path = "../forage-grpc", features = ["client", "server"] }
+forage-ui = { path = "../forage-ui" }
 anyhow.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
