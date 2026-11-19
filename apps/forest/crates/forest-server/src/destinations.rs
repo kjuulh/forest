@@ -28,6 +28,7 @@ pub mod in_process_backend;
 pub mod kubernetesv1;
 pub mod noopv1;
 pub mod terraform_credentials;
+pub mod terraform_locks;
 pub mod terraform_plans;
 pub mod terraformv1;
 

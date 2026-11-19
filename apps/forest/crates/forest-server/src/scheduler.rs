@@ -14,8 +14,9 @@ use crate::{
     destinations::{
         DestinationIndex,
         logger::DestinationLogger,
-        terraformv1::{TerraformStateStore, TerraformStateStoreState},
+        terraformv1::{TerraformStateStore, TerraformStateStoreState, report_stale_lock_check},
     },
+    release_drain::ReleaseDrain,
     runner_manager::RunnerManager,
     services::{
         destination_registry::{DestinationRegistry, DestinationRegistryState},
@@ -47,6 +48,7 @@ struct SchedulerInner {
     tf_state: TerraformStateStore,
     nats: async_nats::Client,
     disable_in_process: bool,
+    drain: ReleaseDrain,
 }
 
 pub struct Scheduler {
@@ -55,7 +57,12 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(state: &State, runner_manager: RunnerManager, disable_in_process: bool) -> Self {
+    pub fn new(
+        state: &State,
+        runner_manager: RunnerManager,
+        disable_in_process: bool,
+        drain: ReleaseDrain,
+    ) -> Self {
         Self {
             inner: Arc::new(SchedulerInner {
                 release_registry: state.release_registry(),
@@ -70,14 +77,19 @@ impl Scheduler {
                 tf_state: state.terraform_state_store(),
                 nats: state.nats.clone(),
                 disable_in_process,
+                drain,
             }),
             nats: state.nats.clone(),
         }
     }
 
-    fn spawn_handle_release(&self, release_id: Uuid) {
+    pub fn drain(&self) -> &ReleaseDrain {
+        &self.inner.drain
+    }
+
+    pub fn dispatch(&self, release_id: Uuid) {
         let inner = self.inner.clone();
-        tokio::spawn(async move {
+        self.inner.drain.spawn(async move {
             if let Err(e) = inner.handle_release(release_id).await {
                 tracing::warn!(%release_id, "failed to handle release: {e:#}");
             }
@@ -87,6 +99,10 @@ impl Scheduler {
 
 impl SchedulerInner {
     async fn handle_release(&self, release_id: Uuid) -> anyhow::Result<()> {
+        if self.drain.is_draining() {
+            tracing::info!(%release_id, "draining for shutdown — leaving release queued for another replica");
+            return Ok(());
+        }
         tracing::debug!(%release_id, "scheduler picked up release");
 
         let release_state = match self
@@ -237,6 +253,11 @@ impl SchedulerInner {
             project: project_name,
         };
 
+        if self.drain.is_draining() {
+            tracing::info!(%release_id, "draining for shutdown — leaving release queued for another replica");
+            return Ok(());
+        }
+
         if let Some((runner_id, work_sender)) = self.runner_manager.try_assign(&dest_index).await {
             if let Err(e) = self
                 .release_event_store
@@ -288,7 +309,19 @@ impl SchedulerInner {
             {
                 let project_id = release_state.project_id.to_string();
                 let state_id = self.tf_state.resolve_state_id(&dest, &project_id).await?;
-                let password = self.tf_state.runner_credential(&state_id, &dest);
+                report_stale_lock_check(
+                    &DestinationLogger::new(
+                        release_item.clone(),
+                        self.release_log_registry.clone(),
+                    ),
+                    &state_id,
+                    self.tf_state
+                        .check_stale_lock(&state_id, &release_item)
+                        .await,
+                );
+                let password = self
+                    .tf_state
+                    .runner_credential(&state_id, release_id, &runner_id);
                 let (url, _, _) = self.tf_state.addresses(&state_id);
                 let id = state_id;
                 Some(ReleaseArtifactStore {
@@ -371,6 +404,11 @@ impl SchedulerInner {
             return Ok(());
         }
 
+        if self.drain.is_draining() {
+            tracing::info!(%release_id, "draining for shutdown — leaving release queued for another replica");
+            return Ok(());
+        }
+
         tracing::info!(%release_id, destination = %dest.name, "assigning release to in-process executor");
 
         if let Err(e) = self
@@ -416,6 +454,7 @@ impl SchedulerInner {
             DestinationLogger::new(release_item.clone(), self.release_log_registry.clone());
 
         let heartbeat_token = tokio_util::sync::CancellationToken::new();
+        let _heartbeat_stops_with_this_task = heartbeat_token.clone().drop_guard();
         let heartbeat_cancel = heartbeat_token.clone();
         let heartbeat_store = self.release_event_store.clone();
         tokio::spawn(async move {
@@ -435,7 +474,7 @@ impl SchedulerInner {
 
         let is_plan_mode = release_state.mode == "plan";
 
-        let result = async {
+        let result = self.drain.run_release(async {
             if is_plan_mode {
                 if !dest_svc.supports_plan() {
                     dest_svc.prepare(&logger, &release_item, &dest).await?;
@@ -470,7 +509,7 @@ impl SchedulerInner {
                 }
             }
             Ok::<(), anyhow::Error>(())
-        }
+        })
         .await;
 
         heartbeat_token.cancel();
@@ -503,6 +542,10 @@ impl SchedulerInner {
             }
             Err(e) => {
                 tracing::warn!(%release_id, destination = %dest.name, "release failed (in-process): {e:#}");
+
+                if let Err(e2) = self.tf_state.release_locks_held_by(release_id).await {
+                    tracing::warn!(%release_id, "failed to release the failed release's terraform state lock: {e2:#}");
+                }
 
                 self.release_event_store
                     .emit_event(
@@ -557,6 +600,8 @@ impl Component for Scheduler {
             "scheduler ready, sweep interval=5s"
         );
 
+        let _drained = self.inner.drain.drained().drop_guard();
+
         loop {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
@@ -567,7 +612,7 @@ impl Component for Scheduler {
                         let payload = String::from_utf8_lossy(&msg.payload);
                         if let Ok(release_id) = payload.parse::<Uuid>() {
                             tracing::info!(%release_id, "received release via NATS");
-                            self.spawn_handle_release(release_id);
+                            self.dispatch(release_id);
                         } else {
                             tracing::warn!(payload = %payload, "received invalid NATS message (not a UUID)");
                         }
@@ -584,11 +629,19 @@ impl Component for Scheduler {
             }
         }
 
+        drop(subscriber);
+        let outcome = self.inner.drain.drain().await;
+        tracing::info!(?outcome, "scheduler drained");
+
         Ok(())
     }
 }
 
 async fn sweep_queued(inner: &SchedulerInner) -> anyhow::Result<()> {
+    if inner.drain.is_draining() {
+        return Ok(());
+    }
+
     let queued = inner.release_event_store.pick_queued_releases(10).await?;
 
     if !queued.is_empty() {
@@ -598,7 +651,7 @@ async fn sweep_queued(inner: &SchedulerInner) -> anyhow::Result<()> {
     for release in queued {
         let inner = inner.clone();
         let release_id = release.release_id;
-        tokio::spawn(async move {
+        inner.drain.clone().spawn(async move {
             if let Err(e) = inner.handle_release(release_id).await {
                 tracing::warn!(
                     %release_id,
@@ -612,11 +665,21 @@ async fn sweep_queued(inner: &SchedulerInner) -> anyhow::Result<()> {
 }
 
 pub trait SchedulerState {
-    fn scheduler(&self, runner_manager: RunnerManager, disable_in_process: bool) -> Scheduler;
+    fn scheduler(
+        &self,
+        runner_manager: RunnerManager,
+        disable_in_process: bool,
+        drain: ReleaseDrain,
+    ) -> Scheduler;
 }
 
 impl SchedulerState for State {
-    fn scheduler(&self, runner_manager: RunnerManager, disable_in_process: bool) -> Scheduler {
-        Scheduler::new(self, runner_manager, disable_in_process)
+    fn scheduler(
+        &self,
+        runner_manager: RunnerManager,
+        disable_in_process: bool,
+        drain: ReleaseDrain,
+    ) -> Scheduler {
+        Scheduler::new(self, runner_manager, disable_in_process, drain)
     }
 }

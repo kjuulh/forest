@@ -124,10 +124,23 @@ Releases are stored as an append-only event log (`release_events` table) with a 
 
 A background process monitors stuck releases:
 
-- **Assigned** or **running** releases whose runner has sent no heartbeat for 90 seconds fail with "release heartbeat lost". Releases run inside the Forest server, so a server restart mid-deploy ends them this way.
+- **Assigned** or **running** releases whose runner has sent no heartbeat for 90 seconds fail with "release heartbeat lost". Up to forest-server v0.3.18, a server restart mid-deploy ended in-process releases this way; later servers drain first (see [Server restarts](#server-restarts)).
 - **Assigned** releases that haven't started within 5 minutes are timed out
 - **Running** releases that haven't completed within 1 hour are timed out
 
 Every release that starts sends a `RELEASE_STARTED` notification, whether `forest release` or a matching trigger began it (triggered releases since forest-server after v0.3.18; earlier servers sent it for manual releases only).
 
 This prevents releases from being permanently stuck if a runner crashes. A reaped release sends a `RELEASE_FAILED` notification like any other failure, so Slack messages and webhooks show it as failed (since forest-server after v0.3.18; earlier servers sent none).
+
+## Server restarts
+
+Since forest-server after v0.3.18, a server that receives SIGTERM (a deploy or scale-in) drains instead of dropping the releases it is running:
+
+1. It stops claiming queued releases at once, so another replica picks them up, and its health check reports `accepting-releases` as unhealthy.
+2. Releases already running inside the server get `FOREST_DRAIN_TIMEOUT_SECS` (default 90 seconds, flag `--drain-timeout-secs`) to finish and are recorded as usual.
+3. A release still running after that is interrupted: Terraform gets SIGINT and up to 15 seconds to stop cleanly, save its state and release its state lock.
+4. Whatever is left then fails immediately with "interrupted by forest-server shutdown" and a `RELEASE_FAILED` notification, rather than 90 seconds later as "release heartbeat lost". The next queued release for that destination starts on another replica.
+
+Interrupted releases are failed, not re-queued: a half-applied Terraform run, a saved plan that no longer matches state, or a provider call already in flight is not safe to start again without someone looking at it. Re-run the release once you have checked the destination. If Terraform had to be killed rather than stopping on SIGINT, its state lock stayed held on forest-server v0.3.18 and earlier and needed `forest state unlock`; after v0.3.18 the replica releases the lock itself once Terraform has exited or been killed, and a lock left by a replica that disappeared is cleared by the next release once that replica has marked itself stopped or been silent for `FOREST_REPLICA_GONE_SECS` (default 20 minutes) (see [State locks](destinations.md#state-locks)). The reaper never removes locks.
+
+The server exits within the drain timeout plus 25 seconds, so the orchestrator's stop timeout must be at least that (120 seconds on ECS with the default). Remote runners are not failed when the server they are connected to shuts down: the server closes their stream after the drain and they reconnect to another replica. A runner reconnects only after the release it is running ends, so a remote release that outlives the drain by more than the 90-second heartbeat window is still reaped.

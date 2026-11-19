@@ -27,6 +27,9 @@ use crate::{
         DestinationEdge, DestinationIndex, DriftReport,
         logger::DestinationLogger,
         terraform_credentials::{self, CredentialKey, Rejection, Scope, Verified},
+        terraform_locks::{
+            self, Holder, LockInfo, OwnerState, StaleLockCheck, StaleLockDecision, StateLock,
+        },
         terraform_plans::{SavedPlan, TerraformPlanStore},
     },
     services::{artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem},
@@ -56,6 +59,8 @@ fn resolve_terraform_exe() -> String {
 pub struct TerraformStateStore {
     db: PgPool,
     key: CredentialKey,
+    stale_lock_after: std::time::Duration,
+    replica_gone_after: std::time::Duration,
 
     pub external_url: String,
 }
@@ -344,11 +349,34 @@ impl TerraformStateStore {
         format!("{environment}.{project_id}.{slug}-{}", &hash[..12])
     }
 
-    pub fn runner_credential(&self, state_id: &str, destination: &Destination) -> String {
+    pub fn in_process_credential(
+        &self,
+        state_id: &str,
+        destination: &Destination,
+        release_id: uuid::Uuid,
+    ) -> String {
         self.key.issue(
             state_id,
             Scope::ReadWrite,
-            &format!("runner:{}/{}", destination.organisation, destination.name),
+            &terraform_locks::in_process_principal(
+                release_id,
+                crate::replicas::replica_name(),
+                destination,
+            ),
+            terraform_credentials::RUNNER_TTL,
+        )
+    }
+
+    pub fn runner_credential(
+        &self,
+        state_id: &str,
+        release_id: uuid::Uuid,
+        runner_id: &str,
+    ) -> String {
+        self.key.issue(
+            state_id,
+            Scope::ReadWrite,
+            &terraform_locks::runner_principal(release_id, runner_id),
             terraform_credentials::RUNNER_TTL,
         )
     }
@@ -384,8 +412,34 @@ impl TerraformStateStore {
         self.key.verify(state_id, &password)
     }
 
-    pub async fn lock_holder(&self, state_id: &str) -> anyhow::Result<Option<String>> {
-        self.get_lock(state_id).await
+    pub async fn current_lock(&self, state_id: &str) -> anyhow::Result<Option<StateLock>> {
+        let row = sqlx::query!(
+            r#"
+                SELECT state_id, lock_id, operation, who, info, tf_version, tf_created, path,
+                       principal, release_id, replica, acquired_at
+                FROM terraform_state_locks
+                WHERE state_id = $1
+            "#,
+            state_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("read terraform state lock")?;
+
+        Ok(row.map(|r| StateLock {
+            state_id: r.state_id,
+            lock_id: r.lock_id,
+            operation: r.operation,
+            who: r.who,
+            info: r.info,
+            tf_version: r.tf_version,
+            tf_created: r.tf_created,
+            path: r.path,
+            principal: r.principal,
+            release_id: r.release_id,
+            replica: r.replica,
+            acquired_at: r.acquired_at,
+        }))
     }
 
     pub async fn force_unlock(&self, state_id: &str) -> anyhow::Result<Option<String>> {
@@ -397,6 +451,133 @@ impl TerraformStateStore {
         .await
         .context("force-unlock terraform state")?;
         Ok(removed)
+    }
+
+    pub async fn release_locks_held_by(
+        &self,
+        release_id: uuid::Uuid,
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        let rows = sqlx::query!(
+            r#"
+                DELETE FROM terraform_state_locks
+                WHERE release_id = $1
+                  AND principal LIKE 'release:%'
+                  AND replica = $2
+                RETURNING state_id, lock_id
+            "#,
+            release_id,
+            crate::replicas::replica_name(),
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("release terraform state locks held by release")?;
+
+        let released: Vec<(String, String)> =
+            rows.into_iter().map(|r| (r.state_id, r.lock_id)).collect();
+        for (state_id, lock_id) in &released {
+            tracing::warn!(
+                %release_id,
+                state_id,
+                lock_id,
+                "released the terraform state lock of an in-process release whose terraform has exited"
+            );
+        }
+        Ok(released)
+    }
+
+    pub async fn check_stale_lock(
+        &self,
+        state_id: &str,
+        release: &ReleaseItem,
+    ) -> anyhow::Result<StaleLockCheck> {
+        let Some(lock) = self.current_lock(state_id).await? else {
+            return Ok(StaleLockCheck::Unlocked);
+        };
+        if lock.release_id == Some(release.id) {
+            return Ok(StaleLockCheck::HeldByThisRelease);
+        }
+
+        let owner = match lock.holder_kind() {
+            Holder::InProcessRelease {
+                release_id,
+                replica,
+            } => {
+                let status = sqlx::query_scalar!(
+                    r#"SELECT status FROM release_states WHERE release_id = $1"#,
+                    release_id,
+                )
+                .fetch_optional(&self.db)
+                .await
+                .context("read the status of the release holding the lock")?;
+                let replica_liveness = match replica.as_deref() {
+                    Some(name) => {
+                        crate::replicas::liveness(&self.db, name, self.replica_gone_after).await?
+                    }
+                    None => crate::replicas::Liveness::Gone,
+                };
+                OwnerState::InProcessRelease {
+                    release_id,
+                    status,
+                    replica,
+                    replica_liveness,
+                }
+            }
+            Holder::RunnerRelease { .. } => OwnerState::RunnerRelease,
+            Holder::Operator { .. } => OwnerState::Operator,
+            Holder::Legacy => {
+                let other_release_active = sqlx::query_scalar!(
+                    r#"
+                        SELECT EXISTS (
+                            SELECT 1 FROM release_states
+                            WHERE destination_id = $1
+                              AND release_id <> $2
+                              AND status IN ('ASSIGNED', 'RUNNING')
+                        ) AS "exists!"
+                    "#,
+                    release.destination_id,
+                    release.id,
+                )
+                .fetch_one(&self.db)
+                .await
+                .context("check for other running releases on the destination")?;
+                OwnerState::Legacy {
+                    other_release_active,
+                }
+            }
+        };
+
+        match terraform_locks::decide(&lock, &owner, chrono::Utc::now(), self.stale_lock_after) {
+            StaleLockDecision::Keep(reason) => Ok(StaleLockCheck::Kept { lock, reason }),
+            StaleLockDecision::Release(reason) => {
+                let removed = sqlx::query!(
+                    r#"
+                        DELETE FROM terraform_state_locks
+                        WHERE state_id = $1 AND lock_id = $2
+                    "#,
+                    state_id,
+                    lock.lock_id,
+                )
+                .execute(&self.db)
+                .await
+                .context("release stale terraform state lock")?
+                .rows_affected();
+                if removed == 0 {
+                    return Ok(StaleLockCheck::Kept {
+                        lock,
+                        reason: "the lock changed hands while it was being checked".into(),
+                    });
+                }
+                tracing::warn!(
+                    state_id,
+                    lock_id = %lock.lock_id,
+                    holder = %lock.holder(),
+                    release_id = %release.id,
+                    reason,
+                    "released a stale terraform state lock before running terraform"
+                );
+                Ok(StaleLockCheck::Released { lock, reason })
+            }
+        }
     }
 
     async fn get_lock(&self, project_id: &str) -> anyhow::Result<Option<String>> {
@@ -411,7 +592,16 @@ impl TerraformStateStore {
         Ok(row)
     }
 
-    async fn attempt_lock(&self, project_id: String, lock_id: &str) -> anyhow::Result<LockState> {
+    async fn attempt_lock(
+        &self,
+        project_id: String,
+        info: &LockInfo,
+        principal: &str,
+    ) -> anyhow::Result<LockState> {
+        let lock_id = info.id.as_str();
+        let holder = Holder::parse(Some(principal));
+        let release_id = holder.release_id();
+        let replica = holder.replica().map(str::to_string);
         let mut tx = self.db.begin().await.context("begin lock tx")?;
 
         let existing: Option<String> = sqlx::query_scalar!(
@@ -433,11 +623,23 @@ impl TerraformStateStore {
             None => {
                 sqlx::query!(
                     r#"
-                        INSERT INTO terraform_state_locks (state_id, lock_id)
-                        VALUES ($1, $2)
+                        INSERT INTO terraform_state_locks (
+                            state_id, lock_id, operation, who, info, tf_version, tf_created,
+                            path, principal, release_id, replica
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     "#,
                     project_id,
                     lock_id,
+                    info.operation,
+                    info.who,
+                    info.info,
+                    info.version,
+                    info.created,
+                    info.path,
+                    principal,
+                    release_id,
+                    replica,
                 )
                 .execute(&mut *tx)
                 .await
@@ -525,6 +727,8 @@ impl TerraformStateStoreState for State {
                 self.config.terraform_state_signing_key.as_deref(),
                 &self.config.access_token_secret_key,
             ),
+            stale_lock_after: self.config.terraform_stale_lock_after,
+            replica_gone_after: self.config.replica_gone_after,
 
             external_url: self.config.terraform_external_host.clone(),
         }
@@ -657,25 +861,52 @@ impl TerraformV1Server {
         headers: http::HeaderMap,
         body: axum::body::Bytes,
     ) -> Result<axum::response::Response, ApiError> {
-        Self::authorise(&state, &state_id, &headers, "lock", true)?;
-        let req = LockRequest::parse(&body)?;
-        tracing::info!(lock_id = req.lock_id, state_id, "locking state");
+        let verified = Self::authorise(&state, &state_id, &headers, "lock", true)?;
+        let info: LockInfo = serde_json::from_slice(&body).map_err(|_| ApiError::BadRequest)?;
+        if info.id.is_empty() {
+            return Err(ApiError::BadRequest);
+        }
+        tracing::info!(
+            lock_id = info.id,
+            state_id,
+            operation = info.operation,
+            who = info.who,
+            principal = %verified.principal,
+            "locking state"
+        );
 
         let store = state.terraform_state_store();
-        let Ok(lock) = store.attempt_lock(state_id.clone(), &req.lock_id).await else {
-            tracing::warn!("failed to lock state");
-            return Err(ApiError::InternalServerError);
+        let lock = match store
+            .attempt_lock(state_id.clone(), &info, &verified.principal)
+            .await
+        {
+            Ok(lock) => lock,
+            Err(e) => {
+                tracing::warn!("failed to lock state: {e:#}");
+                return Err(ApiError::InternalServerError);
+            }
         };
 
         match lock {
             LockState::Held => Ok(StatusCode::OK.into_response()),
             LockState::Wait => {
-                let holder = store.lock_holder(&state_id).await.ok().flatten();
-                Ok((
-                    StatusCode::CONFLICT,
-                    Json(serde_json::json!({ "ID": holder.unwrap_or_default() })),
-                )
-                    .into_response())
+                let holder = store.current_lock(&state_id).await.ok().flatten();
+                let body = match holder {
+                    Some(holder) => {
+                        tracing::info!(
+                            state_id,
+                            requested_by = %verified.principal,
+                            "terraform state is locked: {}",
+                            holder.describe()
+                        );
+                        holder.conflict_info()
+                    }
+                    None => LockInfo {
+                        created: chrono::Utc::now().to_rfc3339(),
+                        ..LockInfo::default()
+                    },
+                };
+                Ok((StatusCode::CONFLICT, Json(body)).into_response())
             }
         }
     }
@@ -902,6 +1133,37 @@ fn root_key(root: &std::path::Path, dir: &std::path::Path) -> String {
         .into_owned()
 }
 
+pub fn report_stale_lock_check(
+    logger: &DestinationLogger,
+    state_id: &str,
+    check: anyhow::Result<StaleLockCheck>,
+) {
+    match check {
+        Ok(StaleLockCheck::Unlocked) | Ok(StaleLockCheck::HeldByThisRelease) => {}
+        Ok(StaleLockCheck::Kept { lock, reason }) => {
+            tracing::info!(
+                state_id,
+                lock_id = %lock.lock_id,
+                holder = %lock.holder(),
+                "terraform state is locked, leaving the lock: {reason}"
+            );
+            logger.log_stderr(&format!(
+                "forest: terraform state {state_id} is locked ({}); leaving it: {reason}",
+                lock.describe()
+            ));
+        }
+        Ok(StaleLockCheck::Released { lock, reason }) => {
+            logger.log_stderr(&format!(
+                "forest: released stale terraform state lock on {state_id} ({}): {reason}",
+                lock.describe()
+            ));
+        }
+        Err(e) => {
+            tracing::warn!(state_id, "could not check the terraform state lock: {e:#}");
+        }
+    }
+}
+
 const PLAN_FILE: &str = "forest.tfplan";
 const LOCK_FILE: &str = ".terraform.lock.hcl";
 
@@ -915,14 +1177,43 @@ impl TerraformV1Destination {
             .tf_state
             .resolve_state_id(destination, &release.project_id.to_string())
             .await?;
-        let password = self.tf_state.runner_credential(&state_id, destination);
-        let (base, lock, unlock) = self.tf_state.addresses(&state_id);
-        Ok(vec![
+        Ok(self.env_for(&state_id, destination, release))
+    }
+
+    async fn backend_env_clearing_stale_lock(
+        &self,
+        logger: &DestinationLogger,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Vec<(&'static str, String)>> {
+        let state_id = self
+            .tf_state
+            .resolve_state_id(destination, &release.project_id.to_string())
+            .await?;
+        report_stale_lock_check(
+            logger,
+            &state_id,
+            self.tf_state.check_stale_lock(&state_id, release).await,
+        );
+        Ok(self.env_for(&state_id, destination, release))
+    }
+
+    fn env_for(
+        &self,
+        state_id: &str,
+        destination: &Destination,
+        release: &ReleaseItem,
+    ) -> Vec<(&'static str, String)> {
+        let password = self
+            .tf_state
+            .in_process_credential(state_id, destination, release.id);
+        let (base, lock, unlock) = self.tf_state.addresses(state_id);
+        vec![
             ("TF_HTTP_LOCK_ADDRESS", lock),
             ("TF_HTTP_UNLOCK_ADDRESS", unlock),
             ("TF_HTTP_ADDRESS", base),
             ("TF_HTTP_PASSWORD", password),
-        ])
+        ]
     }
 
     async fn stage(
@@ -974,7 +1265,9 @@ impl TerraformV1Destination {
         destination: &Destination,
     ) -> anyhow::Result<String> {
         let destroy = self.plans.is_destroy_plan(release.id).await?;
-        let env = self.backend_env(release, destination).await?;
+        let env = self
+            .backend_env_clearing_stale_lock(logger, release, destination)
+            .await?;
         let staged = self.stage(release, destination).await?;
         let (outputs, saved) = plan_roots(
             logger,
@@ -1008,7 +1301,9 @@ impl TerraformV1Destination {
         destination: &Destination,
         saved: Vec<SavedPlan>,
     ) -> anyhow::Result<()> {
-        let env = self.backend_env(release, destination).await?;
+        let env = self
+            .backend_env_clearing_stale_lock(logger, release, destination)
+            .await?;
         let staged = self.stage(release, destination).await?;
         apply_roots(
             logger,
@@ -1028,7 +1323,9 @@ impl TerraformV1Destination {
         destination: &Destination,
         mode: Mode,
     ) -> anyhow::Result<()> {
-        let env = self.backend_env(release, destination).await?;
+        let env = self
+            .backend_env_clearing_stale_lock(logger, release, destination)
+            .await?;
         let staged = self.stage(release, destination).await?;
 
         for dir in &staged.dirs {
@@ -1187,6 +1484,8 @@ async fn run_command_status(
 ) -> anyhow::Result<(i32, String)> {
     tracing::debug!(path =% path.display(), "running terraform {} (capture)", args.join(" "));
 
+    crate::release_drain::ensure_not_interrupted()?;
+
     let mut cmd = command(destination, path, tf_envs).await;
 
     let mut proc = cmd
@@ -1227,7 +1526,9 @@ async fn run_command_status(
         });
     }
 
-    let exit = proc.wait().await.context("terraform failed")?;
+    let exit = crate::release_drain::wait_interruptible(&mut proc)
+        .await
+        .context("terraform failed")?;
     if let Some(task) = stdout_task {
         let _ = task.await;
     }
@@ -1287,6 +1588,8 @@ async fn run_command(
 ) -> anyhow::Result<()> {
     tracing::debug!(path =% path.display(), "running terraform {}", args.join(" "));
 
+    crate::release_drain::ensure_not_interrupted()?;
+
     let mut cmd = command(destination, path, tf_envs).await;
 
     let mut proc = cmd
@@ -1319,7 +1622,9 @@ async fn run_command(
         });
     }
 
-    let exit = proc.wait().await.context("terraform failed")?;
+    let exit = crate::release_drain::wait_interruptible(&mut proc)
+        .await
+        .context("terraform failed")?;
     if !exit.success() {
         anyhow::bail!("terraform failed: {}", exit.code().unwrap_or(-1));
     }

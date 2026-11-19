@@ -5,6 +5,7 @@ use forest_models::ReleaseStatus;
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tonic::Response;
 use uuid::Uuid;
 
@@ -26,6 +27,7 @@ use crate::{
 pub struct RunnerServer {
     pub state: State,
     pub runner_manager: RunnerManager,
+    pub shutdown: CancellationToken,
 }
 
 #[async_trait::async_trait]
@@ -95,12 +97,18 @@ impl RunnerService for RunnerServer {
         let runner_manager = self.runner_manager.clone();
         let runner_id_clone = runner_id.clone();
         let state_clone = self.state.clone();
+        let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(15));
+            let mut server_shutting_down = false;
 
             loop {
                 tokio::select! {
+                    _ = shutdown.cancelled() => {
+                        server_shutting_down = true;
+                        break;
+                    }
                     work = work_rx.recv() => {
                         match work {
                             Some(assignment) => {
@@ -174,6 +182,17 @@ impl RunnerService for RunnerServer {
             }
 
             runner_manager.unregister_runner(&runner_id_clone).await;
+
+            if server_shutting_down {
+                tracing::info!(
+                    runner_id = %runner_id_clone,
+                    "closing runner stream for server shutdown; its releases stay assigned: \
+                     the runner reconnects to another replica once its current release ends, \
+                     and the reaper times out what it cannot finish"
+                );
+                return;
+            }
+
             tracing::info!(runner_id = %runner_id_clone, "runner stream closed");
 
             let token_registry = state_clone.release_token_registry();

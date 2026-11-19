@@ -202,10 +202,8 @@ impl VersionsCommand {
             .list_terraform_state_versions(target, self.limit)
             .await?;
         eprintln!("{}", resp.state_id);
-        if resp.lock_id.is_empty() {
-            eprintln!("unlocked");
-        } else {
-            eprintln!("LOCKED by {}", resp.lock_id);
+        for line in lock_lines(&resp.lock_id, resp.lock.as_ref()) {
+            eprintln!("{line}");
         }
         for v in resp.versions {
             println!("{}\t{}\t{}", v.version, v.created_at, v.size_bytes);
@@ -234,6 +232,37 @@ impl UnlockCommand {
         }
         Ok(())
     }
+}
+
+fn lock_lines(
+    lock_id: &str,
+    lock: Option<&forest_grpc_interface::TerraformStateLock>,
+) -> Vec<String> {
+    if lock_id.is_empty() && lock.is_none() {
+        return vec!["unlocked".into()];
+    }
+    let Some(lock) = lock else {
+        return vec![format!("LOCKED by {lock_id}")];
+    };
+    let mut lines = vec![format!("LOCKED by {}", lock.lock_id)];
+    let mut field = |name: &str, value: &str| {
+        if !value.is_empty() {
+            lines.push(format!("  {name}: {value}"));
+        }
+    };
+    field("holder", &lock.holder);
+    if !lock.release_id.is_empty() {
+        let release = match lock.release_status.as_str() {
+            "" => lock.release_id.clone(),
+            status => format!("{} ({})", lock.release_id, status.to_lowercase()),
+        };
+        field("release", &release);
+    }
+    field("operation", &lock.operation);
+    field("who", &lock.who);
+    field("info", &lock.info);
+    field("since", &lock.created_at);
+    lines
 }
 
 fn resource_addresses(document: &serde_json::Value) -> Vec<String> {
@@ -343,6 +372,37 @@ mod tests {
                 "aws_sns_topic_subscription.queue[\"1\"]",
                 "module.otel.data.aws_secretsmanager_secret.key",
             ]
+        );
+    }
+
+    #[test]
+    fn versions_reports_which_release_holds_the_lock() {
+        let lock = forest_grpc_interface::TerraformStateLock {
+            lock_id: "c7081117".into(),
+            operation: "OperationTypeApply".into(),
+            who: "root@ip-10-0-0-1".into(),
+            holder: "forest release a2fe3766 on forest-server-1".into(),
+            release_id: "a2fe3766".into(),
+            release_status: "FAILED".into(),
+            created_at: "2026-11-19T10:00:00+00:00".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            lock_lines("c7081117", Some(&lock)),
+            vec![
+                "LOCKED by c7081117",
+                "  holder: forest release a2fe3766 on forest-server-1",
+                "  release: a2fe3766 (failed)",
+                "  operation: OperationTypeApply",
+                "  who: root@ip-10-0-0-1",
+                "  since: 2026-11-19T10:00:00+00:00",
+            ]
+        );
+        assert_eq!(lock_lines("", None), vec!["unlocked"]);
+        assert_eq!(
+            lock_lines("old-server-lock", None),
+            vec!["LOCKED by old-server-lock"],
+            "an older server only reports the lock id"
         );
     }
 

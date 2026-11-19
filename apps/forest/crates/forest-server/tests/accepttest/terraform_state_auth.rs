@@ -216,10 +216,11 @@ async fn the_runner_credential_is_accepted_for_its_own_state() {
             fields: vec![],
         },
     };
-    let cred = f
-        .state
-        .terraform_state_store()
-        .runner_credential(&id, &destination);
+    let cred = f.state.terraform_state_store().in_process_credential(
+        &id,
+        &destination,
+        uuid::Uuid::new_v4(),
+    );
 
     let (status, _, _) = call(
         &f.state,

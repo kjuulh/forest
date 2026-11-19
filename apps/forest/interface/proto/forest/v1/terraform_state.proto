@@ -67,6 +67,21 @@ message ListTerraformStateVersionsResponse {
   string state_id = 1;
   repeated TerraformStateVersion versions = 2;
   string lock_id = 3;
+  TerraformStateLock lock = 4;
+}
+
+message TerraformStateLock {
+  string lock_id = 1;
+  string operation = 2;
+  string who = 3;
+  string info = 4;
+  string terraform_version = 5;
+  string created_at = 6;
+  string holder = 7;
+  string release_id = 8;
+  string release_status = 9;
+  string replica = 10;
+  string principal = 11;
 }
 
 message ForceUnlockTerraformStateRequest {

@@ -63,6 +63,10 @@ pub struct Config {
 
     pub terraform_state_signing_key: Option<Vec<u8>>,
 
+    pub terraform_stale_lock_after: std::time::Duration,
+
+    pub replica_gone_after: std::time::Duration,
+
     pub service_account_token_hash: Option<Vec<u8>>,
 
     pub registration_email_domain_regex: Option<regex::Regex>,
@@ -200,6 +204,9 @@ mod tests {
             password_secret_key: "test-password-secret-key-32chars".into(),
             access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
             terraform_state_signing_key: None,
+            terraform_stale_lock_after:
+                crate::destinations::terraform_locks::DEFAULT_STALE_LOCK_AFTER,
+            replica_gone_after: crate::replicas::DEFAULT_GONE_AFTER,
             refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
             service_account_token_hash: None,
             registration_email_domain_regex: None,

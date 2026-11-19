@@ -87,6 +87,9 @@ fn base_test_config() -> forest_server::Config {
         access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
         refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
         terraform_state_signing_key: None,
+        terraform_stale_lock_after:
+            forest_server::destinations::terraform_locks::DEFAULT_STALE_LOCK_AFTER,
+        replica_gone_after: forest_server::replicas::DEFAULT_GONE_AFTER,
         service_account_token_hash: None,
         registration_email_domain_regex: None,
         require_email_verification: false,
@@ -141,8 +144,14 @@ fn bring_up(config: forest_server::Config) -> Fixture {
                 let cancel = cancel.clone();
                 FIXTURE_RUNTIME.spawn(async move {
                     use notmad::Component;
-                    let sched =
-                        forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
+                    let sched = forest_server::scheduler::Scheduler::new(
+                        &state,
+                        runner_manager,
+                        false,
+                        forest_server::release_drain::ReleaseDrain::new(
+                            forest_server::release_drain::DEFAULT_DRAIN_TIMEOUT,
+                        ),
+                    );
                     sched.run(cancel).await.ok();
                 });
             }

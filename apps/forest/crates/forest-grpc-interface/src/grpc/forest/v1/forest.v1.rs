@@ -4792,6 +4792,33 @@ pub struct ListTerraformStateVersionsResponse {
     pub versions: ::prost::alloc::vec::Vec<TerraformStateVersion>,
     #[prost(string, tag="3")]
     pub lock_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="4")]
+    pub lock: ::core::option::Option<TerraformStateLock>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TerraformStateLock {
+    #[prost(string, tag="1")]
+    pub lock_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub who: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub info: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub terraform_version: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag="7")]
+    pub holder: ::prost::alloc::string::String,
+    #[prost(string, tag="8")]
+    pub release_id: ::prost::alloc::string::String,
+    #[prost(string, tag="9")]
+    pub release_status: ::prost::alloc::string::String,
+    #[prost(string, tag="10")]
+    pub replica: ::prost::alloc::string::String,
+    #[prost(string, tag="11")]
+    pub principal: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ForceUnlockTerraformStateRequest {

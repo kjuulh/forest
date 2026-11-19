@@ -445,10 +445,15 @@ async fn force_unlock_reports_what_it_removed() {
         &w.env,
         &w.project_id,
     );
+    let owner = uuid::Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO terraform_state_locks (state_id, lock_id) VALUES ($1, 'crashed-apply')",
+        "INSERT INTO terraform_state_locks
+             (state_id, lock_id, operation, who, principal, release_id, replica)
+         VALUES ($1, 'crashed-apply', 'OperationTypeApply', 'root@task', $2, $3, 'replica-a')",
     )
     .bind(&state_id)
+    .bind(format!("release:{owner}@replica-a:org/dest"))
+    .bind(owner)
     .execute(&f.db)
     .await
     .unwrap();
@@ -466,6 +471,16 @@ async fn force_unlock_reports_what_it_removed() {
         .unwrap()
         .into_inner();
     assert_eq!(listed.lock_id, "crashed-apply");
+    let lock = listed.lock.expect("versions reports who holds the lock");
+    assert_eq!(lock.lock_id, "crashed-apply");
+    assert_eq!(lock.operation, "OperationTypeApply");
+    assert_eq!(lock.who, "root@task");
+    assert_eq!(lock.release_id, owner.to_string());
+    assert_eq!(lock.holder, format!("forest release {owner} on replica-a"));
+    assert_eq!(
+        lock.release_status, "",
+        "the owning release is not on record"
+    );
 
     let unlocked = f
         .terraform_state()

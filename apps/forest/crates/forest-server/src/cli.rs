@@ -45,6 +45,26 @@ struct Command {
         hide_env_values = true
     )]
     terraform_state_signing_key: Option<String>,
+
+    #[arg(
+        long,
+        env = "FOREST_TERRAFORM_STALE_LOCK_MINUTES",
+        default_value_t = 15,
+        help = "Minutes a terraform state lock must be held before a release may break it, \
+                when its owning release has ended or its owner is unknown and nothing else \
+                runs on the destination"
+    )]
+    terraform_stale_lock_minutes: u64,
+
+    #[arg(
+        long,
+        env = "FOREST_REPLICA_GONE_SECS",
+        default_value_t = 1200,
+        help = "Seconds without a heartbeat after which a forest-server replica that did not shut \
+                down cleanly counts as gone, so the terraform state locks its finished releases \
+                left can be cleared (minimum 120)"
+    )]
+    replica_gone_secs: u64,
 }
 
 #[derive(Subcommand)]
@@ -125,6 +145,13 @@ pub async fn execute() -> anyhow::Result<()> {
                 None
             }
         },
+
+        terraform_stale_lock_after: std::time::Duration::from_secs(
+            cli.terraform_stale_lock_minutes.saturating_mul(60),
+        ),
+
+        replica_gone_after: std::time::Duration::from_secs(cli.replica_gone_secs)
+            .max(crate::replicas::MIN_GONE_AFTER),
 
         service_account_token_hash: std::env::var("FOREST_SERVICE_ACCOUNT_API_KEY")
             .ok()

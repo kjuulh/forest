@@ -56,8 +56,64 @@ automatically.
 | Server variable | |
 |---|---|
 | `FOREST_TERRAFORM_STATE_SIGNING_KEY` | Base64, at least 32 bytes. Signs state credentials. Its own secret, so rotating `ACCESS_TOKEN_SECRET_KEY` does not revoke state credentials and rotating this does not sign anybody out. **Optional:** unset, forest derives the key from `ACCESS_TOKEN_SECRET_KEY` and logs a warning at startup. Rotating it revokes every outstanding state credential, including a running apply's, so rotate when nothing is applying. |
+| `FOREST_TERRAFORM_STALE_LOCK_MINUTES` | Default 15 (flag `--terraform-stale-lock-minutes`). How long a lock with no recorded holder must have been held before a release may clear it; never less than 60 minutes; see [State locks](#state-locks). Forest-server after v0.3.18. |
+| `FOREST_REPLICA_GONE_SECS` | Default 1200, minimum 120 (flag `--replica-gone-secs`). Seconds without a heartbeat after which a server replica that did not shut down cleanly (crash, kill, stall) counts as gone, so the locks its ended releases left can be cleared. `FOREST_REPLICA_NAME` (else `HOSTNAME`) names the replica. Forest-server after v0.3.18. |
 
 Generate one with `openssl rand -base64 32`.
+
+### State locks
+
+Terraform locks the state for every plan and apply. Since forest-server after
+v0.3.18 the backend keeps what Terraform sends with the lock (ID, operation,
+who, version, created) and who took it: an in-process release and the server
+replica running it, a remote runner and its release, or the person or app
+whose `forest state env --write` credential was used. A run that finds the
+state locked shows that holder in Terraform's "Lock Info"
+(`Who: forest release <id> on <replica> (<terraform's who>)`), and
+`forest state versions` prints it under `LOCKED by <lock id>`:
+
+```text
+LOCKED by c7081117-...
+  holder: forest release a2fe3766-... on ip-10-0-1-23#5f0c9a1e
+  release: a2fe3766-... (failed)
+  operation: OperationTypeApply
+  who: root@ip-10-0-1-23
+  since: 2026-11-19T14:02:11+00:00
+```
+
+Older servers record only the lock ID, so `versions` prints just the first
+line, and a lock taken before the upgrade has no recorded holder.
+
+Each replica records a heartbeat every 30 seconds. A replica that drains at
+shutdown and stops every release it ran marks itself stopped; a replica that
+just goes quiet (crash, kill, a stalled database connection) counts as gone
+only after `FOREST_REPLICA_GONE_SECS` (default 1200) without a heartbeat,
+because a stalled replica may still be applying. Forest clears a lock only
+when its holder is known to be dead:
+
+- When an in-process release fails, including one the drain interrupts at
+  shutdown, the replica running it releases that release's locks once its
+  Terraform process has exited or been killed.
+- Before an in-process plan or apply, and before handing a release to a
+  remote runner, forest checks the destination's state lock and writes what
+  it found to the release log. It releases a lock only when it belongs to an
+  in-process release that has ended and whose replica is stopped (at once,
+  the usual case after a redeploy) or gone, or when it has no recorded holder,
+  is older than 60 minutes (or `FOREST_TERRAFORM_STALE_LOCK_MINUTES` if
+  higher) and no other release on the destination is assigned or running.
+- Everything else is left and reported: a release still running
+  (`locked by release <id> on replica <r>, still running`), an ended release
+  whose replica is still alive (`..., still alive`) or only silent
+  (`..., not heard from since <time>`), a remote runner's lock,
+  and a person's or app's lock (`locked by user:<id> since <time>; clear it with
+  forest state unlock`).
+
+The release reaper fails releases that lost their heartbeat or ran too long,
+but never removes their locks: Terraform may still be applying.
+
+If a run still reports the state locked, `forest state versions` names the
+holder; `forest state unlock` (Admin) clears it by hand once you know it is
+not in use.
 
 ## Mapping in Configuration
 

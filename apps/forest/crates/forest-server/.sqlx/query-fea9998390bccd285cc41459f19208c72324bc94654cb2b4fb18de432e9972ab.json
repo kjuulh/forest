@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                DELETE FROM terraform_state_locks\n                WHERE release_id = $1\n                  AND principal LIKE 'release:%'\n                  AND replica = $2\n                RETURNING state_id, lock_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "state_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lock_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "lock_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fea9998390bccd285cc41459f19208c72324bc94654cb2b4fb18de432e9972ab"
+}

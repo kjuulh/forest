@@ -140,6 +140,7 @@ impl GrpcServer {
             .add_service(RunnerServiceServer::new(runner::RunnerServer {
                 state: self.state.clone(),
                 runner_manager: self.runner_manager.clone(),
+                shutdown: cancellation_token.clone(),
             }))
             .add_service(ReleaseHealthServiceServer::new(
                 release_health::ReleaseHealthServer {

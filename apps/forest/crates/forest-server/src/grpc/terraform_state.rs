@@ -253,16 +253,42 @@ impl TerraformStateService for TerraformStateServer {
                 size_bytes: size.max(0) as u64,
             })
             .collect();
-        let lock_id = store
-            .lock_holder(&state_id)
-            .await
-            .to_internal_error()?
-            .unwrap_or_default();
+        let lock = store.current_lock(&state_id).await.to_internal_error()?;
+        let lock = match lock {
+            Some(lock) => {
+                let release_status = match lock.release_id {
+                    Some(release_id) => sqlx::query_scalar!(
+                        r#"SELECT status FROM release_states WHERE release_id = $1"#,
+                        release_id,
+                    )
+                    .fetch_optional(&self.state.db)
+                    .await
+                    .map_err(|e| tonic::Status::internal(format!("read release status: {e}")))?
+                    .unwrap_or_default(),
+                    None => String::new(),
+                };
+                Some(TerraformStateLock {
+                    lock_id: lock.lock_id.clone(),
+                    operation: lock.operation.clone(),
+                    who: lock.who.clone(),
+                    info: lock.info.clone(),
+                    terraform_version: lock.tf_version.clone(),
+                    created_at: lock.acquired_at.to_rfc3339(),
+                    holder: lock.holder(),
+                    release_id: lock.release_id.map(|id| id.to_string()).unwrap_or_default(),
+                    release_status,
+                    replica: lock.replica.clone().unwrap_or_default(),
+                    principal: lock.principal.clone().unwrap_or_default(),
+                })
+            }
+            None => None,
+        };
 
         Ok(Response::new(ListTerraformStateVersionsResponse {
             state_id,
             versions,
-            lock_id,
+            lock_id: lock.as_ref().map(|l| l.lock_id.clone()).unwrap_or_default(),
+            lock,
         }))
     }
 
