@@ -409,6 +409,8 @@ impl NotificationDispatcher {
                     "text": message.text,
                     "blocks": message.blocks,
                     "attachments": [],
+                    "unfurl_links": false,
+                    "unfurl_media": false,
                 });
                 match self.slack_call(access_token, "chat.update", &payload).await {
                     Ok(_) => {
@@ -434,6 +436,8 @@ impl NotificationDispatcher {
                     "channel": channel,
                     "text": message.text,
                     "blocks": message.blocks,
+                    "unfurl_links": false,
+                    "unfurl_media": false,
                 });
                 let body = self
                     .slack_call(access_token, "chat.postMessage", &payload)

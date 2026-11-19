@@ -429,3 +429,19 @@ async fn the_artifact_list_is_fetched_once_even_when_there_is_nothing_to_list() 
     assert_eq!(*h.details.artifact_calls.lock().unwrap(), 1);
     assert!(!h.thread().iter().any(|t| t.contains("changes since")));
 }
+
+#[tokio::test]
+async fn forest_links_are_never_unfurled_into_sign_in_previews() {
+    let h = Harness::new().await;
+    h.set_stages(vec![stage("dev", "RUNNING", &[]), stage("prod", "PENDING", &["dev"])]);
+    h.send("release_started", "dev").await;
+    h.set_stages(vec![stage("dev", "SUCCEEDED", &[]), stage("prod", "RUNNING", &["dev"])]);
+    h.send("release_succeeded", "dev").await;
+
+    let st = h.providers.state.lock().unwrap();
+    assert!(!st.update_bodies.is_empty());
+    for body in st.post_bodies.iter().chain(st.update_bodies.iter()) {
+        assert_eq!(body["unfurl_links"], false, "{body}");
+        assert_eq!(body["unfurl_media"], false, "{body}");
+    }
+}
