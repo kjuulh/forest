@@ -1,0 +1,311 @@
+---
+source: crates/forage-server/src/tests/release_detail_tests.rs
+expression: main
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12 pb-12">
+<div class="mb-8">
+<div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+<a href="/orgs/testorg/projects/my-api" class="hover:text-gray-700">my-api</a>
+<span class="text-gray-300">/</span>
+<a href="/orgs/testorg/projects/my-api/releases" class="hover:text-gray-700">Releases</a>
+</div>
+<div class="flex items-center gap-3">
+<span class="w-3 h-3 rounded-full bg-blue-400 shrink-0"></span>
+<h1 class="text-2xl font-bold" title="feat: ledger
+
+Longer body">feat: ledger…</h1>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-green-100 text-green-800">v3.1.0</span>
+</div>
+<p class="text-sm font-mono text-gray-400 mt-1">my-api-rel</p>
+<div class="flex flex-wrap items-center gap-2 mt-3">
+<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium bg-blue-50 text-blue-700 border-blue-200"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>main</span>
+<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-mono bg-gray-100 text-gray-600 border-gray-200"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>01234567</span>
+<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium bg-purple-50 text-purple-700 border-purple-200"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path></svg>github actions</span>
+<a href="/users/ci-bot" class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 transition-colors"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>ci-bot</a>
+<span class="text-xs text-gray-400"><time datetime="2026-03-07T12:00:00Z" class="">AGO</time></span>
+</div>
+</div>
+<div class="mb-8">
+<p class="text-gray-700 whitespace-pre-wrap break-words" title="Moves billing to the new ledger">Moves billing to the new ledger</p>
+</div>
+<div class="mb-8">
+<details class="border border-gray-200 rounded-lg group">
+<summary class="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+<span class="font-medium text-gray-700">Deploy this release</span>
+<svg class="w-3 h-3 text-gray-400 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</summary>
+<div class="px-4 py-4 border-t border-gray-100">
+<form method="post" action="/orgs/testorg/projects/my-api/deploy" class="space-y-4">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="artifact_id" value="art-rel">
+<div class="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-md">
+<input type="checkbox" id="use-pipeline" name="use_pipeline" value="true" checked class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+<label for="use-pipeline" class="text-sm text-purple-800">
+                    Use pipeline <span class="text-purple-600 text-xs">(follows the configured multi-stage deployment pipeline)</span>
+</label>
+</div>
+<div id="env-select">
+<label for="deploy-environment" class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+<select id="deploy-environment" name="environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+<option value="">All environments (pipeline decides)</option>
+<option value="staging">staging</option><option value="prod">prod</option>
+</select>
+<p class="text-xs text-gray-500 mt-1">Leave empty when using a pipeline — it will deploy to all configured stages.</p>
+</div>
+<button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Deploy</button>
+</form>
+</div>
+</details>
+</div>
+<div class="mb-8" id="pipeline">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div id="stage-deploy-staging" class="scroll-mt-4 target:bg-yellow-50">
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="text-sm text-gray-700">Deployed to</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">staging</span>
+
+<span class="text-xs text-gray-400 tabular-nums"><time datetime="2026-03-07T12:00:30Z" class="">AGO</time></span>
+</div>
+
+
+</div><div id="stage-soak" class="scroll-mt-4 target:bg-yellow-50">
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="text-sm text-gray-700">Waited 30s</span>
+
+
+
+</div>
+
+
+</div><div id="stage-plan-prod" class="scroll-mt-4 target:bg-yellow-50">
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-purple-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+<span class="text-sm text-purple-700">Awaiting plan approval</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-pink-100 text-pink-800">prod</span>
+<div class="flex items-center gap-2 ml-auto">
+<form method="post" action="/api/orgs/testorg/projects/my-api/plan-stages/plan-prod/approve" class="inline">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="redirect_to" value="/orgs/testorg/projects/my-api/releases/my-api-rel">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve plan</button>
+</form>
+<form method="post" action="/api/orgs/testorg/projects/my-api/plan-stages/plan-prod/reject" class="inline" data-confirm="Reject this plan?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="redirect_to" value="/orgs/testorg/projects/my-api/releases/my-api-rel">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+</form>
+</div>
+
+</div>
+
+<details data-plan-output class="px-4 pb-3" open>
+<summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
+<pre id="plan-plan-prod" class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto scroll-mt-4">+ ledger_table &lt;new&gt;</pre>
+</details>
+</div>
+</div>
+<p class="text-xs text-gray-400 mt-2">2/3 stages complete</p>
+</div>
+<div class="mb-8">
+<div class="flex items-center gap-3 mb-3">
+<h2 class="text-sm font-semibold text-gray-900">Policy Requirements</h2>
+<span class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+2/4 passed
+            </span>
+</div>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+<div class="px-4 py-3">
+<div class="flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="bg-emerald-100 text-emerald-700 text-xs font-medium px-1.5 py-0.5 rounded">Approval</span>
+<span class="text-gray-600">two-person-rule</span>
+<span class="text-xs text-gray-400 ml-auto">1 of 2 approvals</span>
+</div>
+<div class="mt-3 ml-7">
+<div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
+<span class="font-medium">1/2 approvals</span>
+</div>
+<div class="space-y-1 mb-3">
+<div class="flex items-center gap-2 text-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+<span class="text-green-700 font-medium">alice</span>
+<span class="text-gray-400">approved</span>
+<span class="text-gray-400">— looks good</span>
+</div><div class="flex items-center gap-2 text-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+<span class="text-red-700 font-medium">bob</span>
+<span class="text-gray-400">rejected</span>
+
+</div>
+</div>
+<div class="flex items-center gap-2">
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/approve" class="inline">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="staging">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/approve" class="inline" data-confirm="Admin bypass — skip remaining approvals?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="staging">
+<input type="hidden" name="force_bypass" value="true">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors">Bypass (Admin)</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/reject" class="inline">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="staging">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+</form>
+</div>
+</div>
+</div><div class="px-4 py-3">
+<div class="flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="bg-emerald-100 text-emerald-700 text-xs font-medium px-1.5 py-0.5 rounded">Approval</span>
+<span class="text-gray-600">two-person-rule</span>
+<span class="text-xs text-gray-400 ml-auto">1 of 2 approvals</span>
+</div>
+<div class="mt-3 ml-7">
+<div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
+<span class="font-medium">1/2 approvals</span>
+</div>
+<div class="space-y-1 mb-3">
+<div class="flex items-center gap-2 text-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+<span class="text-green-700 font-medium">alice</span>
+<span class="text-gray-400">approved</span>
+<span class="text-gray-400">— looks good</span>
+</div><div class="flex items-center gap-2 text-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+<span class="text-red-700 font-medium">bob</span>
+<span class="text-gray-400">rejected</span>
+
+</div>
+</div>
+<div class="flex items-center gap-2">
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/approve" class="inline">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="prod">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/approve" class="inline" data-confirm="Admin bypass — skip remaining approvals?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="prod">
+<input type="hidden" name="force_bypass" value="true">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors">Bypass (Admin)</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/releases/my-api-rel/reject" class="inline">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="release_intent_id" value="intent-rel">
+<input type="hidden" name="target_environment" value="prod">
+<button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+</form>
+</div>
+</div>
+</div>
+</div>
+<details class="border border-gray-200 rounded-lg group">
+<summary class="px-4 py-2.5 flex items-center gap-2 text-sm text-gray-500 cursor-pointer list-none hover:bg-gray-50">
+<svg class="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+2 passed policies
+</summary>
+<div class="divide-y divide-gray-100 border-t border-gray-100">
+<div class="px-4 py-2.5 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded">Soak Time</span>
+<span class="text-gray-600">soak-an-hour</span>
+<span class="text-xs text-gray-400 ml-auto">soaked</span>
+</div><div class="px-4 py-2.5 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded">Soak Time</span>
+<span class="text-gray-600">soak-an-hour</span>
+<span class="text-xs text-gray-400 ml-auto">soaked</span>
+</div>
+</div>
+</details>
+</div>
+<div class="mb-8" id="destinations">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Destinations</h2>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div id="dest-staging-eu" class="scroll-mt-4 target:bg-yellow-50">
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">staging</span>
+<span class="text-gray-700">staging-eu</span>
+<span class="text-xs text-green-600">Deployed</span>
+<time datetime="2026-03-07T12:01:00Z" class="text-xs text-gray-400 ml-auto tabular-nums">AGO</time>
+</div>
+
+</div><div id="dest-prod-eu" class="scroll-mt-4 target:bg-yellow-50">
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-pink-100 text-pink-800">prod</span>
+<span class="text-gray-700">prod-eu</span>
+<span class="text-xs text-blue-600">Queued #2</span>
+
+</div>
+
+</div>
+</div>
+</div>
+<div class="mb-8 scroll-mt-4" id="logs">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Logs</h2>
+<release-logs url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs"></release-logs>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Spec</h2>
+<spec-viewer content="project: &quot;billing&quot; &lt;&amp;&gt;" filename="forest.cue"></spec-viewer>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Details</h2>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="px-4 py-3 flex items-start gap-3 text-sm">
+<svg class="w-4 h-4 text-gray-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+<span class="text-gray-700 whitespace-pre-wrap break-words min-w-0">feat: ledger
+
+Longer body</span>
+</div>
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+<a href="https://github.com/acme/billing" class="text-blue-600 hover:underline" target="_blank" rel="noopener">https://github.com/acme/billing</a>
+</div>
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+<span class="text-gray-500">ci@example.com</span>
+</div>
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<a href="https://github.com/acme/billing/actions/runs/1" class="text-blue-600 hover:underline" target="_blank" rel="noopener">View CI run</a>
+</div>
+</div>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-900 mb-3">Links</h2>
+<div class="flex gap-3">
+<a href="https://example.com/billing" class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50" target="_blank" rel="noopener">
+<svg class="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+Web
+</a>
+<a href="https://github.com/acme/billing/pull/7" class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50" target="_blank" rel="noopener">
+<svg class="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+Pull request
+</a>
+</div>
+</div>
+<div class="text-sm text-gray-500">
+<p>Created <time datetime="2026-03-07T12:00:00Z" class="">AGO</time></p>
+</div>
+</section>
+</main>

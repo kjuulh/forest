@@ -1199,24 +1199,29 @@ async fn artifact_detail(
             .any(|ri| ri.artifact_id == artifact.artifact_id && !ri.stages.is_empty())
     });
 
-    let mut pipeline_stages: Vec<minijinja::Value> = Vec::new();
     let latest_intent = release_intents
         .iter()
         .filter(|ri| ri.artifact_id == artifact.artifact_id && !ri.stages.is_empty())
         .max_by_key(|ri| &ri.created_at);
 
+    let mut stages: Vec<forage_ui::release::Stage> = Vec::new();
     if let Some(ri) = latest_intent {
-        let sorted = topo_sort_run_stages(&ri.stages);
-        for rs in sorted {
-            let base_status = deploy_stage_display_status(rs, &matching_states);
-            let display_status = if rs.stage_type == "plan"
-                && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL")
-            {
-                "AWAITING_APPROVAL"
+        for rs in topo_sort_run_stages(&ri.stages) {
+            let kind = forage_ui::release::StageKind::parse(&rs.stage_type);
+            let awaiting_plan = kind == forage_ui::release::StageKind::Plan
+                && matches!(
+                    rs.approval_status.as_deref(),
+                    Some("AWAITING_APPROVAL" | "AWAITINGAPPROVAL")
+                );
+            let status = if awaiting_plan {
+                forage_ui::release::RunStatus::AwaitingApproval
             } else {
-                base_status
+                forage_ui::release::RunStatus::parse(deploy_stage_display_status(
+                    rs,
+                    &matching_states,
+                ))
             };
-            let plan_output = if rs.stage_type == "plan" {
+            let plan_output = if kind == forage_ui::release::StageKind::Plan {
                 match state
                     .platform_client
                     .get_plan_output(&session.access_token, &ri.release_intent_id, &rs.stage_id)
@@ -1235,210 +1240,141 @@ async fn artifact_detail(
             } else {
                 None
             };
-            pipeline_stages.push(context! {
-                id => rs.stage_id,
-                stage_type => rs.stage_type,
-                environment => rs.environment.clone().unwrap_or_default(),
-                duration_seconds => rs.duration_seconds,
-                status => display_status,
-                started_at => rs.started_at,
-                completed_at => rs.completed_at,
-                error_message => rs.error_message,
-                wait_until => rs.wait_until,
-                approval_status => rs.approval_status,
-                plan_output => plan_output,
+            stages.push(forage_ui::release::Stage {
+                id: rs.stage_id.clone(),
+                anchor: forage_core::integrations::slack_release::anchor_id(&rs.stage_id),
+                kind,
+                environment: rs.environment.clone().unwrap_or_default(),
+                status,
+                duration_seconds: rs.duration_seconds,
+                started_at: rs.started_at.clone().filter(|v| !v.is_empty()),
+                error_message: rs.error_message.clone().filter(|v| !v.trim().is_empty()),
+                plan_output,
             });
         }
     }
 
-    let has_pipeline = !pipeline_stages.is_empty() || project_has_pipeline;
+    let has_pipeline = !stages.is_empty() || project_has_pipeline;
 
-    struct PolicyEvalEntry {
-        policy_name: String,
-        policy_type: String,
-        passed: bool,
-        reason: String,
-        target_environment: String,
-        approval_state: Option<forage_core::platform::ApprovalState>,
-    }
-
-    let mut raw_evals: Vec<PolicyEvalEntry> = Vec::new();
-    let release_intent_id_str = latest_intent
+    let mut policies: Vec<crate::views::release::PolicyCheck> = Vec::new();
+    let release_intent_id = latest_intent
         .map(|ri| ri.release_intent_id.clone())
         .unwrap_or_default();
-    let is_release_author = false;
     if let Some(ri) = latest_intent {
-        {
-            let mut seen = std::collections::BTreeSet::new();
-            let environments: Vec<String> = ri
-                .stages
-                .iter()
-                .filter_map(|s| s.environment.clone())
-                .filter(|e| seen.insert(e.clone()))
-                .collect();
+        let mut seen = std::collections::BTreeSet::new();
+        let environments: Vec<String> = ri
+            .stages
+            .iter()
+            .filter_map(|s| s.environment.clone())
+            .filter(|e| seen.insert(e.clone()))
+            .collect();
 
-            for env in &environments {
-                if let Ok(evals) = state
-                    .platform_client
-                    .evaluate_policies(
-                        &session.access_token,
-                        &org,
-                        &project,
-                        env,
-                        Some(&ri.release_intent_id),
-                    )
-                    .await
-                {
-                    for eval in evals {
-                        raw_evals.push(PolicyEvalEntry {
-                            policy_name: eval.policy_name,
+        for env in &environments {
+            if let Ok(evals) = state
+                .platform_client
+                .evaluate_policies(
+                    &session.access_token,
+                    &org,
+                    &project,
+                    env,
+                    Some(&ri.release_intent_id),
+                )
+                .await
+            {
+                policies.extend(
+                    evals
+                        .into_iter()
+                        .map(|eval| crate::views::release::PolicyCheck {
+                            name: eval.policy_name,
                             policy_type: eval.policy_type,
                             passed: eval.passed,
                             reason: eval.reason,
                             target_environment: env.clone(),
-                            approval_state: eval.approval_state,
-                        });
-                    }
-                }
+                            approval: eval.approval_state,
+                        }),
+                );
             }
         }
     }
+    policies.sort_by(|a, b| a.policy_type.cmp(&b.policy_type).then(a.name.cmp(&b.name)));
 
-    raw_evals.sort_by(|a, b| {
-        a.policy_type
-            .cmp(&b.policy_type)
-            .then(a.policy_name.cmp(&b.policy_name))
-    });
-
-    let policy_evaluations: Vec<minijinja::Value> = raw_evals
+    let is_admin = orgs
         .iter()
-        .map(|eval| {
-            let approval_state_ctx = eval.approval_state.as_ref().map(|s| {
-                let decisions: Vec<minijinja::Value> = s
-                    .decisions
-                    .iter()
-                    .map(|d| {
-                        context! {
-                            username => d.username,
-                            decision => d.decision,
-                            comment => d.comment,
-                            decided_at => d.decided_at,
-                        }
-                    })
-                    .collect();
-                context! {
-                    required_approvals => s.required_approvals,
-                    current_approvals => s.current_approvals,
-                    decisions => decisions,
-                }
-            });
-            context! {
-                policy_name => eval.policy_name,
-                policy_type => eval.policy_type,
-                passed => eval.passed,
-                reason => eval.reason,
-                target_environment => eval.target_environment,
-                approval_state => approval_state_ctx,
-            }
-        })
-        .collect();
-
-    let current_org_entry = orgs.iter().find(|o| o.name == org);
-    let is_admin = current_org_entry
+        .find(|o| o.name == org)
         .map(|o| o.role == "owner" || o.role == "admin")
         .unwrap_or(false);
 
-    let env_groups = build_env_groups(&matching_states);
+    let destinations: Vec<forage_ui::release::DestinationRun> =
+        dedupe_destinations(&matching_states)
+            .into_iter()
+            .map(|ds| forage_ui::release::DestinationRun {
+                name: ds.destination_name.clone(),
+                anchor: forage_core::integrations::slack_release::anchor_id(&ds.destination_name),
+                environment: ds.environment.clone(),
+                status: forage_ui::release::RunStatus::parse(ds.status.as_deref().unwrap_or("")),
+                error_message: ds.error_message.clone().filter(|v| !v.trim().is_empty()),
+                queue_position: ds.queue_position,
+                at: ds
+                    .completed_at
+                    .clone()
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| ds.started_at.clone().filter(|v| !v.is_empty())),
+            })
+            .collect();
 
-    let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
-        .into_iter()
-        .map(|ds| {
-            context! {
-                name => ds.destination_name,
-                environment => ds.environment,
-                status => ds.status,
-                error_message => ds.error_message,
-                queued_at => ds.queued_at,
-                started_at => ds.started_at,
-                completed_at => ds.completed_at,
-                queue_position => ds.queue_position,
-            }
-        })
-        .collect();
+    let description_meta = artifact
+        .context
+        .description
+        .as_deref()
+        .filter(|d| d.starts_with("Branch:"))
+        .map(parse_description_metadata)
+        .unwrap_or_default();
 
-    let artifact_id_val = artifact.artifact_id.clone();
-
-    let html = state
-        .templates
-        .render(
-            "pages/artifact_detail.html.jinja",
-            context! {
-                title => format!("{} - {} - {} - Forest", artifact.context.title, project, org),
-                description => artifact.context.description,
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_name => &project,
-                projects => projects,
-                active_tab => "project_releases",
-                artifact => {
-                    let desc_meta = artifact.context.description.as_deref()
-                        .filter(|d| d.starts_with("Branch:"))
-                        .map(parse_description_metadata)
-                        .unwrap_or_default();
-
-                    let branch = artifact.git_ref.as_ref().and_then(|r| r.branch.clone())
-                        .or_else(|| desc_meta.get("branch").cloned());
-                    let source_type = artifact.source.as_ref().and_then(|s| s.source_type.clone())
-                        .or_else(|| desc_meta.get("source").cloned());
-                    let source_user = artifact.source.as_ref().and_then(|s| s.user.clone())
-                        .or_else(|| desc_meta.get("author").cloned());
-
-                    context! {
-                        slug => artifact.slug,
-                        title => artifact.context.title,
-                        description => artifact.context.description,
-                        web => artifact.context.web,
-                        pr => artifact.context.pr,
-                        created_at => artifact.created_at,
-                        source_user => source_user,
-                        source_email => artifact.source.as_ref().and_then(|s| s.email.clone()),
-                        source_type => source_type,
-                        run_url => artifact.source.as_ref().and_then(|s| s.run_url.clone()),
-                        commit_sha => artifact.git_ref.as_ref().map(|r| r.commit_sha.clone()),
-                        branch => branch,
-                        commit_message => artifact.git_ref.as_ref().and_then(|r| r.commit_message.clone()),
-                        version => artifact.git_ref.as_ref().and_then(|r| r.version.clone()),
-                        repo_url => artifact.git_ref.as_ref().and_then(|r| r.repo_url.clone()),
-                    }
-                },
-                summary_status => &summary_status,
-                pipeline_stages => pipeline_stages,
-                has_pipeline => has_pipeline,
-                env_groups => env_groups,
-                destinations => destinations,
-                configured_destinations => artifact.destinations.iter().map(|d| {
-                    context! { name => d.name, environment => d.environment }
-                }).collect::<Vec<_>>(),
-                has_release_intents => release_intents.iter().any(|ri| ri.artifact_id == artifact.artifact_id),
-                artifact_spec => if artifact_spec.is_empty() { None::<String> } else { Some(artifact_spec) },
-                policy_evaluations => policy_evaluations,
-                release_intent_id => &release_intent_id_str,
-                is_release_author => is_release_author,
-                is_admin => is_admin,
-                artifact_id => &artifact_id_val,
-                has_active_pipeline => has_pipeline,
-                environments => warn_default("list_environments", environments)
-                    .iter()
-                    .map(|e| context! { name => e.name })
-                    .collect::<Vec<_>>(),
+    let page = crate::views::release::ReleasePage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!(
+                    "{} - {} - {} - Forest",
+                    artifact.context.title, project, org
+                ),
+                description: artifact.context.description.clone().unwrap_or_default(),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectReleases,
             },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        release: crate::views::release::details(&artifact, &description_meta),
+        summary: forage_ui::release::RunStatus::parse(&summary_status),
+        environments: warn_default("list_environments", environments)
+            .into_iter()
+            .map(|e| e.name)
+            .collect(),
+        has_pipeline,
+        stages,
+        release_intent_id,
+        policies,
+        destinations,
+        configured_destinations: artifact
+            .destinations
+            .iter()
+            .map(|d| crate::views::release::ConfiguredDestination {
+                name: d.name.clone(),
+                environment: d.environment.clone(),
+            })
+            .collect(),
+        has_release_intents: release_intents
+            .iter()
+            .any(|ri| ri.artifact_id == artifact.artifact_id),
+        spec: Some(artifact_spec).filter(|s| !s.is_empty()),
+    };
+    let html = crate::views::pages::artifact_detail::render(&page);
 
     Ok(Html(html).into_response())
 }

@@ -1,0 +1,298 @@
+use forage_ui::Tone;
+use forage_ui::components::{CsrfField, DestinationRow, DetailRow, ExternalLinkButton, Icon, OutlineChip, PendingDestinationRow, PolicyTypeBadge, ReleaseStatusDot, SectionHeading, StageRow, Timeago};
+use forage_ui::layouts::Shell;
+use forage_ui::release::{source_icon, source_label, StageKind};
+use crate::views::models::project_href;
+use crate::views::release::{deploy_href, logs_href, plan_stage_href, policies_passed, release_href, stages_done, user_href};
+props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_admin, release, summary, environments, has_pipeline, stages, release_intent_id, policies, destinations, configured_destinations, has_release_intents, spec };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12 pb-12">
+    <div class="mb-8">
+      <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+        <a href={project_href(org, project)} class="hover:text-gray-700">{project}</a>
+        <span class="text-gray-300">/</span>
+        <a href="{project_href(org, project)}/releases" class="hover:text-gray-700">Releases</a>
+      </div>
+      <div class="flex items-center gap-3">
+        <ReleaseStatusDot status={*summary} />
+        <h1 class="text-2xl font-bold" title={release.full_title}>{release.heading}</h1>
+        {if let Some(version) = &release.version {
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-green-100 text-green-800">{version}</span>
+        }}
+      </div>
+      <p class="text-sm font-mono text-gray-400 mt-1">{release.slug}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        {if let Some(branch) = &release.branch {
+          <OutlineChip tone={Tone::Blue} icon="branch">{branch}</OutlineChip>
+        }}
+        {if let Some(sha) = &release.short_sha {
+          <OutlineChip icon="code">{sha}</OutlineChip>
+        }}
+        {if let Some(source) = &release.source_type {
+          <OutlineChip tone={Tone::Purple} icon={source_icon(source)}>{source_label(source)}</OutlineChip>
+        }}
+        {if let Some(user) = &release.source_user {
+          <OutlineChip tone={Tone::Amber} icon="user" href={Some(user_href(user).as_str())}>{user}</OutlineChip>
+        }}
+        <span class="text-xs text-gray-400"><Timeago value={release.created_at} /></span>
+      </div>
+    </div>
+
+    {if let Some(description) = &release.description {
+      <div class="mb-8">
+        <p class="text-gray-700 whitespace-pre-wrap break-words" title={description.full}>{description.shown}</p>
+      </div>
+    }}
+
+    {if *is_admin {
+      <div class="mb-8">
+        <details class="border border-gray-200 rounded-lg group">
+          <summary class="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50">
+            <Icon name="refresh" class="w-4 h-4 text-gray-400 shrink-0" />
+            <span class="font-medium text-gray-700">Deploy this release</span>
+            <Icon name="chevron-right" class="w-3 h-3 text-gray-400 ml-auto transition-transform group-open:rotate-90" />
+          </summary>
+          <div class="px-4 py-4 border-t border-gray-100">
+            <form method="post" action={deploy_href(org, project)} class="space-y-4">
+              <CsrfField token={csrf_token} name="_csrf" />
+              <input type="hidden" name="artifact_id" value={release.artifact_id}>
+              {if *has_pipeline {
+                <div class="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-md">
+                  <input type="checkbox" id="use-pipeline" name="use_pipeline" value="true" checked class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                  <label for="use-pipeline" class="text-sm text-purple-800">
+                    Use pipeline <span class="text-purple-600 text-xs">(follows the configured multi-stage deployment pipeline)</span>
+                  </label>
+                </div>
+              }}
+              <div id="env-select">
+                <label for="deploy-environment" class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <select id="deploy-environment" name="environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                  <option value="">All environments (pipeline decides)</option>
+                  {for env in environments.iter() {
+                    <option value={env}>{env}</option>
+                  }}
+                </select>
+                <p class="text-xs text-gray-500 mt-1">Leave empty when using a pipeline — it will deploy to all configured stages.</p>
+              </div>
+              <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Deploy</button>
+            </form>
+          </div>
+        </details>
+      </div>
+    }}
+
+    {if !stages.is_empty() {
+      <div class="mb-8" id="pipeline">
+        <SectionHeading>Pipeline</SectionHeading>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {for stage in stages.iter() {
+            {if stage.kind == StageKind::Plan && stage.awaiting_approval() && !release_intent_id.is_empty() {
+              <StageRow stage={stage}>
+                <:actions>
+                  <div class="flex items-center gap-2 ml-auto">
+                    <form method="post" action={plan_stage_href(org, project, &stage.id, "approve")} class="inline">
+                      <CsrfField token={csrf_token} />
+                      <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                      <input type="hidden" name="redirect_to" value={release_href(org, project, &release.slug)}>
+                      <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve plan</button>
+                    </form>
+                    <form method="post" action={plan_stage_href(org, project, &stage.id, "reject")} class="inline" data-confirm="Reject this plan?">
+                      <CsrfField token={csrf_token} />
+                      <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                      <input type="hidden" name="redirect_to" value={release_href(org, project, &release.slug)}>
+                      <button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+                    </form>
+                  </div>
+                </:actions>
+              </StageRow>
+            } else {
+              <StageRow stage={stage} />
+            }}
+          }}
+        </div>
+        <p class="text-xs text-gray-400 mt-2">{stages_done(stages)}/{stages.len()} stages complete</p>
+      </div>
+    } else if *has_pipeline {
+      <div class="mb-8">
+        <SectionHeading>Pipeline</SectionHeading>
+        <div class="flex items-center gap-2 text-sm text-gray-500 p-4 border border-gray-200 rounded-lg">
+          <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" />
+          <span>Pipeline configured — waiting for release to be triggered.</span>
+        </div>
+      </div>
+    }}
+
+    {if !policies.is_empty() {
+      {let passed = policies_passed(policies);}
+      {let total = policies.len();}
+      <div class="mb-8">
+        <div class="flex items-center gap-3 mb-3">
+          <h2 class="text-sm font-semibold text-gray-900">Policy Requirements</h2>
+          {if passed == total {
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+              <Icon name="check-circle" class="w-3 h-3" />
+              {passed}/{total} passed
+            </span>
+          } else {
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+              <Icon name="alert-circle" class="w-3 h-3" />
+              {passed}/{total} passed
+            </span>
+          }}
+        </div>
+
+        {if passed < total {
+          <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+            {for check in policies.iter().filter(|p| !p.passed) {
+              <div class="px-4 py-3">
+                <div class="flex items-center gap-3 text-sm">
+                  <Icon name="alert-circle" class="w-4 h-4 text-amber-500 shrink-0" />
+                  <PolicyTypeBadge policy_type={check.policy_type} />
+                  <span class="text-gray-600">{check.name}</span>
+                  <span class="text-xs text-gray-400 ml-auto">{check.reason}</span>
+                </div>
+                {if let Some(approval) = check.approval_state() {
+                  <div class="mt-3 ml-7">
+                    <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                      <span class="font-medium">{approval.current_approvals}/{approval.required_approvals} approvals</span>
+                    </div>
+                    {if !approval.decisions.is_empty() {
+                      <div class="space-y-1 mb-3">
+                        {for d in approval.decisions.iter() {
+                          <div class="flex items-center gap-2 text-xs">
+                            {if d.decision == "approved" {
+                              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                              <span class="text-green-700 font-medium">{d.username}</span>
+                              <span class="text-gray-400">approved</span>
+                            } else {
+                              <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                              <span class="text-red-700 font-medium">{d.username}</span>
+                              <span class="text-gray-400">rejected</span>
+                            }}
+                            {if let Some(comment) = d.comment.as_deref().filter(|c| !c.is_empty()) {
+                              <span class="text-gray-400">— {comment}</span>
+                            }}
+                          </div>
+                        }}
+                      </div>
+                    }}
+                    <div class="flex items-center gap-2">
+                      <form method="post" action="{release_href(org, project, &release.slug)}/approve" class="inline">
+                        <CsrfField token={csrf_token} />
+                        <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                        <input type="hidden" name="target_environment" value={check.target_environment}>
+                        <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve</button>
+                      </form>
+                      {if *is_admin {
+                        <form method="post" action="{release_href(org, project, &release.slug)}/approve" class="inline" data-confirm="Admin bypass — skip remaining approvals?">
+                          <CsrfField token={csrf_token} />
+                          <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                          <input type="hidden" name="target_environment" value={check.target_environment}>
+                          <input type="hidden" name="force_bypass" value="true">
+                          <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors">Bypass (Admin)</button>
+                        </form>
+                      }}
+                      <form method="post" action="{release_href(org, project, &release.slug)}/reject" class="inline">
+                        <CsrfField token={csrf_token} />
+                        <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                        <input type="hidden" name="target_environment" value={check.target_environment}>
+                        <button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+                      </form>
+                    </div>
+                  </div>
+                }}
+              </div>
+            }}
+          </div>
+        }}
+
+        {if passed > 0 {
+          <details class="border border-gray-200 rounded-lg group">
+            <summary class="px-4 py-2.5 flex items-center gap-2 text-sm text-gray-500 cursor-pointer list-none hover:bg-gray-50">
+              <Icon name="chevron-right" class="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" />
+              <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" />
+              {passed} passed {if passed == 1 { policy } else { policies }}
+            </summary>
+            <div class="divide-y divide-gray-100 border-t border-gray-100">
+              {for check in policies.iter().filter(|p| p.passed) {
+                <div class="px-4 py-2.5 flex items-center gap-3 text-sm">
+                  <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" />
+                  <PolicyTypeBadge policy_type={check.policy_type} />
+                  <span class="text-gray-600">{check.name}</span>
+                  <span class="text-xs text-gray-400 ml-auto">{check.reason}</span>
+                </div>
+              }}
+            </div>
+          </details>
+        }}
+      </div>
+    }}
+
+    {if !destinations.is_empty() || !configured_destinations.is_empty() {
+      <div class="mb-8" id="destinations">
+        <SectionHeading>Destinations</SectionHeading>
+        {if !destinations.is_empty() {
+          <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {for dest in destinations.iter() { <DestinationRow dest={dest} /> }}
+          </div>
+        } else {
+          <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {for cd in configured_destinations.iter() { <PendingDestinationRow name={cd.name} environment={cd.environment} /> }}
+          </div>
+        }}
+      </div>
+    }}
+
+    {if *has_release_intents {
+      <div class="mb-8 scroll-mt-4" id="logs">
+        <SectionHeading>Logs</SectionHeading>
+        <release-logs url={logs_href(org, project, &release.slug)}></release-logs>
+      </div>
+    }}
+
+    {if let Some(spec) = spec {
+      <div class="mb-8">
+        <SectionHeading>Spec</SectionHeading>
+        <spec-viewer content={spec} filename="forest.cue"></spec-viewer>
+      </div>
+    }}
+
+    {if release.has_details() {
+      <div class="mb-8">
+        <SectionHeading>Details</SectionHeading>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {if let Some(message) = &release.commit_message {
+            <DetailRow icon="chat" top={true}><span class="text-gray-700 whitespace-pre-wrap break-words min-w-0">{message}</span></DetailRow>
+          }}
+          {if let Some(url) = &release.repo_url {
+            <DetailRow icon="code"><a href={url} class="text-blue-600 hover:underline" target="_blank" rel="noopener">{url}</a></DetailRow>
+          }}
+          {if let Some(email) = &release.source_email {
+            <DetailRow icon="mail"><span class="text-gray-500">{email}</span></DetailRow>
+          }}
+          {if let Some(url) = &release.run_url {
+            <DetailRow icon="play-circle"><a href={url} class="text-blue-600 hover:underline" target="_blank" rel="noopener">View CI run</a></DetailRow>
+          }}
+        </div>
+      </div>
+    }}
+
+    {if release.web.is_some() || release.pr.is_some() {
+      <div class="mb-8">
+        <SectionHeading>Links</SectionHeading>
+        <div class="flex gap-3">
+          {if let Some(web) = &release.web { <ExternalLinkButton href={web}>Web</ExternalLinkButton> }}
+          {if let Some(pr) = &release.pr { <ExternalLinkButton href={pr}>Pull request</ExternalLinkButton> }}
+        </div>
+      </div>
+    }}
+
+    <div class="text-sm text-gray-500">
+      <p>Created <Timeago value={release.created_at} /></p>
+    </div>
+  </section>
+  <:scripts>
+    <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+  </:scripts>
+</Shell>

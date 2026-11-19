@@ -107,6 +107,8 @@ pub(crate) struct MockPlatformBehavior {
         Option<Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError>>,
     pub list_artifacts_by_project: Option<std::collections::HashMap<String, Vec<Artifact>>>,
     pub get_plan_output_result: Option<Result<forage_core::platform::PlanOutput, PlatformError>>,
+    pub evaluate_policies_result:
+        Option<Result<Vec<forage_core::platform::PolicyEvaluation>, PlatformError>>,
     pub get_visibility_result: Option<Result<forage_core::platform::Visibility, PlatformError>>,
     pub set_visibility_result: Option<Result<(), PlatformError>>,
     pub visibility_calls: Option<Arc<Mutex<Vec<String>>>>,
@@ -1083,7 +1085,8 @@ impl ForestPlatform for MockPlatformClient {
         _target_environment: &str,
         _release_intent_id: Option<&str>,
     ) -> Result<Vec<forage_core::platform::PolicyEvaluation>, PlatformError> {
-        Ok(vec![])
+        let b = self.behavior.lock().unwrap();
+        b.evaluate_policies_result.clone().unwrap_or(Ok(vec![]))
     }
 
     async fn approve_release(

@@ -879,7 +879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2908,7 +2908,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3044,7 +3044,7 @@ dependencies = [
 [[package]]
 name = "sedge-gen"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
 dependencies = [
  "sedge-syntax",
  "serde_json",
@@ -3053,7 +3053,7 @@ dependencies = [
 [[package]]
 name = "sedge-rt"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
 dependencies = [
  "serde",
  "serde_json",
@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "sedge-syntax"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=3975b043d794c490213c41ec1536ef0ff2f1af81#3975b043d794c490213c41ec1536ef0ff2f1af81"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
 dependencies = [
  "miette",
 ]
@@ -3523,6 +3523,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
@@ -3663,7 +3664,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3684,7 +3685,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

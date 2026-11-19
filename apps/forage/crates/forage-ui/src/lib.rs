@@ -1,6 +1,7 @@
 pub mod chrome;
 pub mod format;
 pub mod project_settings;
+pub mod release;
 pub mod templates;
 mod tone;
 

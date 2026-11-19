@@ -7,3 +7,4 @@ pub use compiled::*;
 
 pub mod chrome;
 pub mod models;
+pub mod release;

@@ -26,6 +26,7 @@ mod pages_tests;
 mod platform_tests;
 mod project_settings_tests;
 mod registry_tests;
+mod release_detail_tests;
 mod release_pages_tests;
 mod trigger_pages_tests;
 mod shell_parity_tests;
