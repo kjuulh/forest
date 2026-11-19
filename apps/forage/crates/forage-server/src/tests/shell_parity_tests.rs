@@ -54,11 +54,24 @@ fn affordances(html: &str) -> Vec<String> {
     let input = Regex::new(r#"<input type="hidden" name="([^"]*)" value="([^"]*)">"#).unwrap();
     let mut out = Vec::new();
     for c in link.captures_iter(&html) {
+        let attrs = format!("{} {}", &c[1], &c[3]);
+        let mut classes: Vec<&str> = class
+            .captures(&attrs)
+            .map(|m| m.get(1).unwrap().as_str().split_whitespace().collect())
+            .unwrap_or_default();
+        classes.sort_unstable();
         out.push(format!(
-            "link {} [{}]",
-            &c[1],
-            squash(&tag.replace_all(&c[2], ""))
+            "link {} [{}] {}",
+            &c[2],
+            squash(&tag.replace_all(&c[4], "")),
+            classes.join(" ")
         ));
+    }
+    for c in script.captures_iter(&html) {
+        out.push(format!("script {}", &c[1]));
+    }
+    for c in marker.captures_iter(&html) {
+        out.push(format!("marker {}", &c[0]));
     }
     for c in form.captures_iter(&html) {
         out.push(format!("form {} {}", c[1].to_uppercase(), &c[2]));

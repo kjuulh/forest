@@ -26,7 +26,7 @@ pub struct Session {
 
 pub fn safe_return_to(raw: Option<&str>) -> Option<&str> {
     let p = raw?;
-    if p.len() < 2 || !p.starts_with('/') {
+    if p.len() < 2 || !p.starts_with('/') || p.chars().any(char::is_control) {
         return None;
     }
     let second = p.as_bytes()[1];
@@ -254,5 +254,8 @@ mod tests {
         assert_eq!(safe_return_to(Some("javascript:alert(1)")), None);
         assert_eq!(safe_return_to(Some("//evil.com/path")), None);
         assert_eq!(safe_return_to(Some("/\\evil.com")), None);
+        assert_eq!(safe_return_to(Some("/\t/evil.com")), None);
+        assert_eq!(safe_return_to(Some("/\r\n/evil.com")), None);
+        assert_eq!(safe_return_to(Some("/orgs\n/evil")), None);
     }
 }

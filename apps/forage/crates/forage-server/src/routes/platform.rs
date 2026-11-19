@@ -5473,7 +5473,7 @@ async fn approve_plan_stage_submit(
     State(state): State<AppState>,
     session: Session,
     headers: axum::http::HeaderMap,
-    Path((org, _project, stage_id)): Path<(String, String, String)>,
+    Path((org, project, stage_id)): Path<(String, String, String)>,
     Form(form): Form<PlanStageForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5504,10 +5504,19 @@ async fn approve_plan_stage_submit(
             ),
         })?;
 
-    if let Some(redirect) = &form.redirect_to {
-        Ok(Redirect::to(redirect).into_response())
-    } else {
-        Ok(Json(serde_json::json!({ "ok": true })).into_response())
+    Ok(plan_stage_response(&org, &project, form.redirect_to.as_deref()))
+}
+
+fn plan_stage_response(org: &str, project: &str, redirect_to: Option<&str>) -> Response {
+    match (redirect_to, crate::auth::safe_return_to(redirect_to)) {
+        (_, Some(path)) => Redirect::to(path).into_response(),
+        (Some(_), None) => Redirect::to(&format!(
+            "/orgs/{}/projects/{}/releases",
+            urlencoding::encode(org),
+            urlencoding::encode(project)
+        ))
+        .into_response(),
+        (None, None) => Json(serde_json::json!({ "ok": true })).into_response(),
     }
 }
 
@@ -5515,7 +5524,7 @@ async fn reject_plan_stage_submit(
     State(state): State<AppState>,
     session: Session,
     headers: axum::http::HeaderMap,
-    Path((org, _project, stage_id)): Path<(String, String, String)>,
+    Path((org, project, stage_id)): Path<(String, String, String)>,
     Form(form): Form<PlanStageForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5560,11 +5569,7 @@ async fn reject_plan_stage_submit(
             ),
         })?;
 
-    if let Some(redirect) = &form.redirect_to {
-        Ok(Redirect::to(redirect).into_response())
-    } else {
-        Ok(Json(serde_json::json!({ "ok": true })).into_response())
-    }
+    Ok(plan_stage_response(&org, &project, form.redirect_to.as_deref()))
 }
 
 #[derive(Deserialize)]

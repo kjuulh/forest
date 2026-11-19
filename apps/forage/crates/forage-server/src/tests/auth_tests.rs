@@ -866,3 +866,21 @@ async fn account_backend_failures_keep_forms_without_exposing_diagnostics() {
         assert_generic_auth_error(std::str::from_utf8(&body).unwrap());
     }
 }
+
+#[tokio::test]
+async fn a_signed_in_visit_to_signup_never_follows_a_return_to_with_a_tab() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let response = crate::build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/signup?return_to=%2F%09%2Fevil.example")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()["location"], "/dashboard");
+}

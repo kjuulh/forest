@@ -472,3 +472,60 @@ async fn links_with_a_script_scheme_are_not_followed() {
         "unsafe scheme reached the page"
     );
 }
+
+async fn decide_plan(action: &str, redirect_to: Option<&str>) -> axum::response::Response {
+    let (state, sessions) = test_state_with(
+        MockForestClient::new(),
+        MockPlatformClient::with_behavior(behaviour()),
+    );
+    let cookie = create_test_session(&sessions).await;
+    let mut body = "csrf_token=test-csrf&release_intent_id=intent-rel".to_string();
+    if let Some(r) = redirect_to {
+        body.push_str(&format!("&redirect_to={}", urlencoding::encode(r)));
+    }
+    build_router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/orgs/testorg/projects/my-api/plan-stages/plan-prod/{action}"))
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_plan_decision_never_redirects_off_site() {
+    for action in ["approve", "reject"] {
+        for target in [
+            "https://evil.example/phish",
+            "//evil.example/phish",
+            "/\\evil.example",
+            "javascript:alert(1)",
+            "releases",
+            "/\t/evil.example",
+            "/\n/evil.example",
+        ] {
+            let response = decide_plan(action, Some(target)).await;
+            assert_eq!(response.status(), StatusCode::SEE_OTHER, "{action} {target}");
+            assert_eq!(
+                response.headers()["location"],
+                "/orgs/testorg/projects/my-api/releases",
+                "{action} {target}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_plan_decision_follows_a_same_site_path_and_answers_json_without_one() {
+    for action in ["approve", "reject"] {
+        let response = decide_plan(action, Some(PAGE)).await;
+        assert_eq!(response.headers()["location"], PAGE, "{action}");
+        let response = decide_plan(action, None).await;
+        assert_eq!(response.status(), StatusCode::OK, "{action}");
+    }
+}
