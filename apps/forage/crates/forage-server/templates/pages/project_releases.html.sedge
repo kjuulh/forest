@@ -1,0 +1,22 @@
+use forage_ui::components::{IconLink, TimelinePrefetch};
+use forage_ui::layouts::Shell;
+use crate::views::models::settings_href;
+props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_token, username, role, prefetch_js };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8">
+      <h1 class="text-2xl font-bold">Releases</h1>
+      <div class="flex items-center gap-4">
+        <IconLink href={settings_href(org, project, "pipelines")} icon="pipelines">Pipelines</IconLink>
+        <IconLink href={settings_href(org, project, "triggers")} icon="triggers">Triggers</IconLink>
+        <IconLink href={settings_href(org, project, "policies")} icon="policies">Policies</IconLink>
+      </div>
+    </div>
+    <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} />
+    <release-timeline org={org} project={project} csrf={csrf_token} username={username} role={role}></release-timeline>
+  </section>
+  <:scripts>
+    <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+  </:scripts>
+</Shell>

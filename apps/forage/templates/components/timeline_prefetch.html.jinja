@@ -1,14 +1,4 @@
 {% macro timeline_prefetch(org, project) %}
 {% set url = ("/api/orgs/" ~ org ~ "/projects/" ~ project ~ "/timeline") if project else ("/api/orgs/" ~ org ~ "/timeline") %}
-<script data-timeline-url="{{ url|escape }}">
-(function () {
-    var el = document.currentScript;
-    if (!el) return;
-    var url = el.getAttribute("data-timeline-url");
-    var store = (window.__forestTimeline = window.__forestTimeline || {});
-    store[url] = fetch(url, { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .catch(function () { return null; });
-})();
-</script>
+<script src="{{ asset('js/timeline-prefetch.js') }}" data-timeline-url="{{ url }}"></script>
 {% endmacro %}

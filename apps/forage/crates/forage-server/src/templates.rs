@@ -4,6 +4,19 @@ use anyhow::Context;
 use minijinja::Environment;
 use sha2::Digest;
 
+fn asset_href(path: &str) -> String {
+    static HASHES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::LazyLock::new(Default::default);
+    let mut hashes = HASHES.lock().unwrap_or_else(|e| e.into_inner());
+    let hash = hashes.entry(path.to_string()).or_insert_with(|| {
+        match std::fs::read(Path::new("static").join(path)) {
+            Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
+            Err(_) => "dev".to_string(),
+        }
+    });
+    format!("/static/{path}?v={hash}")
+}
+
 #[derive(Clone)]
 pub struct TemplateEngine {
     env: Environment<'static>,
@@ -50,6 +63,7 @@ impl TemplateEngine {
             forage_core::platform::prettify_url(&v)
         });
 
+        env.add_function("asset", |path: String| -> String { asset_href(&path) });
         env.add_global("css_hash", "dev");
         env.add_global("ui_js_hash", "dev");
         env.add_global("components_js_hash", "dev");
@@ -107,16 +121,7 @@ impl TemplateEngine {
     }
 
     pub fn asset_href(&self, path: &str) -> String {
-        static HASHES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-            std::sync::LazyLock::new(Default::default);
-        let mut hashes = HASHES.lock().unwrap_or_else(|e| e.into_inner());
-        let hash = hashes.entry(path.to_string()).or_insert_with(|| {
-            match std::fs::read(Path::new("static").join(path)) {
-                Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
-                Err(_) => "dev".to_string(),
-            }
-        });
-        format!("/static/{path}?v={hash}")
+        asset_href(path)
     }
 
     #[cfg(test)]
@@ -214,9 +219,10 @@ mod timeline_prefetch_tests {
 
     #[test]
     fn the_page_starts_the_timeline_request() {
-        let html = releases_page("understory");
+        let html = releases_page("understory").replace("&#x2f;", "/");
         assert!(
-            html.contains("__forestTimeline"),
+            html.contains(r#"<script src="/static/js/timeline-prefetch.js?v="#)
+                && html.contains(r#"data-timeline-url="/api/orgs/understory/timeline""#),
             "the releases page no longer primes the timeline; \
              <release-timeline> will wait for the bundle before it asks for data"
         );

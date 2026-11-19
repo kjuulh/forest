@@ -43,3 +43,17 @@ pub fn triggers_href(org: &str, project: &str) -> String {
 pub fn destinations_href(org: &str) -> String {
     format!("/orgs/{}/destinations", urlencode(org))
 }
+
+pub struct ProjectReleasesPage {
+    pub chrome: Chrome,
+    pub org: String,
+    pub project: String,
+    pub csrf_token: String,
+    pub username: String,
+    pub role: String,
+    pub prefetch_js: String,
+}
+
+pub fn settings_href(org: &str, project: &str, section: &str) -> String {
+    format!("{}/settings/{section}", project_href(org, project))
+}

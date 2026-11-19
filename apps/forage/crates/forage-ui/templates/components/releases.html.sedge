@@ -1,0 +1,4 @@
+component TimelinePrefetch(org: &str, project: Option<&str>, src: &str) {
+{let url = match project { Some(p) => format!("/api/orgs/{org}/projects/{p}/timeline"), None => format!("/api/orgs/{org}/timeline") };}
+<script src={src} data-timeline-url={url}></script>
+}

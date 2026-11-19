@@ -1084,58 +1084,35 @@ async fn project_releases(
         ));
     }
 
-    let (artifacts, projects, environments) = tokio::join!(
+    let projects = warn_default(
+        "list_projects",
         state
             .platform_client
-            .list_artifacts(&session.access_token, &org, &project),
-        state
-            .platform_client
-            .list_projects(&session.access_token, &org),
-        state
-            .platform_client
-            .list_environments(&session.access_token, &org),
+            .list_projects(&session.access_token, &org)
+            .await,
     );
-    let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
-    let projects = warn_default("list_projects", projects);
-    let environments = warn_default("list_environments", environments);
 
-    let mut sorted_envs = environments.clone();
-    sorted_envs.sort_by_key(|e| e.sort_order);
-    let env_options: Vec<minijinja::Value> = if !sorted_envs.is_empty() {
-        sorted_envs
-            .iter()
-            .map(|e| context! { name => e.name })
-            .collect()
-    } else {
-        let mut env_seen = std::collections::HashSet::new();
-        artifacts
-            .iter()
-            .flat_map(|a| a.destinations.iter())
-            .filter(|d| env_seen.insert(d.environment.clone()))
-            .map(|d| context! { name => d.environment })
-            .collect()
-    };
-
-    let html = state
-        .templates
-        .render(
-            "pages/project_releases.html.jinja",
-            context! {
-                title => format!("Releases - {project} - {org} - Forest"),
-                description => format!("Releases performed for {project} in {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_name => &project,
-                projects => projects,
-                current_role => &current_role,
-                active_tab => "project_releases",
-                env_options => env_options,
+    let page = crate::views::models::ProjectReleasesPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Releases - {project} - {org} - Forest"),
+                description: format!("Releases performed for {project} in {org}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectReleases,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        username: session.user.username.clone(),
+        role: current_role,
+        prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+    };
+    let html = crate::views::pages::project_releases::render(&page);
 
     Ok(Html(html).into_response())
 }
