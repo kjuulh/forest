@@ -6,7 +6,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Redirect, Response};
 use axum::routing::{get, post};
 use forage_core::platform::{OAuthClientInfo, OAuthDeviceToken, OAuthFlowError};
-use minijinja::context;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -192,41 +191,28 @@ async fn authorize_page(
         _ => {}
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/oauth_consent.html.jinja",
-            context! {
-                title => format!("Authorize {} - Forest", app.name),
-                description => "Authorize application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                csrf_token => &session.csrf_token,
-                app_name => &app.name,
-                app_homepage => &app.homepage_url,
-                scopes => scopes.iter().map(|s| context! {
-                    name => s,
-                    description => scope_description(s),
-                }).collect::<Vec<_>>(),
-                client_id => &q.client_id,
-                redirect_uri => &q.redirect_uri,
-                scope => scopes.join(" "),
-                consent_binding => consent_binding(
-                    &session.csrf_token,
-                    &q.client_id,
-                    &q.redirect_uri,
-                    &scopes.join(" "),
-                ),
-                state => q.state.clone().unwrap_or_default(),
-                code_challenge => q.code_challenge.clone().unwrap_or_default(),
-                code_challenge_method => q.code_challenge_method.clone().unwrap_or_default(),
-                nonce => q.nonce.clone().unwrap_or_default(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::OAuthConsentPage::new(
+        &state,
+        &session,
+        &app.name,
+        &app.homepage_url,
+        crate::views::auth::ConsentRequest {
+            client_id: &q.client_id,
+            redirect_uri: &q.redirect_uri,
+            scopes: &scopes,
+            consent_binding: consent_binding(
+                &session.csrf_token,
+                &q.client_id,
+                &q.redirect_uri,
+                &scopes.join(" "),
+            ),
+            state: q.state.as_deref(),
+            code_challenge: q.code_challenge.as_deref(),
+            code_challenge_method: q.code_challenge_method.as_deref(),
+            nonce: q.nonce.as_deref(),
+        },
+    );
+    Ok(Html(crate::views::pages::oauth_consent::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]

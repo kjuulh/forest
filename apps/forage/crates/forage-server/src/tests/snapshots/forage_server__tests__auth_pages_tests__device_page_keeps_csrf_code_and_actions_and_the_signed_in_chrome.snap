@@ -1,0 +1,43 @@
+---
+source: crates/forage-server/src/tests/auth_pages_tests.rs
+expression: masked_main(&page.html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-md mx-auto px-4 pt-24">
+<h1 class="text-2xl font-bold text-center mb-2 text-gray-900">
+        Authorise Forest CLI
+      </h1>
+<p class="text-center text-gray-600 mb-8">
+        Approve a sign-in request from the <code class="text-sm bg-gray-100 px-1 rounded">forest</code> command line tool.
+      </p>
+
+<div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
+<p class="font-medium">Only approve if you started this from your own terminal.</p>
+<p class="mt-1">
+              Approving will let the device sign in to Forest as
+              <strong>testuser</strong>.
+            </p>
+</div>
+<form method="POST" action="/device" class="space-y-4">
+<input type="hidden" name="_csrf" value="test-csrf">
+
+<div>
+<label for="user_code" class="block text-sm font-medium mb-1 text-gray-900">
+              One-time code
+            </label>
+<input type="text" id="user_code" name="user_code" value="ABCD-EFGH" required autocomplete="off" spellcheck="false" class="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-md text-base font-mono tracking-widest text-center uppercase focus:outline-none focus:ring-2 focus:ring-gray-900" placeholder="XXXX-XXXX">
+<p class="mt-2 text-xs text-gray-500">
+              The code is shown in your terminal where you started the sign-in.
+            </p>
+</div>
+<div class="flex gap-2">
+<button type="submit" name="action" value="approve" class="flex-1 py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+              Approve
+            </button>
+<button type="submit" name="action" value="deny" class="flex-1 py-2 bg-white border border-gray-300 text-gray-900 rounded-md font-medium hover:bg-gray-50">
+              Deny
+            </button>
+</div>
+</form>
+</section>
+</main>

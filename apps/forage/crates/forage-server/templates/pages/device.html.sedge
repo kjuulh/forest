@@ -1,0 +1,109 @@
+use forage_ui::components::{Alert, CsrfField};
+use forage_ui::layouts::Shell;
+use crate::views::auth::DeviceOutcome;
+props crate::views::auth::DevicePage { chrome, app, username, csrf_token, user_code, error, outcome };
+
+<Shell chrome={chrome}>
+  <section class="max-w-md mx-auto px-4 pt-24">
+    {if let Some(app) = app {
+      <h1 class="text-2xl font-bold text-center mb-2 text-gray-900">
+        Authorise {app.name}
+      </h1>
+      <p class="text-center text-gray-600 mb-8">
+        Approve a sign-in request from a terminal, for the
+        <strong>{app.name}</strong> application.
+      </p>
+    } else {
+      <h1 class="text-2xl font-bold text-center mb-2 text-gray-900">
+        Authorise Forest CLI
+      </h1>
+      <p class="text-center text-gray-600 mb-8">
+        Approve a sign-in request from the <code class="text-sm bg-gray-100 px-1 rounded">forest</code> command line tool.
+      </p>
+    }}
+
+    {match outcome {
+      DeviceOutcome::Unconfigured => {
+        <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">
+          <p class="font-medium">Device login isn't configured on this deployment.</p>
+          <p class="mt-1">
+            This forage instance can't approve CLI device logins yet — the
+            operator needs to set <code class="bg-red-100 px-1 rounded">FOREST_SERVICE_ACCOUNT_API_KEY</code>.
+            Until that's done, please sign in to the CLI with
+            <code class="bg-red-100 px-1 rounded">forest auth login --password</code>.
+          </p>
+        </div>
+      }
+      DeviceOutcome::Approved => {
+        <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">
+          {if let Some(app) = app {
+            <p class="font-medium">{app.name} is authorised.</p>
+            <p class="mt-1">You can close this tab and return to your terminal. Revoke it any time under Settings &rarr; Authorized apps.</p>
+          } else {
+            <p class="font-medium">You're signed in.</p>
+            <p class="mt-1">You can close this tab and return to your terminal.</p>
+          }}
+        </div>
+      }
+      DeviceOutcome::Denied => {
+        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-800">
+          <p class="font-medium">Sign-in denied.</p>
+          <p class="mt-1">The terminal request was cancelled. You can close this tab.</p>
+        </div>
+      }
+      DeviceOutcome::Pending => {
+        {if let Some(error) = error {
+          <Alert>{error}</Alert>
+        }}
+
+        <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
+          <p class="font-medium">Only approve if you started this from your own terminal.</p>
+          {if let Some(app) = app {
+            <p class="mt-1">
+              Approving lets <strong>{app.name}</strong> act as
+              <strong>{username}</strong>, with only these permissions. It does not get your Forest session.
+            </p>
+            <ul class="mt-2 space-y-1">
+              {for scope in app.scopes.iter() {
+                <li><span class="font-mono">{scope.name}</span>{if !scope.description.is_empty() { {" — "}{scope.description} }}</li>
+              }}
+            </ul>
+          } else {
+            <p class="mt-1">
+              Approving will let the device sign in to Forest as
+              <strong>{username}</strong>.
+            </p>
+          }}
+        </div>
+
+        <form method="POST" action="/device" class="space-y-4">
+          <CsrfField token={csrf_token.as_str()} name="_csrf" />
+          {if let Some(app) = app {
+            <input type="hidden" name="client_id" value={app.client_id}>
+          }}
+
+          <div>
+            <label for="user_code" class="block text-sm font-medium mb-1 text-gray-900">
+              One-time code
+            </label>
+            <input type="text" id="user_code" name="user_code" value={user_code} required autocomplete="off" spellcheck="false"
+              class="w-full px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-md text-base font-mono tracking-widest text-center uppercase focus:outline-none focus:ring-2 focus:ring-gray-900"
+              placeholder="XXXX-XXXX">
+            <p class="mt-2 text-xs text-gray-500">
+              The code is shown in your terminal where you started the sign-in.
+            </p>
+          </div>
+
+          <div class="flex gap-2">
+            <button type="submit" name="action" value="approve" class="flex-1 py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+              Approve
+            </button>
+            <button type="submit" name="action" value="deny" class="flex-1 py-2 bg-white border border-gray-300 text-gray-900 rounded-md font-medium hover:bg-gray-50">
+              Deny
+            </button>
+          </div>
+        </form>
+      }
+    }}
+  </section>
+</Shell>

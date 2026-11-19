@@ -6,7 +6,6 @@ use axum::{Form, Router};
 use axum::extract::Multipart;
 use chrono::Utc;
 use forage_core::integrations::SlackUserLink;
-use minijinja::context;
 use serde::Deserialize;
 
 use super::{error_page, internal_error, record_error, report_error};
@@ -259,26 +258,8 @@ fn render_signup(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/signup.html.jinja",
-            context! {
-                title => "Sign Up - Forest",
-                description => "Create your Forest account",
-                is_auth_page => true,
-                username => username,
-                email => email,
-                error => error,
-                has_google_oauth => state.google_oauth_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_magic_link => state.magic_link_store.is_some(),
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| internal_error(state, "render signup", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::SignupPage::new(state, username, email, error, return_to);
+    Ok(Html(crate::views::pages::signup::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -409,21 +390,9 @@ async fn login_submit(
                 "forage_mfa_session={}; HttpOnly; SameSite=Lax; Path=/login; Max-Age=300",
                 mfa_session_token
             );
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => None::<String>,
-                        return_to => rt,
-                    },
-                )
-                .map_err(|e| internal_error(&state, "render login MFA challenge", &e))?;
-
-            let mut response = Html(html).into_response();
+            let page = crate::views::auth::MfaChallengePage::new(&state, None, rt);
+            let mut response =
+                Html(crate::views::pages::mfa_challenge::render(&page)).into_response();
             if let Ok(val) = HeaderValue::from_str(&cookie_value) {
                 response.headers_mut().insert(SET_COOKIE, val);
             }
@@ -485,36 +454,20 @@ async fn login_mfa_submit(
     {
         Ok(t) => t,
         Err(forage_core::auth::AuthError::InvalidCredentials) => {
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => Some("Invalid or expired code. Please try again."),
-                        return_to => rt,
-                    },
-                )
-                .map_err(|e| internal_error(&state, "render invalid login MFA challenge", &e))?;
-            return Ok(Html(html).into_response());
+            let page = crate::views::auth::MfaChallengePage::new(
+                &state,
+                Some("Invalid or expired code. Please try again.".into()),
+                rt,
+            );
+            return Ok(Html(crate::views::pages::mfa_challenge::render(&page)).into_response());
         }
         Err(e) => {
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => Some(report_error("verify login MFA", &e)),
-                        return_to => rt,
-                    },
-                )
-                .map_err(|e| internal_error(&state, "render failed login MFA challenge", &e))?;
-            return Ok(Html(html).into_response());
+            let page = crate::views::auth::MfaChallengePage::new(
+                &state,
+                Some(report_error("verify login MFA", &e)),
+                rt,
+            );
+            return Ok(Html(crate::views::pages::mfa_challenge::render(&page)).into_response());
         }
     };
 
@@ -580,25 +533,8 @@ fn render_login(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/login.html.jinja",
-            context! {
-                title => "Sign In - Forest",
-                description => "Sign in to your Forest account",
-                is_auth_page => true,
-                identifier => identifier,
-                error => error,
-                has_google_oauth => state.google_oauth_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_magic_link => state.magic_link_store.is_some(),
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| internal_error(state, "render login", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::LoginPage::new(state, identifier, error, return_to);
+    Ok(Html(crate::views::pages::login::render(&page)).into_response())
 }
 
 async fn logout_submit(
@@ -2327,23 +2263,9 @@ fn render_complete_profile(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/complete_profile.html.jinja",
-            context! {
-                title => "Choose Username - Forest",
-                description => "Pick a username for your new account",
-                is_auth_page => true,
-                csrf_token => csrf_token,
-                username => username,
-                error => error,
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| internal_error(state, "render complete profile", &e))?;
-
-    Ok(Html(html).into_response())
+    let page =
+        crate::views::auth::CompleteProfilePage::new(state, csrf_token, username, error, return_to);
+    Ok(Html(crate::views::pages::complete_profile::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -2597,37 +2519,13 @@ fn render_magic_link_form(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/magic_link.html.jinja",
-            context! {
-                title => "Sign in with Email - Forest",
-                description => "Get a magic link sent to your email",
-                email => email,
-                error => error,
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| internal_error(state, "render magic link form", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::MagicLinkPage::new(state, email, error, return_to);
+    Ok(Html(crate::views::pages::magic_link::render(&page)).into_response())
 }
 
 fn render_magic_link_sent(state: &AppState, email: &str) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/magic_link_sent.html.jinja",
-            context! {
-                title => "Check Your Email - Forest",
-                description => "Magic link sent",
-                email => email,
-            },
-        )
-        .map_err(|e| internal_error(state, "render magic link sent", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::EmailNoticePage::magic_link_sent(state, email);
+    Ok(Html(crate::views::pages::magic_link_sent::render(&page)).into_response())
 }
 
 const MAX_PICTURE_SIZE: usize = 2 * 1024 * 1024;
@@ -2951,18 +2849,8 @@ async fn enqueue_verification_email(
 }
 
 fn render_verify_email_check_inbox(state: &AppState, email: &str) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_check_inbox.html.jinja",
-            context! {
-                title => "Verify your email - Forest",
-                description => "Check your inbox for a verification link",
-                email => email,
-            },
-        )
-        .map_err(|e| internal_error(state, "render verify email check inbox", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::EmailNoticePage::check_inbox(state, email);
+    Ok(Html(crate::views::pages::verify_email_check_inbox::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -3019,19 +2907,9 @@ async fn verify_email_redeem(
         .into_response());
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_success.html.jinja",
-            context! {
-                title => "Email verified - Forest",
-                description => "Your email has been verified",
-                email => email,
-            },
-        )
-        .map_err(|e| internal_error(&state, "render email verification success", &e))?;
-
-    let mut response = Html(html).into_response();
+    let page = crate::views::auth::EmailNoticePage::verified(&state, &email);
+    let mut response =
+        Html(crate::views::pages::verify_email_success::render(&page)).into_response();
     response.headers_mut().insert(
         axum::http::header::REFERRER_POLICY,
         axum::http::HeaderValue::from_static("no-referrer"),
@@ -3040,20 +2918,12 @@ async fn verify_email_redeem(
 }
 
 fn render_verify_email_failed(state: &AppState) -> Response {
-    match state.templates.render(
-        "pages/verify_email_failed.html.jinja",
-        context! {
-            title => "Verification link expired - Forest",
-            description => "Verification link expired or already used",
-        },
-    ) {
-        Ok(html) => {
-            let mut resp = Html(html).into_response();
-            *resp.status_mut() = StatusCode::BAD_REQUEST;
-            resp
-        }
-        Err(e) => internal_error(state, "verify_email_failed template", &e),
-    }
+    let page = crate::views::auth::VerifyEmailFailedPage::new(state);
+    (
+        StatusCode::BAD_REQUEST,
+        Html(crate::views::pages::verify_email_failed::render(&page)),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -3062,19 +2932,8 @@ struct VerifyEmailResendForm {
 }
 
 async fn verify_email_resend_page(State(state): State<AppState>) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_resend.html.jinja",
-            context! {
-                title => "Resend verification email - Forest",
-                description => "Send a new verification link",
-                email => "",
-                error => None::<String>,
-            },
-        )
-        .map_err(|e| internal_error(&state, "render resend verification email", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::VerifyEmailResendPage::new(&state);
+    Ok(Html(crate::views::pages::verify_email_resend::render(&page)).into_response())
 }
 
 async fn verify_email_resend_submit(

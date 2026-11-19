@@ -5,14 +5,12 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use minijinja::context;
 use serde::Deserialize;
 
 use forage_core::platform::PendingOAuthDeviceAuthorization;
 
 use super::{error_page, internal_error};
 use crate::auth::{self, Session};
-use crate::routes::oauth::scope_description;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -258,38 +256,13 @@ fn render_device_for(
     error: Option<&str>,
     result: Option<&str>,
 ) -> Result<Response, Response> {
-    let title = match app {
-        Some(app) => format!("Authorise {}", app.name),
-        None => "Authorise Forest CLI".to_string(),
-    };
-    let html = state
-        .templates
-        .render(
-            "pages/device.html.jinja",
-            context! {
-                title => title,
-                description => "Approve a device login",
-                app => app.map(|a| context! {
-                    name => &a.name,
-                    client_id => &a.client_id,
-                    homepage_url => &a.homepage_url,
-                    scopes => a.scopes.iter().map(|s| context! {
-                        name => s,
-                        description => scope_description(s),
-                    }).collect::<Vec<_>>(),
-                }),
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! {
-                    name => &o.name,
-                    role => &o.role,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                user_code => user_code,
-                error => error,
-                result => result,
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::DevicePage::new(
+        state,
+        session,
+        user_code,
+        app,
+        error,
+        crate::views::auth::DeviceOutcome::from_result(result),
+    );
+    Ok(Html(crate::views::pages::device::render(&page)).into_response())
 }
