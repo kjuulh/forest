@@ -59,6 +59,8 @@ automatically.
 | `FOREST_TERRAFORM_STALE_LOCK_MINUTES` | Default 15 (flag `--terraform-stale-lock-minutes`). How long a lock with no recorded holder must have been held before a release may clear it; never less than 60 minutes; see [State locks](#state-locks). Forest-server after v0.3.18. |
 | `FOREST_REPLICA_GONE_SECS` | Default 1200, minimum 120 (flag `--replica-gone-secs`). Seconds without a heartbeat after which a server replica that did not shut down cleanly (crash, kill, stall) counts as gone, so the locks its ended releases left can be cleared. `FOREST_REPLICA_NAME` (else `HOSTNAME`) names the replica. Forest-server after v0.3.18. |
 
+| `FOREST_TERRAFORM_PLUGIN_CACHE_DIR` | Provider plugin cache shared by every run, so `init` installs a provider once per server process instead of on every plan and apply. Default `<tmp>/forest/terraform-plugin-cache`; an empty value turns it off. A run's lock file records the cached package's hash, and the deploy stage verifies against it. Nothing prunes old provider versions; the cache is cleared when the server's disk is. |
+
 Generate one with `openssl rand -base64 32`.
 
 ### State locks

@@ -1653,6 +1653,11 @@ async fn command(
         cmd.env(k, v);
     }
 
+    if let Some(cache) = plugin_cache_dir().await {
+        cmd.env("TF_PLUGIN_CACHE_DIR", cache)
+            .env("TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE", "true");
+    }
+
     if let Ok(mirror_url) = std::env::var("FOREST_TERRAFORM_PROVIDER_MIRROR_URL") {
         let cli_config = path.join(".terraformrc");
         tokio::fs::write(
@@ -1674,11 +1679,42 @@ async fn command(
             .env_remove("AWS_SESSION_TOKEN");
     }
 
+    if let Some(n) = parallelism(destination) {
+        let arg = format!("-parallelism={n}");
+        cmd.env("TF_CLI_ARGS_plan", &arg)
+            .env("TF_CLI_ARGS_apply", &arg);
+    }
+
     for (k, v) in &destination.metadata {
         cmd.env(format!("TF_VAR_{}", k), v);
     }
 
     cmd
+}
+
+fn parallelism(destination: &Destination) -> Option<u32> {
+    destination
+        .metadata
+        .get("tf_parallelism")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|n| *n > 0)
+}
+
+async fn plugin_cache_dir() -> Option<std::path::PathBuf> {
+    let dir = match std::env::var("FOREST_TERRAFORM_PLUGIN_CACHE_DIR") {
+        Ok(dir) if dir.is_empty() => return None,
+        Ok(dir) => std::path::PathBuf::from(dir),
+        Err(_) => std::env::temp_dir()
+            .join("forest")
+            .join("terraform-plugin-cache"),
+    };
+    match tokio::fs::create_dir_all(&dir).await {
+        Ok(()) => Some(dir),
+        Err(e) => {
+            tracing::warn!(dir = %dir.display(), "terraform plugin cache unavailable, downloading providers per run: {e}");
+            None
+        }
+    }
 }
 
 fn join_plan_outputs(outputs: Vec<(String, String)>) -> String {
@@ -1941,6 +1977,27 @@ mod tests {
                 fields: vec![],
             },
         }
+    }
+
+    #[test]
+    fn parallelism_comes_from_the_destination_and_ignores_nonsense() {
+        assert_eq!(
+            parallelism(&destination_with(&[("tf_parallelism", "30")])),
+            Some(30)
+        );
+        assert_eq!(
+            parallelism(&destination_with(&[("tf_parallelism", " 5 ")])),
+            Some(5)
+        );
+        assert_eq!(
+            parallelism(&destination_with(&[("tf_parallelism", "0")])),
+            None
+        );
+        assert_eq!(
+            parallelism(&destination_with(&[("tf_parallelism", "lots")])),
+            None
+        );
+        assert_eq!(parallelism(&destination_with(&[])), None);
     }
 
     #[tokio::test]
