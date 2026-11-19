@@ -4369,71 +4369,6 @@ async fn policies_page(
 
     let is_admin = current_org.role == "owner" || current_org.role == "admin";
 
-    let policy_items: Vec<minijinja::Value> = policies
-        .iter()
-        .map(|p| {
-            let (policy_type, config_detail) = match &p.config {
-                PolicyConfig::SoakTime {
-                    source_environment,
-                    target_environment,
-                    duration_seconds,
-                } => (
-                    "soak_time",
-                    context! {
-                        source_environment => source_environment,
-                        target_environment => target_environment,
-                        duration_seconds => duration_seconds,
-                        duration_human => format_duration(*duration_seconds),
-                    },
-                ),
-                PolicyConfig::BranchRestriction {
-                    target_environment,
-                    branch_pattern,
-                } => (
-                    "branch_restriction",
-                    context! {
-                        target_environment => target_environment,
-                        branch_pattern => branch_pattern,
-                    },
-                ),
-                PolicyConfig::Approval {
-                    target_environment,
-                    required_approvals,
-                } => (
-                    "approval",
-                    context! {
-                        target_environment => target_environment,
-                        required_approvals => required_approvals,
-                    },
-                ),
-                PolicyConfig::SupersedePending {
-                    target_environment,
-                    same_branch_only,
-                } => (
-                    "supersede_pending",
-                    context! {
-                        target_environment => target_environment,
-                        same_branch_only => same_branch_only,
-                    },
-                ),
-            };
-            context! {
-                id => p.id,
-                name => p.name,
-                enabled => p.enabled,
-                policy_type => policy_type,
-                config => config_detail,
-                created_at => p.created_at,
-                updated_at => p.updated_at,
-            }
-        })
-        .collect();
-
-    let env_options: Vec<minijinja::Value> = environments
-        .iter()
-        .map(|e| context! { name => e.name })
-        .collect();
-
     let projects = warn_default(
         "list_projects",
         state
@@ -4442,30 +4377,28 @@ async fn policies_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/policies.html.jinja",
-            context! {
-                title => format!("Policies - {project} - {org} - Forest"),
-                description => format!("Deployment policies for {project} in {org}"),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                projects => projects,
-                policies => policy_items,
-                environments => env_options,
-                is_admin => is_admin,
+    let page = crate::views::project_settings::PoliciesPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Policies - {project} - {org} - Forest"),
+                description: format!("Deployment policies for {project} in {org}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        policies,
+        environments: environments.into_iter().map(|e| e.name).collect(),
+        policy_form_js: state.templates.asset_href("js/policy-form.js"),
+    };
+    let html = crate::views::pages::policies::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -4560,22 +4493,6 @@ mod env_lane_color_tests {
             assert_ne!(c, "#d97706", "{name} took the attention colour");
             assert_ne!(c, "#dc2626", "{name} took the failure colour");
         }
-    }
-}
-
-fn format_duration(seconds: i64) -> String {
-    if seconds >= 3600 {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
-        if mins > 0 {
-            format!("{}h {}m", hours, mins)
-        } else {
-            format!("{}h", hours)
-        }
-    } else if seconds >= 60 {
-        format!("{}m", seconds / 60)
-    } else {
-        format!("{}s", seconds)
     }
 }
 
@@ -4824,7 +4741,7 @@ async fn edit_policy_page(
     let policies = policies.map_err(|e| internal_error(&state, "list_policies", &e))?;
     let environments = warn_default("list_environments", environments);
 
-    let policy = policies.iter().find(|p| p.id == id).ok_or_else(|| {
+    let policy = policies.into_iter().find(|p| p.id == id).ok_or_else(|| {
         error_page(
             &state,
             StatusCode::NOT_FOUND,
@@ -4832,64 +4749,6 @@ async fn edit_policy_page(
             "Policy not found.",
         )
     })?;
-
-    let (policy_type, config_ctx) = match &policy.config {
-        PolicyConfig::SoakTime {
-            source_environment,
-            target_environment,
-            duration_seconds,
-        } => (
-            "soak_time",
-            context! {
-                source_environment => source_environment,
-                target_environment => target_environment,
-                duration_seconds => duration_seconds,
-            },
-        ),
-        PolicyConfig::BranchRestriction {
-            target_environment,
-            branch_pattern,
-        } => (
-            "branch_restriction",
-            context! {
-                target_environment => target_environment,
-                branch_pattern => branch_pattern,
-            },
-        ),
-        PolicyConfig::Approval {
-            target_environment,
-            required_approvals,
-        } => (
-            "approval",
-            context! {
-                target_environment => target_environment,
-                required_approvals => required_approvals,
-            },
-        ),
-        PolicyConfig::SupersedePending {
-            target_environment,
-            same_branch_only,
-        } => (
-            "supersede_pending",
-            context! {
-                target_environment => target_environment,
-                same_branch_only => same_branch_only,
-            },
-        ),
-    };
-
-    let policy_ctx = context! {
-        id => policy.id,
-        name => policy.name,
-        enabled => policy.enabled,
-        policy_type => policy_type,
-        config => config_ctx,
-    };
-
-    let env_options: Vec<minijinja::Value> = environments
-        .iter()
-        .map(|e| context! { name => e.name })
-        .collect();
 
     let projects = warn_default(
         "list_projects",
@@ -4899,29 +4758,26 @@ async fn edit_policy_page(
             .await,
     );
 
-    let html = state
-        .templates
-        .render(
-            "pages/policy_edit.html.jinja",
-            context! {
-                title => format!("Edit policy {} - {project} - {org} - Forest", policy.name),
-                description => format!("Edit policy {} for {project} in {org}", policy.name),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                projects => projects,
-                policy => policy_ctx,
-                environments => env_options,
+    let page = crate::views::project_settings::PolicyEditPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Edit policy {} - {project} - {org} - Forest", policy.name),
+                description: format!("Edit policy {} for {project} in {org}", policy.name),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        policy,
+        environments: environments.into_iter().map(|e| e.name).collect(),
+    };
+    let html = crate::views::pages::policy_edit::render(&page);
 
     Ok(Html(html).into_response())
 }
@@ -4939,6 +4795,8 @@ struct EditPolicyForm {
     duration_seconds: Option<i64>,
     #[serde(default)]
     branch_pattern: String,
+    #[serde(default)]
+    required_approvals: Option<i32>,
     #[serde(default)]
     same_branch_only: Option<String>,
 }
@@ -4997,6 +4855,22 @@ async fn edit_policy_submit(
             PolicyConfig::BranchRestriction {
                 target_environment: target.to_string(),
                 branch_pattern: pattern.to_string(),
+            }
+        }
+        "approval" => {
+            let target = form.target_environment.trim();
+            let required = form.required_approvals.unwrap_or(1);
+            if target.is_empty() || required < 1 {
+                return Err(error_page(
+                    &state,
+                    StatusCode::BAD_REQUEST,
+                    "Invalid request",
+                    "Approval requires a target environment and at least 1 required approval.",
+                ));
+            }
+            PolicyConfig::Approval {
+                target_environment: target.to_string(),
+                required_approvals: required,
             }
         }
         "supersede_pending" => {
@@ -5069,45 +4943,27 @@ async fn pipelines_page(
 
     let is_admin = current_org.role == "owner" || current_org.role == "admin";
 
-    let pipeline_items: Vec<minijinja::Value> = pipelines
-        .iter()
-        .map(|p| {
-            let stage_count = p.stages.len();
-            context! {
-                id => p.id,
-                name => p.name,
-                enabled => p.enabled,
-                stages_json => serde_json::to_string(&p.stages).unwrap_or_default(),
-                stage_count => stage_count,
-                created_at => p.created_at,
-                updated_at => p.updated_at,
-            }
-        })
-        .collect();
-
-    let html = state
-        .templates
-        .render(
-            "pages/pipelines.html.jinja",
-            context! {
-                title => format!("Pipelines - {project} - {org} - Forest"),
-                description => format!("Release pipelines for {project} in {org}"),
-                user => context! {
-                    username => session.user.username,
-                },
-                csrf_token => session.csrf_token,
-                orgs => orgs_context(orgs),
-                current_org => &org,
-                current_project => &project,
-                org_name => &org,
-                project_name => &project,
-                active_tab => "project_settings",
-                projects => projects,
-                pipelines => pipeline_items,
-                is_admin => is_admin,
+    let page = crate::views::project_settings::PipelinesPage {
+        chrome: crate::views::chrome::signed_in(
+            &state,
+            &session,
+            crate::views::chrome::Page {
+                title: format!("Pipelines - {project} - {org} - Forest"),
+                description: format!("Release pipelines for {project} in {org}"),
+                org: Some(&org),
+                project: Some(&project),
+                projects,
+                tab: forage_ui::chrome::Tab::ProjectSettings,
             },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+        ),
+        org: org.clone(),
+        project: project.clone(),
+        csrf_token: session.csrf_token.clone(),
+        is_admin,
+        pipelines: pipelines.into_iter().map(Into::into).collect(),
+        pipeline_builder_js: state.templates.asset_href("js/pipeline-builder.js"),
+    };
+    let html = crate::views::pages::pipelines::render(&page);
 
     Ok(Html(html).into_response())
 }

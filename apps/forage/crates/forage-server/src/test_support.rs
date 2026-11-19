@@ -74,6 +74,10 @@ pub(crate) struct MockPlatformBehavior {
     pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
     pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
     pub update_trigger_inputs: Option<Arc<Mutex<Vec<UpdateTriggerInput>>>>,
+    pub create_policy_inputs: Option<Arc<Mutex<Vec<CreatePolicyInput>>>>,
+    pub update_policy_inputs: Option<Arc<Mutex<Vec<(String, UpdatePolicyInput)>>>>,
+    pub update_release_pipeline_inputs:
+        Option<Arc<Mutex<Vec<(String, UpdateReleasePipelineInput)>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub list_policies_result: Option<Result<Vec<Policy>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
@@ -937,9 +941,22 @@ impl ForestPlatform for MockPlatformClient {
         _access_token: &str,
         _organisation: &str,
         _project: &str,
-        _input: &CreatePolicyInput,
+        input: &CreatePolicyInput,
     ) -> Result<Policy, PlatformError> {
-        Err(PlatformError::Other("not implemented in mock".into()))
+        let b = self.behavior.lock().unwrap();
+        let Some(inputs) = &b.create_policy_inputs else {
+            return Err(PlatformError::Other("not implemented in mock".into()));
+        };
+        inputs.lock().unwrap().push(input.clone());
+        Ok(Policy {
+            id: "policy-1".into(),
+            name: input.name.clone(),
+            enabled: true,
+            policy_type: String::new(),
+            config: input.config.clone(),
+            created_at: "2026-03-08T00:00:00Z".into(),
+            updated_at: "2026-03-08T00:00:00Z".into(),
+        })
     }
 
     async fn update_policy(
@@ -947,10 +964,28 @@ impl ForestPlatform for MockPlatformClient {
         _access_token: &str,
         _organisation: &str,
         _project: &str,
-        _name: &str,
-        _input: &UpdatePolicyInput,
+        name: &str,
+        input: &UpdatePolicyInput,
     ) -> Result<Policy, PlatformError> {
-        Err(PlatformError::Other("not implemented in mock".into()))
+        let b = self.behavior.lock().unwrap();
+        let Some(inputs) = &b.update_policy_inputs else {
+            return Err(PlatformError::Other("not implemented in mock".into()));
+        };
+        inputs.lock().unwrap().push((name.into(), input.clone()));
+        Ok(Policy {
+            id: "policy-1".into(),
+            name: name.into(),
+            enabled: input.enabled.unwrap_or(true),
+            policy_type: String::new(),
+            config: input.config.clone().unwrap_or(
+                forage_core::platform::PolicyConfig::Approval {
+                    target_environment: String::new(),
+                    required_approvals: 1,
+                },
+            ),
+            created_at: "2026-03-08T00:00:00Z".into(),
+            updated_at: "2026-03-08T00:00:00Z".into(),
+        })
     }
 
     async fn delete_policy(
@@ -1004,6 +1039,9 @@ impl ForestPlatform for MockPlatformClient {
         input: &UpdateReleasePipelineInput,
     ) -> Result<ReleasePipeline, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(inputs) = &b.update_release_pipeline_inputs {
+            inputs.lock().unwrap().push((name.into(), input.clone()));
+        }
         b.update_release_pipeline_result
             .clone()
             .unwrap_or(Ok(ReleasePipeline {

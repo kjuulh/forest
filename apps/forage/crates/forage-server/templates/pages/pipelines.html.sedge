@@ -1,0 +1,96 @@
+use forage_ui::ButtonVariant;
+use forage_ui::components::{Button, Card, CsrfField, DashedEmpty, Icon, PipelineBuilder, StatusDot, Timeago};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::project_settings::Section;
+use crate::views::project_settings::{pipeline_href, pipelines_href, plural};
+props crate::views::project_settings::PipelinesPage { chrome, org, project, csrf_token, is_admin, pipelines, pipeline_builder_js };
+
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Pipelines} description="Define multi-stage deployment pipelines as a DAG">
+    {if !pipelines.is_empty() {
+      <div class="space-y-3 mb-8">
+        {for pipeline in pipelines.iter() {
+          {let href = pipeline_href(org, project, &pipeline.id);}
+          <details class="border border-gray-200 rounded-lg overflow-hidden group">
+            <summary class="px-4 py-3 flex items-center gap-3 flex-wrap cursor-pointer list-none hover:bg-gray-50">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <StatusDot on={pipeline.enabled} />
+                <span class="font-medium text-gray-900">{pipeline.name}</span>
+              </div>
+              <div class="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+                {if pipeline.stage_count > 0 {
+                  <span class="font-mono">{pipeline.stage_count} stage{plural(pipeline.stage_count as i64)}</span>
+                } else {
+                  <span class="italic text-gray-400">no stages</span>
+                }}
+                <Timeago value={pipeline.updated_at.as_str()} />
+              </div>
+              {if *is_admin {
+                <div class="flex items-center gap-2 shrink-0">
+                  <form method="post" action="{href}/toggle">
+                    <CsrfField token={csrf_token} name="_csrf" />
+                    {if pipeline.enabled {
+                      <Button label="Disable" variant={ButtonVariant::SmallNeutral} />
+                    } else {
+                      <input type="hidden" name="enabled" value="true">
+                      <Button label="Enable" variant={ButtonVariant::SmallPositive} />
+                    }}
+                  </form>
+                  <form method="post" action="{href}/delete" data-confirm={format!("Delete pipeline \"{}\"?", pipeline.name)}>
+                    <CsrfField token={csrf_token} name="_csrf" />
+                    <Button label="Delete" variant={ButtonVariant::SmallDanger} />
+                  </form>
+                </div>
+              }}
+              <Icon name="chevron-right" class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" />
+            </summary>
+            <div class="border-t border-gray-100 px-4 py-3">
+              {if *is_admin {
+                {let target = format!("edit-{}", pipeline.name);}
+                <form method="post" action="{href}/update" class="space-y-3">
+                  <CsrfField token={csrf_token} name="_csrf" />
+                  <PipelineBuilder target={target.as_str()} />
+                  <textarea id={target} name="stages_json" hidden>{pipeline.stages_json}</textarea>
+                  <button type="submit" class="text-xs px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800">Save Changes</button>
+                </form>
+              } else if pipeline.stage_count > 0 {
+                {let target = format!("view-{}", pipeline.name);}
+                <PipelineBuilder target={target.as_str()} readonly={true} />
+                <textarea id={target} hidden>{pipeline.stages_json}</textarea>
+              } else {
+                <p class="text-sm text-gray-400 italic">No stages configured yet.</p>
+              }}
+            </div>
+          </details>
+        }}
+      </div>
+    } else {
+      <DashedEmpty>
+        <p class="mb-1">No release pipelines configured.</p>
+        {if *is_admin { <p class="text-sm">Create one below to define a multi-stage deployment DAG.</p> }}
+      </DashedEmpty>
+    }}
+    {if *is_admin {
+      <Card class="p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Pipeline</h2>
+        <form method="post" action={pipelines_href(org, project)} class="space-y-4">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <div>
+            <label for="pipeline-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" id="pipeline-name" name="name" required placeholder="e.g. deploy-to-production" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+            <p class="text-xs text-gray-500 mt-1">A unique identifier for this pipeline.</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Stages</label>
+            <PipelineBuilder target="pipeline-stages" />
+            <textarea id="pipeline-stages" name="stages_json" hidden></textarea>
+          </div>
+          <Button label="Create Pipeline" />
+        </form>
+      </Card>
+    }}
+  </ProjectSettings>
+  <:scripts>
+    <script src={pipeline_builder_js} defer></script>
+  </:scripts>
+</Shell>

@@ -1,0 +1,124 @@
+---
+source: crates/forage-server/src/tests/policy_pipeline_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-6xl mx-auto px-4 pt-10">
+<div class="flex items-center justify-between gap-4 flex-wrap mb-4">
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+
+<a href="/orgs/testorg/projects" class="hover:text-gray-900 hover:underline">testorg</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api" class="hover:text-gray-900 hover:underline">my-api</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api/settings" class="hover:text-gray-900 hover:underline">Settings</a><span class="text-gray-300" aria-hidden="true">›</span>
+<span class="text-gray-900">Pipelines</span>
+</nav>
+<a href="/orgs/testorg/projects/my-api" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+  Back to my-api
+</a>
+</div>
+<div class="mb-8">
+<h1 class="font-mono text-2xl tracking-tight leading-tight">
+<span class="text-gray-500">testorg</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">my-api</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
+</h1>
+<p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
+</div>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Project settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="mb-6">
+<h2 class="text-lg font-bold">Pipelines</h2>
+<p class="text-sm text-gray-500 mt-1">Define multi-stage deployment pipelines as a DAG</p>
+</div>
+<div class="space-y-3 mb-8">
+<details class="border border-gray-200 rounded-lg overflow-hidden group">
+<summary class="px-4 py-3 flex items-center gap-3 flex-wrap cursor-pointer list-none hover:bg-gray-50">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+<span class="font-medium text-gray-900">standard</span>
+</div>
+<div class="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+<span class="font-mono">2 stages</span>
+<time datetime="2026-03-08T00:00:00Z" class="">08 Mar 2026</time>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p1/toggle">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p1/delete" data-confirm="Delete pipeline &quot;standard&quot;?">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+<svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</summary>
+<div class="border-t border-gray-100 px-4 py-3">
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p1/update" class="space-y-3">
+<input type="hidden" name="_csrf" value="test-csrf">
+<pipeline-builder data-target="edit-standard"></pipeline-builder>
+<textarea id="edit-standard" name="stages_json" hidden>[{&quot;id&quot;:&quot;dev&quot;,&quot;depends_on&quot;:[],&quot;config&quot;:{&quot;Deploy&quot;:{&quot;environment&quot;:&quot;dev&lt;/textarea&gt;&lt;b&gt;&quot;}}},{&quot;id&quot;:&quot;soak&quot;,&quot;depends_on&quot;:[&quot;dev&quot;],&quot;config&quot;:{&quot;Wait&quot;:{&quot;duration_seconds&quot;:60}}}]</textarea>
+<button type="submit" class="text-xs px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800">Save Changes</button>
+</form>
+</div>
+</details><details class="border border-gray-200 rounded-lg overflow-hidden group">
+<summary class="px-4 py-3 flex items-center gap-3 flex-wrap cursor-pointer list-none hover:bg-gray-50">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title="Disabled"></span>
+<span class="font-medium text-gray-900">empty</span>
+</div>
+<div class="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+<span class="italic text-gray-400">no stages</span>
+<time datetime="2026-03-08T00:00:00Z" class="">08 Mar 2026</time>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p2/toggle">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="enabled" value="true">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p2/delete" data-confirm="Delete pipeline &quot;empty&quot;?">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+<svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</summary>
+<div class="border-t border-gray-100 px-4 py-3">
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines/p2/update" class="space-y-3">
+<input type="hidden" name="_csrf" value="test-csrf">
+<pipeline-builder data-target="edit-empty"></pipeline-builder>
+<textarea id="edit-empty" name="stages_json" hidden>[]</textarea>
+<button type="submit" class="text-xs px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800">Save Changes</button>
+</form>
+</div>
+</details>
+</div>
+<div class="border border-gray-200 rounded-lg p-6"><h2 class="text-lg font-semibold mb-4">Create Pipeline</h2>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/pipelines" class="space-y-4">
+<input type="hidden" name="_csrf" value="test-csrf">
+<div>
+<label for="pipeline-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+<input type="text" id="pipeline-name" name="name" required placeholder="e.g. deploy-to-production" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+<p class="text-xs text-gray-500 mt-1">A unique identifier for this pipeline.</p>
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Stages</label>
+<pipeline-builder data-target="pipeline-stages"></pipeline-builder>
+<textarea id="pipeline-stages" name="stages_json" hidden></textarea>
+</div>
+<button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Create Pipeline</button>
+</form></div>
+</div>
+</div>
+</section>
+</main>

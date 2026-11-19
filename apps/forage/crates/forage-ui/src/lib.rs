@@ -1,6 +1,7 @@
 pub mod chrome;
 pub mod format;
 pub mod org_settings;
+pub mod policies;
 pub mod project_settings;
 pub mod release;
 pub mod templates;

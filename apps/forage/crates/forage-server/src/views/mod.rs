@@ -9,3 +9,4 @@ pub mod chrome;
 pub mod models;
 pub mod release;
 pub mod org_settings;
+pub mod project_settings;

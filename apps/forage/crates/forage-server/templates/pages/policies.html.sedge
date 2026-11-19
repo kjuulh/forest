@@ -1,0 +1,160 @@
+use forage_core::platform::PolicyConfig;
+use forage_ui::ButtonVariant;
+use forage_ui::components::{Button, Card, Code, CsrfField, DashedEmpty, EnvironmentSelect, PolicyFields, PolicyKindChip, StatusDot};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::policies::PolicyKind;
+use forage_ui::project_settings::Section;
+use crate::views::project_settings::{duration_human, plural, policies_href, policy_href, policy_kind};
+props crate::views::project_settings::PoliciesPage { chrome, org, project, csrf_token, is_admin, policies, environments, policy_form_js };
+
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Policies} description="Gate deployments with soak times, branch restrictions, and approvals">
+    {if !policies.is_empty() {
+      <div class="space-y-3 mb-8">
+        {for policy in policies.iter() {
+          <Card class="overflow-hidden">
+            <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <StatusDot on={policy.enabled} />
+                <span class="font-medium text-gray-900">{policy.name}</span>
+              </div>
+              <div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+                <PolicyKindChip kind={policy_kind(&policy.config)} />
+                {match &policy.config {
+                  PolicyConfig::SoakTime { source_environment, target_environment, duration_seconds } => {
+                    <Code>{source_environment}</Code>
+                    <span class="text-gray-300">→</span>
+                    <Code>{target_environment}</Code>
+                    <span class="text-gray-400">·</span>
+                    <span>{duration_human(*duration_seconds)}</span>
+                  }
+                  PolicyConfig::BranchRestriction { target_environment, branch_pattern } => {
+                    <Code>{branch_pattern}</Code>
+                    <span class="text-gray-300">→</span>
+                    <Code>{target_environment}</Code>
+                  }
+                  PolicyConfig::Approval { target_environment, required_approvals } => {
+                    <Code>{target_environment}</Code>
+                    <span class="text-gray-400">·</span>
+                    <span>{*required_approvals} approval{plural(*required_approvals)}</span>
+                  }
+                  PolicyConfig::SupersedePending { target_environment, same_branch_only } => {
+                    <Code>{target_environment}</Code>
+                    <span class="text-gray-400">·</span>
+                    <span>newest wins{if *same_branch_only { {", same branch only"} }}</span>
+                  }
+                }}
+              </div>
+              {if *is_admin {
+                {let href = policy_href(org, project, &policy.id);}
+                <div class="flex items-center gap-2 shrink-0">
+                  <Button label="Edit" variant={ButtonVariant::SmallNeutral} href={Some(href.as_str())} />
+                  <form method="post" action="{href}/toggle">
+                    <CsrfField token={csrf_token} />
+                    {if policy.enabled {
+                      <Button label="Disable" variant={ButtonVariant::SmallNeutral} />
+                    } else {
+                      <input type="hidden" name="enabled" value="true">
+                      <Button label="Enable" variant={ButtonVariant::SmallPositive} />
+                    }}
+                  </form>
+                  <form method="post" action="{href}/delete" data-confirm={format!("Delete policy \"{}\"?", policy.name)}>
+                    <CsrfField token={csrf_token} />
+                    <Button label="Delete" variant={ButtonVariant::SmallDanger} />
+                  </form>
+                </div>
+              }}
+            </div>
+          </Card>
+        }}
+      </div>
+    } else {
+      <DashedEmpty>
+        <p class="mb-1">No deployment policies configured.</p>
+        {if *is_admin { <p class="text-sm">Create one below to gate deployments with soak times, branch restrictions, or approvals.</p> }}
+      </DashedEmpty>
+    }}
+    {if *is_admin {
+      {let off = |kind: PolicyKind| kind != PolicyKind::default();}
+      <Card class="p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Policy</h2>
+        <form method="post" action={policies_href(org, project)} class="space-y-4" id="policy-form">
+          <CsrfField token={csrf_token} />
+          <div>
+            <label for="policy-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" id="policy-name" name="name" required placeholder="e.g. staging-soak-30m" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          </div>
+          <div>
+            <label for="policy-type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select id="policy-type" name="policy_type" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
+              {for kind in PolicyKind::ALL {
+                <option value={kind.slug()} data-description={kind.description()}>{kind.label()}</option>
+              }}
+            </select>
+            <p class="text-xs text-gray-500 mt-1" id="policy-type-desc">{PolicyKind::default().description()}</p>
+          </div>
+          <PolicyFields kind={PolicyKind::SoakTime} active={!off(PolicyKind::SoakTime)}>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Source environment</label>
+                <EnvironmentSelect name="source_environment" environments={environments.as_slice()} disabled={off(PolicyKind::SoakTime)} />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" id="soak-target-env" environments={environments.as_slice()} disabled={off(PolicyKind::SoakTime)} />
+              </div>
+            </div>
+            <div class="mt-3">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Soak duration (seconds)</label>
+              <input type="number" name="duration_seconds" min="1" placeholder="1800" disabled={off(PolicyKind::SoakTime)} class="w-48 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+              <p class="text-xs text-gray-500 mt-1">e.g. 1800 = 30 minutes, 3600 = 1 hour</p>
+            </div>
+          </PolicyFields>
+          <PolicyFields kind={PolicyKind::BranchRestriction} active={!off(PolicyKind::BranchRestriction)}>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+                <input type="text" name="branch_pattern" placeholder="e.g. main" disabled={off(PolicyKind::BranchRestriction)} class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" id="branch-target-env" environments={environments.as_slice()} disabled={off(PolicyKind::BranchRestriction)} />
+              </div>
+            </div>
+          </PolicyFields>
+          <PolicyFields kind={PolicyKind::Approval} active={!off(PolicyKind::Approval)}>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" id="approval-target-env" environments={environments.as_slice()} disabled={off(PolicyKind::Approval)} />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Required approvals</label>
+                <input type="number" name="required_approvals" min="1" value="1" placeholder="1" disabled={off(PolicyKind::Approval)} class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                <p class="text-xs text-gray-500 mt-1">Number of distinct approvals needed before deployment proceeds.</p>
+              </div>
+            </div>
+          </PolicyFields>
+          <PolicyFields kind={PolicyKind::SupersedePending} active={!off(PolicyKind::SupersedePending)}>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" id="supersede-pending-target-env" environments={environments.as_slice()} disabled={off(PolicyKind::SupersedePending)} />
+              </div>
+              <div>
+                <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                  <input type="checkbox" name="same_branch_only" value="1" disabled={off(PolicyKind::SupersedePending)} class="rounded border-gray-300 text-gray-900 focus:ring-gray-900"> Same branch only</label>
+                <p class="text-xs text-gray-500 mt-1">Only supersede a pending release when the newer one is on the same branch, so a hotfix off another branch still deploys.</p>
+              </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-3">A deploy already running is never interrupted — it finishes, and the queue behind it collapses to the newest.</p>
+          </PolicyFields>
+          <Button label="Create Policy" />
+        </form>
+      </Card>
+    }}
+  </ProjectSettings>
+  <:scripts>
+    {if *is_admin { <script src={policy_form_js} defer></script> }}
+  </:scripts>
+</Shell>

@@ -1,0 +1,218 @@
+---
+source: crates/forage-server/src/tests/policy_pipeline_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="max-w-6xl mx-auto px-4 pt-10">
+<div class="flex items-center justify-between gap-4 flex-wrap mb-4">
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+
+<a href="/orgs/testorg/projects" class="hover:text-gray-900 hover:underline">testorg</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api" class="hover:text-gray-900 hover:underline">my-api</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/testorg/projects/my-api/settings" class="hover:text-gray-900 hover:underline">Settings</a><span class="text-gray-300" aria-hidden="true">›</span>
+<span class="text-gray-900">Policies</span>
+</nav>
+<a href="/orgs/testorg/projects/my-api" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+  Back to my-api
+</a>
+</div>
+<div class="mb-8">
+<h1 class="font-mono text-2xl tracking-tight leading-tight">
+<span class="text-gray-500">testorg</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">my-api</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
+</h1>
+<p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
+</div>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Project settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/projects/my-api/settings/triggers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Triggers</a></li><li><a href="/orgs/testorg/projects/my-api/settings/policies" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Policies</a></li><li><a href="/orgs/testorg/projects/my-api/settings/pipelines" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Pipelines</a></li><li><a href="/orgs/testorg/projects/my-api/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="mb-6">
+<h2 class="text-lg font-bold">Policies</h2>
+<p class="text-sm text-gray-500 mt-1">Gate deployments with soak times, branch restrictions, and approvals</p>
+</div>
+<div class="space-y-3 mb-8">
+<div class="border border-gray-200 rounded-lg overflow-hidden"><div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+<span class="font-medium text-gray-900">staging-soak-30m</span>
+</div>
+<div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+<span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Soak Time</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">staging</code>
+<span class="text-gray-300">→</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">prod</code>
+<span class="text-gray-400">·</span>
+<span>1h 30m</span>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<a href="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000001" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000001/toggle">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000001/delete" data-confirm="Delete policy &quot;staging-soak-30m&quot;?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+</div></div><div class="border border-gray-200 rounded-lg overflow-hidden"><div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title="Disabled"></span>
+<span class="font-medium text-gray-900">main-only</span>
+</div>
+<div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+<span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Branch Restriction</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">release/&lt;v&gt;</code>
+<span class="text-gray-300">→</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">prod</code>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<a href="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000002" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000002/toggle">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<input type="hidden" name="enabled" value="true">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000002/delete" data-confirm="Delete policy &quot;main-only&quot;?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+</div></div><div class="border border-gray-200 rounded-lg overflow-hidden"><div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+<span class="font-medium text-gray-900">prod-approval</span>
+</div>
+<div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Approval Required</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">prod</code>
+<span class="text-gray-400">·</span>
+<span>2 approvals</span>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<a href="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000003" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000003/toggle">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000003/delete" data-confirm="Delete policy &quot;prod-approval&quot;?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+</div></div><div class="border border-gray-200 rounded-lg overflow-hidden"><div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+<span class="font-medium text-gray-900">collapse-prod</span>
+</div>
+<div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+<span class="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded">Supersede Pending</span>
+<code class="bg-gray-100 px-1.5 py-0.5 rounded">prod</code>
+<span class="text-gray-400">·</span>
+<span>newest wins, same branch only</span>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<a href="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000004" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000004/toggle">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+</form>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies/aaaaaaaa-0000-0000-0000-000000000004/delete" data-confirm="Delete policy &quot;collapse-prod&quot;?">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+</form>
+</div>
+</div></div>
+</div>
+<div class="border border-gray-200 rounded-lg p-6"><h2 class="text-lg font-semibold mb-4">Create Policy</h2>
+<form method="post" action="/orgs/testorg/projects/my-api/settings/policies" class="space-y-4" id="policy-form">
+<input type="hidden" name="csrf_token" value="test-csrf">
+<div>
+<label for="policy-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+<input type="text" id="policy-name" name="name" required placeholder="e.g. staging-soak-30m" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label for="policy-type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+<select id="policy-type" name="policy_type" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
+<option value="soak_time" data-description="Require an artifact to succeed in a source environment for a duration before deploying to target.">Soak Time</option><option value="branch_restriction" data-description="Only allow deployments to the target environment from a specific branch pattern.">Branch Restriction</option><option value="approval" data-description="Require one or more team members to approve before deploying to the target environment.">Approval Required</option><option value="supersede_pending" data-description="When releases queue up for a destination, deploy the newest and mark the ones it overtook superseded instead of deploying each in turn.">Supersede Pending</option>
+</select>
+<p class="text-xs text-gray-500 mt-1" id="policy-type-desc">Require an artifact to succeed in a source environment for a duration before deploying to target.</p>
+</div>
+<div id="soak-time-fields"><div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Source environment</label>
+<select name="source_environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+
+<option value="dev">dev</option><option value="staging">staging</option><option value="prod">prod</option>
+</select>
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+<select name="target_environment" id="soak-target-env" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+
+<option value="dev">dev</option><option value="staging">staging</option><option value="prod">prod</option>
+</select>
+</div>
+</div>
+<div class="mt-3">
+<label class="block text-sm font-medium text-gray-700 mb-1">Soak duration (seconds)</label>
+<input type="number" name="duration_seconds" min="1" placeholder="1800" class="w-48 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+<p class="text-xs text-gray-500 mt-1">e.g. 1800 = 30 minutes, 3600 = 1 hour</p>
+</div></div>
+<div id="branch-restriction-fields" class="hidden"><div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+<input type="text" name="branch_pattern" placeholder="e.g. main" disabled class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+<select name="target_environment" id="branch-target-env" disabled class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+
+<option value="dev">dev</option><option value="staging">staging</option><option value="prod">prod</option>
+</select>
+</div>
+</div></div>
+<div id="approval-fields" class="hidden"><div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+<select name="target_environment" id="approval-target-env" disabled class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+
+<option value="dev">dev</option><option value="staging">staging</option><option value="prod">prod</option>
+</select>
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Required approvals</label>
+<input type="number" name="required_approvals" min="1" value="1" placeholder="1" disabled class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+<p class="text-xs text-gray-500 mt-1">Number of distinct approvals needed before deployment proceeds.</p>
+</div>
+</div></div>
+<div id="supersede-pending-fields" class="hidden"><div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+<select name="target_environment" id="supersede-pending-target-env" disabled class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+
+<option value="dev">dev</option><option value="staging">staging</option><option value="prod">prod</option>
+</select>
+</div>
+<div>
+<label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+<input type="checkbox" name="same_branch_only" value="1" disabled class="rounded border-gray-300 text-gray-900 focus:ring-gray-900"> Same branch only</label>
+<p class="text-xs text-gray-500 mt-1">Only supersede a pending release when the newer one is on the same branch, so a hotfix off another branch still deploys.</p>
+</div>
+</div>
+<p class="text-xs text-gray-500 mt-3">A deploy already running is never interrupted — it finishes, and the queue behind it collapses to the newest.</p></div>
+<button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">Create Policy</button>
+</form></div>
+</div>
+</div>
+</section>
+</main>
