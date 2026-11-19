@@ -345,6 +345,14 @@ impl NotificationDispatcher {
             .await
             .unwrap_or(None);
 
+        if event_type == "release_annotated"
+            && existing_ref
+                .as_ref()
+                .is_some_and(|r| r.last_event_type != "release_annotated")
+        {
+            return Ok(None);
+        }
+
         let mut destinations = existing_ref
             .as_ref()
             .map(|r| r.destinations.clone())

@@ -445,3 +445,17 @@ async fn forest_links_are_never_unfurled_into_sign_in_previews() {
         assert_eq!(body["unfurl_media"], false, "{body}");
     }
 }
+
+#[tokio::test]
+async fn a_late_annotated_event_does_not_undo_a_started_release() {
+    let h = Harness::new().await;
+    h.set_stages(vec![stage("dev", "RUNNING", &[]), stage("prod", "PENDING", &["dev"])]);
+    h.send("release_started", "dev").await;
+    let updates_before = h.providers.state.lock().unwrap().update_bodies.len();
+
+    h.set_stages(vec![]);
+    h.send("release_annotated", "dev").await;
+
+    assert_eq!(h.providers.state.lock().unwrap().update_bodies.len(), updates_before);
+    assert!(h.last_header().contains("Releasing"), "{}", h.last_header());
+}

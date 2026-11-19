@@ -27,6 +27,15 @@ webhook integrations cannot edit or thread, so they keep one message per event.
   retried rather than rendered from events alone. The notifier reads
   `SUPERSEDED` and `AWAITING_SIGNAL` as they are (the web UI's converter folds
   them into `PENDING`).
+- R1.6 An annotation nothing has started deploying (no pipeline stages, no
+  destination events) reads "Ready to release" with a note that nothing is
+  deploying, never "Releasing"; it follows along once a release starts.
+  This relies on Forest sending RELEASE_STARTED (with the intent) for
+  trigger-started releases too. An annotated event that arrives after a
+  release has started for the message is ignored, so it cannot undo it.
+- R1.7 A release Forest's reaper ends (heartbeat lost, timed out) sends
+  RELEASE_FAILED like any other failure (forest-server `release_reaper`), so
+  its message turns into a failure instead of staying on "Deploying".
 - R1.5 A destination never moves back from a finished state to started (a
   late or redelivered start event).
 - R1.2 The header shows one of: in progress, waiting for approval, succeeded,

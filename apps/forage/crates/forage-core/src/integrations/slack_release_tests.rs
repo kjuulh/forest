@@ -676,3 +676,27 @@ fn oversized_or_control_character_urls_never_become_buttons() {
         assert!(!case.parent().to_string().contains("view_source"));
     }
 }
+
+#[test]
+fn an_annotation_nothing_released_says_so_instead_of_releasing() {
+    let mut case = Case::new(event("release_annotated", "", ""), vec![]);
+    case.steps.clear();
+    case.expected = 0;
+    assert_eq!(overall_state(&case.view()), OverallState::NotReleased);
+    let header = case.header();
+    assert!(
+        header.contains("Ready to release: understory/agent-gateway"),
+        "{header}"
+    );
+    assert!(!header.contains("Releasing"), "{header}");
+    insta::assert_json_snapshot!(case.parent());
+}
+
+#[test]
+fn an_annotation_whose_pipeline_started_is_in_progress() {
+    let case = Case::new(
+        event("release_annotated", "", ""),
+        vec![stage("dev", "deploy", "dev", "RUNNING", &[])],
+    );
+    assert_eq!(overall_state(&case.view()), OverallState::InProgress);
+}

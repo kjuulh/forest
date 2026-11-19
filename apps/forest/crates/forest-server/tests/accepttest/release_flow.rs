@@ -211,3 +211,153 @@ async fn test_two_annotations_of_one_artifact_both_list_its_destinations() -> an
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_a_reaped_release_announces_its_failure() -> anyhow::Result<()> {
+    let (given, when, then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let dest = format!("reap-dest-{suffix}");
+    let env = format!("reap-env-{suffix}");
+    given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&dest, &env)
+        .await
+        .an_uploaded_artifact()
+        .await
+        .an_annotated_release()
+        .await;
+    let when = when
+        .release_is_triggered()
+        .await?
+        .release_reaches_terminal_state()
+        .await?;
+
+    let fixture = then.fixture();
+    let artifact_id: uuid::Uuid = when.data().artifact_id.parse()?;
+    sqlx::query(
+        "UPDATE release_states
+         SET status = 'RUNNING', last_heartbeat_at = now() - interval '10 minutes'
+         WHERE artifact_id = $1",
+    )
+    .bind(artifact_id)
+    .execute(&fixture.db)
+    .await?;
+    sqlx::query("DELETE FROM notifications WHERE organisation = $1")
+        .bind(&org)
+        .execute(&fixture.db)
+        .await?;
+
+    forest_server::release_reaper::ReleaseReaper::new(
+        &fixture.state,
+        forest_server::runner_manager::RunnerManager::new(),
+    )
+    .reap()
+    .await?;
+
+    let failed: Vec<(String, String)> =
+        sqlx::query_as("SELECT notification_type, body FROM notifications WHERE organisation = $1")
+            .bind(&org)
+            .fetch_all(&fixture.db)
+            .await?;
+    assert_eq!(
+        failed.len(),
+        1,
+        "one notification for the reaped release: {failed:?}"
+    );
+    assert_eq!(failed[0].0, "RELEASE_FAILED");
+    assert!(failed[0].1.contains("heartbeat lost"), "{}", failed[0].1);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_a_release_a_trigger_starts_announces_that_it_started() -> anyhow::Result<()> {
+    use forest_grpc_interface::*;
+
+    let (given, _when, then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let dest = format!("trig-dest-{suffix}");
+    let env = format!("trig-env-{suffix}");
+    let given = given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&dest, &env)
+        .await
+        .an_uploaded_artifact()
+        .await;
+
+    let fixture = then.fixture();
+    let token = given.data().auth_token.clone();
+    let authed = |inner| {
+        let mut req = tonic::Request::new(inner);
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {token}").parse().expect("valid metadata"),
+        );
+        req
+    };
+    fixture
+        .releases()
+        .create_project(authed(CreateProjectRequest {
+            organisation: org.clone(),
+            project: "test-project".into(),
+        }))
+        .await?;
+    let mut triggers = trigger_service_client::TriggerServiceClient::new(fixture.channel.clone());
+    let mut req = tonic::Request::new(CreateTriggerRequest {
+        project: Some(Project {
+            organisation: org.clone(),
+            project: "test-project".into(),
+            readme: String::new(),
+            description: String::new(),
+            metadata: Some(Default::default()),
+        }),
+        name: "main".into(),
+        branch_pattern: Some("^main$".into()),
+        target_destinations: vec![dest.clone()],
+        ..Default::default()
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {}", given.data().auth_token).parse()?,
+    );
+    triggers.create_trigger(req).await?;
+
+    given.an_annotated_release().await;
+
+    let started: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "SELECT notification_type, release_context FROM notifications
+         WHERE organisation = $1 AND notification_type = 'RELEASE_STARTED'",
+    )
+    .bind(&org)
+    .fetch_all(&fixture.db)
+    .await?;
+    assert_eq!(
+        started.len(),
+        1,
+        "the trigger's release announces its start: {started:?}"
+    );
+    let intent = started[0].1["release_intent_id"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        !intent.is_empty(),
+        "the start names its intent: {:?}",
+        started[0].1
+    );
+
+    Ok(())
+}

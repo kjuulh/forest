@@ -124,7 +124,10 @@ Releases are stored as an append-only event log (`release_events` table) with a 
 
 A background process monitors stuck releases:
 
+- **Assigned** or **running** releases whose runner has sent no heartbeat for 90 seconds fail with "release heartbeat lost". Releases run inside the Forest server, so a server restart mid-deploy ends them this way.
 - **Assigned** releases that haven't started within 5 minutes are timed out
 - **Running** releases that haven't completed within 1 hour are timed out
 
-This prevents releases from being permanently stuck if a runner crashes.
+Every release that starts sends a `RELEASE_STARTED` notification, whether `forest release` or a matching trigger began it (triggered releases since forest-server after v0.3.18; earlier servers sent it for manual releases only).
+
+This prevents releases from being permanently stuck if a runner crashes. A reaped release sends a `RELEASE_FAILED` notification like any other failure, so Slack messages and webhooks show it as failed (since forest-server after v0.3.18; earlier servers sent none).

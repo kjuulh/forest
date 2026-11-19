@@ -160,6 +160,9 @@ impl StageState {
 /// pipeline, every destination) has finished successfully.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverallState {
+    /// Annotated, but nothing has started deploying it: no trigger matched,
+    /// or one has not fired yet.
+    NotReleased,
     InProgress,
     WaitingForApproval,
     Succeeded,
@@ -530,6 +533,7 @@ pub fn overall_state(view: &ReleaseView) -> OverallState {
     if states.is_empty() {
         return match view.event.notification_type.as_str() {
             "release_failed" => OverallState::Failed,
+            "release_annotated" if view.destinations.is_empty() => OverallState::NotReleased,
             _ => OverallState::InProgress,
         };
     }
@@ -587,6 +591,11 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
             format!("Release cancelled: {target}"),
             "#6c757d",
         ),
+        OverallState::NotReleased => (
+            ":package:".to_string(),
+            format!("Ready to release: {target}"),
+            "#6c757d",
+        ),
     };
 
     let links = Links::new(view);
@@ -604,6 +613,12 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
             }));
         }
         blocks.push(metadata_context(event, &links));
+    }
+    if overall == OverallState::NotReleased {
+        blocks.push(json!({
+            "type": "context",
+            "elements": [{ "type": "mrkdwn", "text": "Annotated, not released: nothing is deploying this build. A matching trigger or `forest release` starts it, and this message follows along." }]
+        }));
     }
 
     let rows = rows(view, &links);

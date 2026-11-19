@@ -345,6 +345,7 @@ impl ReleaseService for ReleaseServer {
                                 destinations = created.releases.len(),
                                 "trigger fired successfully"
                             );
+                            self.notify_release_started(&artifact_id, &created).await;
                             if trigger_match.use_pipeline {
                                 let _ = self
                                     .state
@@ -691,72 +692,13 @@ impl ReleaseService for ReleaseServer {
             .context("release")
             .to_internal_error()?;
 
-        let dest_count = created.releases.len();
         let dest_names: Vec<String> = created
             .releases
             .iter()
             .map(|r| r.destination.clone())
             .collect();
 
-        let ann_ctx = self
-            .state
-            .release_registry()
-            .get_annotation_context(&artifact_id)
-            .await
-            .ok();
-
-        if let Err(e) = self
-            .state
-            .notification_registry()
-            .create_notification(
-                "RELEASE_STARTED",
-                &format!(
-                    "Release started: {}/{}",
-                    &created.organisation, &created.project
-                ),
-                &format!("Release staged to {} destination(s)", dest_count),
-                &created.organisation,
-                &created.project,
-                &NotifReleaseContext {
-                    slug: ann_ctx.as_ref().map(|a| a.slug.clone()),
-                    artifact_id: Some(artifact_id.to_string()),
-                    release_intent_id: Some(created.release_intent_id.to_string()),
-                    destination: if dest_names.len() == 1 {
-                        Some(dest_names[0].clone())
-                    } else {
-                        None
-                    },
-                    destination_count: dest_count as i32,
-                    source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
-                    source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
-                    source_attribution: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.personal_recipient_attribution()),
-                    source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
-                    run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
-                    commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
-                    commit_branch: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.reference.commit_branch.clone()),
-                    commit_message: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.reference.commit_message.clone()),
-                    version: ann_ctx.as_ref().and_then(|a| a.reference.version.clone()),
-                    repo_url: ann_ctx.as_ref().and_then(|a| a.reference.repo_url.clone()),
-                    context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
-                    context_description: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.context.description.clone()),
-                    context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
-                    context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            tracing::warn!("failed to create release started notification: {e:#}");
-        }
+        self.notify_release_started(&artifact_id, &created).await;
 
         self.state
             .event_bus()
@@ -2272,6 +2214,83 @@ fn pipeline_run_to_proto(
         created_at: row.created_at.to_rfc3339(),
         stages: proto_stages,
     })
+}
+
+impl ReleaseServer {
+    /// Every path that creates a release intent announces it, so delivery
+    /// services see the release start whether a person or a trigger began it.
+    async fn notify_release_started(
+        &self,
+        artifact_id: &uuid::Uuid,
+        created: &crate::services::release_registry::CreatedReleaseIntent,
+    ) {
+        let dest_count = created.releases.len();
+        let dest_names: Vec<String> = created
+            .releases
+            .iter()
+            .map(|r| r.destination.clone())
+            .collect();
+
+        let ann_ctx = self
+            .state
+            .release_registry()
+            .get_annotation_context(artifact_id)
+            .await
+            .ok();
+
+        if let Err(e) = self
+            .state
+            .notification_registry()
+            .create_notification(
+                "RELEASE_STARTED",
+                &format!(
+                    "Release started: {}/{}",
+                    &created.organisation, &created.project
+                ),
+                &format!("Release staged to {} destination(s)", dest_count),
+                &created.organisation,
+                &created.project,
+                &NotifReleaseContext {
+                    slug: ann_ctx.as_ref().map(|a| a.slug.clone()),
+                    artifact_id: Some(artifact_id.to_string()),
+                    release_intent_id: Some(created.release_intent_id.to_string()),
+                    destination: if dest_names.len() == 1 {
+                        Some(dest_names[0].clone())
+                    } else {
+                        None
+                    },
+                    destination_count: dest_count as i32,
+                    source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
+                    source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+                    source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
+                    source_attribution: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.personal_recipient_attribution()),
+                    source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
+                    run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
+                    commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
+                    commit_branch: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_branch.clone()),
+                    commit_message: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_message.clone()),
+                    version: ann_ctx.as_ref().and_then(|a| a.reference.version.clone()),
+                    repo_url: ann_ctx.as_ref().and_then(|a| a.reference.repo_url.clone()),
+                    context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
+                    context_description: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.context.description.clone()),
+                    context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
+                    context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            tracing::warn!("failed to create release started notification: {e:#}");
+        }
+    }
 }
 
 impl From<grpc::ArtifactContext> for crate::services::release_registry::ArtifactContext {
