@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_nats::jetstream;
 use forage_core::integrations::nats::{
@@ -30,6 +30,7 @@ impl Component for NotificationIngester {
         let mut backoff = 1u64;
 
         loop {
+            let connected_at = Instant::now();
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("notification ingester shutting down");
@@ -42,7 +43,12 @@ impl Component for NotificationIngester {
                             backoff = 1;
                         }
                         Err(e) => {
-                            tracing::error!(error = %e, backoff_secs = backoff, "notification stream error, reconnecting");
+                            backoff = reconnect_delay_secs(backoff, connected_at.elapsed());
+                            if backoff >= MAX_BACKOFF_SECS {
+                                tracing::error!(error = %e, backoff_secs = backoff, "notification stream still failing, reconnecting");
+                            } else {
+                                tracing::warn!(error = %e, backoff_secs = backoff, "notification stream error, reconnecting");
+                            }
                         }
                     }
 
@@ -50,7 +56,7 @@ impl Component for NotificationIngester {
                         _ = cancellation_token.cancelled() => break,
                         _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
                     }
-                    backoff = (backoff * 2).min(60);
+                    backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
                 }
             }
         }
@@ -58,6 +64,26 @@ impl Component for NotificationIngester {
         Ok(())
     }
 }
+
+/// Reaching the cap means forest has been unreachable for minutes, not a redeploy.
+const MAX_BACKOFF_SECS: u64 = 60;
+
+const STABLE_STREAM: Duration = Duration::from_secs(60);
+
+/// Backoff is for a failure still in progress. A stream that ran for a while and
+/// then dropped (every forest-server redeploy does this) reconnects at once, or
+/// notifications wait in forest for up to the full backoff.
+fn reconnect_delay_secs(backoff_secs: u64, connected_for: Duration) -> u64 {
+    if connected_for >= STABLE_STREAM {
+        1
+    } else {
+        backoff_secs
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/notification_ingester_tests.rs"]
+mod tests;
 
 impl NotificationIngester {
     async fn ensure_stream(&self) -> Result<(), String> {

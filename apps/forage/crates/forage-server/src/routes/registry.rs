@@ -8,8 +8,8 @@ use minijinja::context;
 use serde::Deserialize;
 
 use super::{
-    error_page, internal_error, orgs_context, render_markdown, require_org_membership,
-    warn_default,
+    default_unless_missing, error_page, internal_error, orgs_context, render_markdown,
+    require_org_membership, warn_default,
 };
 use crate::auth::{MaybeSession, Session};
 use crate::manifest_view::ManifestView;
@@ -307,7 +307,7 @@ async fn component_version_detail(
         other => internal_error(&state, "get_component_detail", &other),
     })?;
 
-    let manifest_json = warn_default("get_public_component_manifest", manifest_res);
+    let manifest_json = default_unless_missing("get_public_component_manifest", manifest_res);
     let manifest_html = if manifest_json.is_empty() {
         String::new()
     } else {

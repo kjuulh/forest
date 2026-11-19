@@ -157,6 +157,25 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
     }
 }
 
+/// Like [`warn_default`], but a `NotFound` is an expected absence (an old
+/// component version has no manifest) and logs at debug, not warn.
+fn default_unless_missing<T: Default>(
+    context: &str,
+    result: Result<T, forage_core::platform::PlatformError>,
+) -> T {
+    match result {
+        Err(forage_core::platform::PlatformError::NotFound(e)) => {
+            tracing::debug!("{context}: not found: {e}");
+            T::default()
+        }
+        other => warn_default(context, other),
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/log_level_tests.rs"]
+mod log_level_tests;
+
 pub(super) fn render_markdown(md: &str) -> String {
     use std::collections::{HashMap, HashSet};
 
