@@ -2776,3 +2776,72 @@ async fn the_release_page_has_the_anchors_slack_messages_link_to() {
     assert!(html.contains(&format!("id=\"plan-{stage}\"")), "plan anchor missing");
     assert!(html.contains("id=\"pipeline\""), "pipeline anchor missing");
 }
+
+#[tokio::test]
+async fn a_release_without_a_description_has_an_empty_meta_description() {
+    let html = artifact_detail_html(awaiting_plan_fixture("plan")).await;
+    assert!(
+        html.contains(r#"<meta name="description" content="">"#),
+        "an unset description must not render as \"none\""
+    );
+    assert!(!html.contains(r#"content="none""#), "{html}");
+}
+
+#[tokio::test]
+async fn a_stage_without_an_environment_still_renders() {
+    let mut behavior = awaiting_plan_fixture("plan");
+    if let Some(Ok(intents)) = behavior.get_release_intent_states_result.as_mut() {
+        intents[0].stages[0].environment = None;
+        intents[0].stages.push(forage_core::platform::PipelineRunStageState {
+            stage_id: "deploy-somewhere".into(),
+            stage_type: "deploy".into(),
+            status: "QUEUED".into(),
+            environment: None,
+            ..Default::default()
+        });
+    }
+    let html = artifact_detail_html(behavior).await;
+    assert!(html.contains("Queued for"), "{html}");
+}
+
+#[tokio::test]
+async fn exporting_a_destination_without_a_type_exports_an_empty_type() {
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_destinations_result: Some(Ok(vec![forage_core::platform::Destination {
+            name: "legacy".into(),
+            environment: "dev".into(),
+            organisation: "testorg".into(),
+            metadata: Default::default(),
+            sensitive_keys: vec![],
+            dest_type: None,
+        }])),
+        list_environments_result: Some(Ok(vec![forage_core::platform::Environment {
+            id: "env-dev".into(),
+            organisation: "testorg".into(),
+            name: "dev".into(),
+            description: None,
+            sort_order: 0,
+            created_at: "2026-03-08T00:00:00Z".into(),
+        }])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let response = build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/destinations")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    for attr in ["data-type-org", "data-type-name", "data-type-version"] {
+        assert!(html.contains(&format!("{attr}=\"\"")), "{attr} should be empty: {html}");
+    }
+    assert!(!html.contains("data-type-org=\"none\""), "{html}");
+}

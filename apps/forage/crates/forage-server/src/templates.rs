@@ -19,6 +19,12 @@ impl TemplateEngine {
 
         let mut env = Environment::new();
         env.set_loader(minijinja::path_loader(path));
+        env.set_formatter(|out, state, value| {
+            if value.is_none() || value.is_undefined() {
+                return Ok(());
+            }
+            minijinja::escape_formatter(out, state, value)
+        });
         env.add_filter("timeago", |v: String| -> String {
             forage_ui::format::timeago(&v)
         });
@@ -118,6 +124,23 @@ impl TemplateEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn none_renders_as_nothing_and_everything_else_is_still_escaped() {
+        let engine = TemplateEngine::from_path(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates"),
+        )
+        .expect("load templates");
+        let html = engine
+            .env
+            .render_named_str(
+                "test.html.jinja",
+                r#"<input value="{{ unset }}">{{ missing }}|{{ text }}|{{ zero }}|{{ no }}"#,
+                minijinja::context! { unset => None::<String>, text => "<b>", zero => 0, no => false },
+            )
+            .unwrap();
+        assert_eq!(html, r#"<input value="">|&lt;b&gt;|0|false"#);
+    }
 
     #[test]
     fn every_page_template_parses() {

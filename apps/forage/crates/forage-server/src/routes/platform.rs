@@ -574,7 +574,7 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                         pipeline_stages.push(context! {
                             id => rs.stage_id,
                             stage_type => rs.stage_type,
-                            environment => rs.environment,
+                            environment => rs.environment.clone().unwrap_or_default(),
                             duration_seconds => rs.duration_seconds,
                             status => display_status,
                             started_at => rs.started_at,
@@ -1261,7 +1261,7 @@ async fn artifact_detail(
             pipeline_stages.push(context! {
                 id => rs.stage_id,
                 stage_type => rs.stage_type,
-                environment => rs.environment,
+                environment => rs.environment.clone().unwrap_or_default(),
                 duration_seconds => rs.duration_seconds,
                 status => display_status,
                 started_at => rs.started_at,
