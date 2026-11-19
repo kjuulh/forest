@@ -122,11 +122,11 @@
     {% endif %}
 
     {% if has_pipeline and pipeline_stages | length > 0 %}
-    <div class="mb-8">
+    <div class="mb-8" id="pipeline">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for stage in pipeline_stages %}
-            <div>
+            <div id="stage-{{ stage.id | anchor }}" class="scroll-mt-4 target:bg-yellow-50">
             <div class="px-4 py-3 flex items-center gap-3 text-sm {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
                 {% if stage.status == "SUCCEEDED" %}
                 <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -192,7 +192,7 @@
             {% if stage.plan_output %}
             <details data-plan-output class="px-4 pb-3" {% if stage.status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITINGAPPROVAL" %}open{% endif %}>
                 <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
-                <pre class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto">{{ stage.plan_output }}</pre>
+                <pre id="plan-{{ stage.id | anchor }}" class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto scroll-mt-4">{{ stage.plan_output }}</pre>
             </details>
             {% endif %}
             </div>
@@ -356,11 +356,11 @@
     {% endif %}
 
     {% if destinations | length > 0 or configured_destinations | length > 0 %}
-    <div class="mb-8">
+    <div class="mb-8" id="destinations">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Destinations</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for dest in destinations %}
-            <div>
+            <div id="dest-{{ dest.name | anchor }}" class="scroll-mt-4 target:bg-yellow-50">
             <div class="px-4 py-3 flex items-center gap-3 text-sm">
                 {% if dest.status == "SUCCEEDED" %}
                 <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -426,7 +426,7 @@
     {% endif %}
 
     {% if has_release_intents %}
-    <div class="mb-8">
+    <div class="mb-8 scroll-mt-4" id="logs">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Logs</h2>
         <release-logs url="/api/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}/logs"></release-logs>
     </div>

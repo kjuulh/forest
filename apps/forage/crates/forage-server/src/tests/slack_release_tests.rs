@@ -299,14 +299,14 @@ async fn a_release_keeps_one_parent_message_and_threads_the_detail_once() {
     assert_eq!(
         thread
             .iter()
-            .filter(|t| t.contains("Deployed `dev-k8s`"))
+            .filter(|t| t.contains("|dev-k8s> (dev)"))
             .count(),
         1
     );
     assert_eq!(
         thread
             .iter()
-            .filter(|t| t.contains("Deployed `prod-k8s`"))
+            .filter(|t| t.contains("|prod-k8s> (prod)"))
             .count(),
         1
     );

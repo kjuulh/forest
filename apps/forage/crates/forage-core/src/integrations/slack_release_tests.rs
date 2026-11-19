@@ -99,7 +99,10 @@ struct Case {
 
 impl Case {
     fn new(event: NotificationEvent, stages: Vec<PipelineRunStageState>) -> Self {
-        let expected = event.release.as_ref().map_or(0, |r| r.destination_count as usize);
+        let expected = event
+            .release
+            .as_ref()
+            .map_or(0, |r| r.destination_count as usize);
         Self {
             expected,
             event,
@@ -292,10 +295,10 @@ fn org_emoji_set_replaces_the_standard_emoji() {
         ..Default::default()
     };
     let text = case.parent().to_string();
-    assert!(text.contains(":sonicfastafboi: *Releasing"), "{text}");
-    assert!(text.contains(":loading:  Deploy to `e2e`"), "{text}");
+    assert!(text.contains(":sonicfastafboi: *<"), "{text}");
+    assert!(text.contains(":loading:  Deploy to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-e2e|e2e>"), "{text}");
     assert!(
-        text.contains(":white_check_mark:  Deployed to `dev`"),
+        text.contains(":white_check_mark:  Deployed to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-dev|dev>"),
         "{text}"
     );
     insta::assert_json_snapshot!(case.parent());
@@ -491,7 +494,7 @@ fn release_steps_list_destinations_no_event_has_named_yet() {
     case.expected = 0;
     assert_eq!(overall_state(&case.view()), OverallState::InProgress);
     let text = case.parent().to_string();
-    assert!(text.contains("Deploy `prod-k8s`"), "{text}");
+    assert!(text.contains("Deploy <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#dest-prod-k8s|prod-k8s>"), "{text}");
 }
 
 #[test]
@@ -506,7 +509,7 @@ fn a_superseded_stage_finishes_the_release() {
     .with("dev-k8s", dest("dev", "succeeded"));
     assert_eq!(overall_state(&case.view()), OverallState::Succeeded);
     let text = case.parent().to_string();
-    assert!(text.contains("Deploy to `prod` skipped"), "{text}");
+    assert!(text.contains("#stage-prod|prod> skipped"), "{text}");
     assert!(text.contains("1 skipped"), "{text}");
 }
 
@@ -523,9 +526,153 @@ fn outside_text_is_escaped_so_it_cannot_ping_or_forge_links() {
     failed.error = Some("<!here> boom".into());
     let case = Case::new(e, vec![]).with("prod-k8s", failed);
     let parent = case.parent().to_string();
-    assert!(parent.contains("fix &lt;!channel&gt; &amp; &lt;https://evil.example|PR&gt;"), "{parent}");
+    assert!(
+        parent.contains("fix &lt;!channel&gt; &amp; &lt;https://evil.example|PR&gt;"),
+        "{parent}"
+    );
     assert!(!parent.contains("javascript:"), "{parent}");
     let posts = thread_posts(&case.view(), &ThreadDetail::default());
     let failure = posts.iter().find(|p| p.key == "failure:prod-k8s").unwrap();
-    assert!(failure.text.contains("&lt;!here&gt; boom"), "{}", failure.text);
+    assert!(
+        failure.text.contains("&lt;!here&gt; boom"),
+        "{}",
+        failure.text
+    );
+}
+
+#[test]
+fn every_part_of_the_message_links_to_its_place_in_forest() {
+    let mut stages = vec![
+        stage("dev", "deploy", "dev", "SUCCEEDED", &[]),
+        stage("plan prod", "plan", "prod", "AWAITING_APPROVAL", &["dev"]),
+    ];
+    stages[1].completed_at = None;
+    let case = Case::new(event("release_succeeded", "dev-k8s", "dev"), stages)
+        .with("dev-k8s/eu west", dest("dev", "succeeded"));
+    let release = "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor";
+
+    let parent = case.parent();
+    let actions = parent["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "actions")
+        .expect("action row");
+    let buttons: Vec<(&str, &str)> = actions["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                b["text"]["text"].as_str().unwrap(),
+                b["url"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        buttons[0],
+        ("Review plan", &*format!("{release}#stage-plan-prod"))
+    );
+    assert!(buttons.contains(&("Logs", &*format!("{release}#logs"))));
+    assert!(buttons.contains(&(
+        "Project",
+        "https://forest.understory.sh/orgs/understory/projects/agent-gateway"
+    )));
+    let text = parent.to_string();
+    assert!(
+        text.contains(&format!("<{release}#stage-plan-prod|prod> needs approval")),
+        "{text}"
+    );
+
+    let posts = thread_posts(&case.view(), &ThreadDetail::default());
+    let approval = posts
+        .iter()
+        .find(|p| p.key == "approval:plan prod:requested")
+        .unwrap();
+    assert_eq!(
+        approval.blocks[0]["accessory"]["url"],
+        format!("{release}#stage-plan-prod")
+    );
+    let deploy = posts
+        .iter()
+        .find(|p| p.key == "deploy:dev-k8s/eu west")
+        .unwrap();
+    assert!(
+        deploy.text.contains("<https://forest.understory.sh/orgs/understory/destinations/detail?name=dev-k8s%2Feu%20west|dev-k8s/eu west>"),
+        "{}",
+        deploy.text
+    );
+}
+
+#[test]
+fn without_a_forage_url_names_stay_plain_and_only_the_source_button_renders() {
+    let case = Case::new(
+        event("release_started", "dev-k8s", "dev"),
+        vec![stage("dev", "deploy", "dev", "RUNNING", &[])],
+    );
+    let view = ReleaseView {
+        forage_url: "",
+        ..case.view()
+    };
+    let m = render_parent(&view);
+    let text = serde_json::to_string(&m.blocks).unwrap();
+    assert!(text.contains("Deploying to `dev`"), "{text}");
+    assert!(!text.contains("forest.understory.sh"), "{text}");
+    assert!(text.contains("\"view_source\""), "{text}");
+    assert!(!text.contains("\"view_release\""), "{text}");
+}
+
+#[test]
+fn anchor_ids_match_what_the_release_page_renders() {
+    assert_eq!(
+        anchor_id("prod/eu-west-1/production"),
+        "prod-eu-west-1-production"
+    );
+    assert_eq!(anchor_id("plan prod"), "plan-prod");
+    assert_eq!(anchor_id("dev_1"), "dev_1");
+}
+
+#[test]
+fn a_long_pipeline_stays_under_slacks_section_limit() {
+    let stages: Vec<_> = (0..40)
+        .map(|i| {
+            let id = format!("deploy-region-number-{i:02}");
+            let mut s = stage(
+                &id,
+                "deploy",
+                &format!("environment-{i:02}"),
+                "SUCCEEDED",
+                &[],
+            );
+            s.depends_on = (i > 0)
+                .then(|| format!("deploy-region-number-{:02}", i - 1))
+                .into_iter()
+                .collect();
+            s
+        })
+        .collect();
+    let case = Case::new(event("release_succeeded", "dev-k8s", "dev"), stages);
+    for block in case.parent()["blocks"].as_array().unwrap() {
+        if let Some(text) = block["text"]["text"].as_str() {
+            assert!(text.len() <= 3000, "section of {} chars", text.len());
+        }
+    }
+    let text = case.parent().to_string();
+    assert!(
+        text.contains("Deployed to `environment-00`"),
+        "links are dropped before rows: {text}"
+    );
+}
+
+#[test]
+fn oversized_or_control_character_urls_never_become_buttons() {
+    for web in [
+        format!("https://example.com/{}", "a".repeat(3100)),
+        "https://example.com/a\nb".to_string(),
+    ] {
+        let mut e = event("release_started", "dev-k8s", "dev");
+        e.release.as_mut().unwrap().context_web = web;
+        let case = Case::new(e, vec![]);
+        assert!(!case.parent().to_string().contains("view_source"));
+    }
 }

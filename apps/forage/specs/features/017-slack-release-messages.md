@@ -98,6 +98,30 @@ webhook integrations cannot edit or thread, so they keep one message per event.
 - R5.4 HTTP 429 / `ratelimited` waits Slack's `Retry-After` (1–30 s, ≤60 s
   total per call) and retries; then the delivery's own retry ladder applies.
 
+### R6 — Every part links to its place in Forest
+
+- R6.1 The release page carries stable anchors: `#stage-<id>`, `#plan-<id>`
+  (on the plan output, so a closed plan expands), `#dest-<name>`, `#logs`,
+  `#pipeline`, `#destinations`. Ids go through one function (`anchor_id`,
+  the `anchor` template filter): characters other than `[A-Za-z0-9_-]`
+  become `-`.
+- R6.2 Parent: the headline links to the release; the project and slug link
+  to their pages; each stage's environment (or, without a pipeline, each
+  destination) links to its row. An action row replaces the header button:
+  the primary button is "Review plan" (`#stage-<id>`, which always renders
+  and holds the plan) while waiting for approval, "See what failed"
+  (`#logs`) on failure, else "View release"; then Logs, Source (CI's
+  context URL) and Project. If the linked stage list would pass Slack's
+  3000-character section limit, rows fall back to plain names, then trailing
+  rows collapse into "…and N more", so the message is never rejected.
+- R6.3 Thread: the approval request carries a "Review plan" button to the
+  stage, the plan reply a "Full plan" button to the plan output; deploy replies link the destination to its destination
+  page and to the logs; failure replies carry a neutral "Full logs" button; the
+  changes reply links the previous release.
+- R6.4 Without a Forage URL, names render as inline code and only the Commit
+  button remains. Only `https://` URLs of at most 3000 characters with no
+  control characters, `|`, `<`, `>` or spaces become links or buttons.
+
 ## Not done
 
 - Image digests: Forest records no image digest for an artifact, so the thread

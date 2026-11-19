@@ -119,6 +119,9 @@ impl TemplateEngine {
         env.add_filter("human_size", |v: u64| -> String {
             crate::manifest_view::ManifestView::human_size(v)
         });
+        env.add_filter("anchor", |v: String| -> String {
+            forage_core::integrations::slack_release::anchor_id(&v)
+        });
         env.add_filter("prettify_url", |v: String| -> String {
             forage_core::platform::prettify_url(&v)
         });

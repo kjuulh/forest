@@ -2767,3 +2767,12 @@ async fn delete_trigger_with_unknown_id_is_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert!(calls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn the_release_page_has_the_anchors_slack_messages_link_to() {
+    let html = artifact_detail_html(awaiting_plan_fixture("would change nothing")).await;
+    let stage = forage_core::integrations::slack_release::anchor_id("plan-finance");
+    assert!(html.contains(&format!("id=\"stage-{stage}\"")), "stage anchor missing");
+    assert!(html.contains(&format!("id=\"plan-{stage}\"")), "plan anchor missing");
+    assert!(html.contains("id=\"pipeline\""), "pipeline anchor missing");
+}

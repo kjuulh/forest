@@ -5,16 +5,8 @@ expression: case.parent()
 {
   "blocks": [
     {
-      "accessory": {
-        "text": {
-          "text": "View release",
-          "type": "plain_text"
-        },
-        "type": "button",
-        "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor"
-      },
       "text": {
-        "text": ":arrows_counterclockwise: *Releasing understory/agent-gateway*",
+        "text": ":arrows_counterclockwise: *<https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|Releasing understory/agent-gateway>*",
         "type": "mrkdwn"
       },
       "type": "section"
@@ -29,7 +21,7 @@ expression: case.parent()
     {
       "elements": [
         {
-          "text": "*agent-gateway* / vivaciously-ultimate-condor  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "text": "*<https://forest.understory.sh/orgs/understory/projects/agent-gateway|agent-gateway>* / <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|vivaciously-ultimate-condor>  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
           "type": "mrkdwn"
         }
       ],
@@ -37,7 +29,7 @@ expression: case.parent()
     },
     {
       "text": {
-        "text": ":arrows_counterclockwise:  Deploying to `dev`  ·  since <!date^1795084200^{time}|10:30 UTC>\n:hourglass_flowing_sand:  Deploy to `prod`",
+        "text": ":arrows_counterclockwise:  Deploying to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-dev|dev>  ·  since <!date^1795084200^{time}|10:30 UTC>\n:hourglass_flowing_sand:  Deploy to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-prod|prod>",
         "type": "mrkdwn"
       },
       "type": "section"
@@ -50,6 +42,48 @@ expression: case.parent()
         }
       ],
       "type": "context"
+    },
+    {
+      "elements": [
+        {
+          "action_id": "view_release",
+          "style": "primary",
+          "text": {
+            "text": "View release",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor"
+        },
+        {
+          "action_id": "view_logs",
+          "text": {
+            "text": "Logs",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs"
+        },
+        {
+          "action_id": "view_source",
+          "text": {
+            "text": "Source",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://github.com/understory-io/agent-gateway/commit/dc989e4"
+        },
+        {
+          "action_id": "view_project",
+          "text": {
+            "text": "Project",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway"
+        }
+      ],
+      "type": "actions"
     }
   ],
   "text": "Releasing understory/agent-gateway"

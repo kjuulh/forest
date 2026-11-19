@@ -179,6 +179,7 @@ pub struct ReleaseView<'a> {
     pub expected_destinations: usize,
 }
 
+#[derive(Clone)]
 struct Row {
     state: StageState,
     label: String,
@@ -222,7 +223,7 @@ fn stage_state(view: &ReleaseView, stage: &PipelineRunStageState) -> StageState 
     }
 }
 
-fn rows(view: &ReleaseView) -> Vec<Row> {
+fn rows(view: &ReleaseView, links: &Links) -> Vec<Row> {
     if !view.stages.is_empty() {
         return super::router::topo_sort_stages(view.stages)
             .iter()
@@ -230,7 +231,7 @@ fn rows(view: &ReleaseView) -> Vec<Row> {
                 let state = stage_state(view, s);
                 Row {
                     state,
-                    label: stage_label(s, state),
+                    label: stage_label(s, state, links),
                     started: parse_ts(s.started_at.as_deref().or(s.queued_at.as_deref())),
                     completed: parse_ts(s.completed_at.as_deref()),
                 }
@@ -266,7 +267,10 @@ fn rows(view: &ReleaseView) -> Vec<Row> {
             let (started, completed) = destination_times(event, step);
             Row {
                 state,
-                label: format!("{verb} `{}`", esc(name)),
+                label: format!(
+                    "{verb} {}",
+                    name_link(&links.destination_row(name), &esc(name))
+                ),
                 started,
                 completed,
             }
@@ -310,30 +314,185 @@ pub fn esc(text: &str) -> String {
 }
 
 fn link(url: &str, label: &str) -> String {
-    if url.starts_with("https://") && !url.contains(['|', '<', '>', ' ']) {
+    if is_linkable(url) {
         format!("<{url}|{label}>")
     } else {
         label.to_string()
     }
 }
 
-fn stage_label(stage: &PipelineRunStageState, state: StageState) -> String {
-    let env = esc(stage.environment.as_deref().unwrap_or("unknown"));
+fn is_linkable(url: &str) -> bool {
+    url.len() <= 3000
+        && url.starts_with("https://")
+        && !url.contains(['|', '<', '>', ' '])
+        && !url.chars().any(char::is_control)
+}
+
+/// `text` as a link when there is somewhere to go, else as inline code, so a
+/// name stays recognisable either way. `text` must already be escaped.
+fn name_link(url: &str, text: &str) -> String {
+    if is_linkable(url) {
+        format!("<{url}|{text}>")
+    } else {
+        format!("`{text}`")
+    }
+}
+
+/// The id forage gives a stage, plan or destination on the release page, so a
+/// Slack link can land on it. Must match the `anchor` template filter.
+pub fn anchor_id(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn pct(segment: &str) -> String {
+    segment
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Where in Forest each part of the message points. Every method returns an
+/// empty string when Forage's URL is unknown, which renders plain text.
+struct Links {
+    base: String,
+    org: String,
+    project: String,
+    slug: String,
+}
+
+impl Links {
+    fn none() -> Self {
+        Self {
+            base: String::new(),
+            org: String::new(),
+            project: String::new(),
+            slug: String::new(),
+        }
+    }
+
+    fn new(view: &ReleaseView) -> Self {
+        Self {
+            base: view.forage_url.trim_end_matches('/').to_string(),
+            org: view.event.organisation.clone(),
+            project: view.event.project.clone(),
+            slug: view
+                .event
+                .release
+                .as_ref()
+                .map(|r| r.slug.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn project(&self) -> String {
+        if self.base.is_empty() {
+            return String::new();
+        }
+        format!(
+            "{}/orgs/{}/projects/{}",
+            self.base,
+            pct(&self.org),
+            pct(&self.project)
+        )
+    }
+
+    fn release_of(&self, slug: &str) -> String {
+        if self.base.is_empty() || slug.is_empty() {
+            return String::new();
+        }
+        format!("{}/releases/{}", self.project(), pct(slug))
+    }
+
+    fn release(&self) -> String {
+        self.release_of(&self.slug)
+    }
+
+    fn on_release(&self, anchor: &str) -> String {
+        let release = self.release();
+        if release.is_empty() {
+            return release;
+        }
+        format!("{release}#{anchor}")
+    }
+
+    fn stage(&self, stage_id: &str) -> String {
+        self.on_release(&format!("stage-{}", anchor_id(stage_id)))
+    }
+
+    fn plan(&self, stage_id: &str) -> String {
+        self.on_release(&format!("plan-{}", anchor_id(stage_id)))
+    }
+
+    fn destination_row(&self, name: &str) -> String {
+        self.on_release(&format!("dest-{}", anchor_id(name)))
+    }
+
+    fn logs(&self) -> String {
+        self.on_release("logs")
+    }
+
+    fn destination(&self, name: &str) -> String {
+        if self.base.is_empty() {
+            return String::new();
+        }
+        format!(
+            "{}/orgs/{}/destinations/detail?name={}",
+            self.base,
+            pct(&self.org),
+            pct(name)
+        )
+    }
+}
+
+fn button(label: &str, url: &str, action_id: &str, primary: bool) -> Option<Value> {
+    if !is_linkable(url) {
+        return None;
+    }
+    let mut b = json!({
+        "type": "button",
+        "text": { "type": "plain_text", "text": label },
+        "url": url,
+        "action_id": action_id,
+    });
+    if primary {
+        b["style"] = json!("primary");
+    }
+    Some(b)
+}
+
+fn stage_label(stage: &PipelineRunStageState, state: StageState, links: &Links) -> String {
+    let env = name_link(
+        &links.stage(&stage.stage_id),
+        &esc(stage.environment.as_deref().unwrap_or("unknown")),
+    );
     match stage.stage_type.as_str() {
         "deploy" => match state {
-            StageState::Succeeded => format!("Deployed to `{env}`"),
-            StageState::Running => format!("Deploying to `{env}`"),
-            StageState::Failed => format!("Deploy to `{env}` failed"),
-            StageState::Skipped => format!("Deploy to `{env}` skipped"),
-            StageState::RolledBack => format!("Deploy to `{env}` rolled back"),
-            _ => format!("Deploy to `{env}`"),
+            StageState::Succeeded => format!("Deployed to {env}"),
+            StageState::Running => format!("Deploying to {env}"),
+            StageState::Failed => format!("Deploy to {env} failed"),
+            StageState::Skipped => format!("Deploy to {env} skipped"),
+            StageState::RolledBack => format!("Deploy to {env} rolled back"),
+            _ => format!("Deploy to {env}"),
         },
         "plan" => match state {
-            StageState::Succeeded => format!("Plan for `{env}` approved"),
-            StageState::Running => format!("Planning `{env}`"),
-            StageState::AwaitingApproval => format!("Plan for `{env}` needs approval"),
-            StageState::Failed => format!("Plan for `{env}` failed"),
-            _ => format!("Plan `{env}`"),
+            StageState::Succeeded => format!("Plan for {env} approved"),
+            StageState::Running => format!("Planning {env}"),
+            StageState::AwaitingApproval => format!("Plan for {env} needs approval"),
+            StageState::Failed => format!("Plan for {env} failed"),
+            _ => format!("Plan {env}"),
         },
         "wait" => {
             let d = format_duration(stage.duration_seconds.unwrap_or(0));
@@ -350,10 +509,16 @@ fn stage_label(stage: &PipelineRunStageState, state: StageState) -> String {
             if stage.gate_waiting_on.is_empty() || state.is_terminal() {
                 "Gate".to_string()
             } else {
-                format!("Gate, waiting on {}", esc(&stage.gate_waiting_on.join(", ")))
+                format!(
+                    "Gate, waiting on {}",
+                    esc(&stage.gate_waiting_on.join(", "))
+                )
             }
         }
-        _ => format!("Stage `{}`", esc(&stage.stage_id)),
+        _ => format!(
+            "Stage {}",
+            name_link(&links.stage(&stage.stage_id), &esc(&stage.stage_id))
+        ),
     }
 }
 
@@ -361,7 +526,7 @@ pub fn overall_state(view: &ReleaseView) -> OverallState {
     if view.destinations.values().any(|d| d.status == "failed") {
         return OverallState::Failed;
     }
-    let states: Vec<StageState> = rows(view).iter().map(|r| r.state).collect();
+    let states: Vec<StageState> = rows(view, &Links::none()).iter().map(|r| r.state).collect();
     if states.is_empty() {
         return match view.event.notification_type.as_str() {
             "release_failed" => OverallState::Failed,
@@ -399,22 +564,6 @@ fn slack_time(t: DateTime<Utc>) -> String {
     )
 }
 
-pub fn release_url(view: &ReleaseView) -> String {
-    let Some(r) = view.event.release.as_ref() else {
-        return String::new();
-    };
-    if view.forage_url.is_empty() {
-        return String::new();
-    }
-    format!(
-        "{}/orgs/{}/projects/{}/releases/{}",
-        view.forage_url.trim_end_matches('/'),
-        view.event.organisation,
-        view.event.project,
-        r.slug,
-    )
-}
-
 pub fn render_parent(view: &ReleaseView) -> SlackMessage {
     let event = view.event;
     let target = esc(&format!("{}/{}", event.organisation, event.project));
@@ -440,20 +589,12 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
         ),
     };
 
+    let links = Links::new(view);
     let mut blocks: Vec<Value> = Vec::new();
-    let mut header = json!({
+    blocks.push(json!({
         "type": "section",
-        "text": { "type": "mrkdwn", "text": format!("{emoji} *{headline}*") }
-    });
-    let url = release_url(view);
-    if !url.is_empty() {
-        header["accessory"] = json!({
-            "type": "button",
-            "text": { "type": "plain_text", "text": "View release" },
-            "url": url,
-        });
-    }
-    blocks.push(header);
+        "text": { "type": "mrkdwn", "text": format!("{emoji} *{}*", link(&links.release(), &headline)) }
+    }));
 
     if let Some(r) = event.release.as_ref() {
         if !r.context_title.is_empty() {
@@ -462,30 +603,14 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
                 "text": { "type": "mrkdwn", "text": format!(":memo: {}", truncate(&esc(&r.context_title), 500)) }
             }));
         }
-        blocks.push(metadata_context(event));
+        blocks.push(metadata_context(event, &links));
     }
 
-    let rows = rows(view);
+    let rows = rows(view, &links);
     if !rows.is_empty() {
-        let lines: Vec<String> = rows
-            .iter()
-            .map(|row| {
-                let mut line = format!("{}  {}", row.state.emoji(e), row.label);
-                match (row.state, row.started, row.completed) {
-                    (s, Some(a), Some(b)) if s.is_terminal() => {
-                        line.push_str(&format!("  ·  {}", format_duration((b - a).num_seconds())));
-                    }
-                    (StageState::Running, Some(a), _) => {
-                        line.push_str(&format!("  ·  since {}", slack_time(a)));
-                    }
-                    _ => {}
-                }
-                line
-            })
-            .collect();
         blocks.push(json!({
             "type": "section",
-            "text": { "type": "mrkdwn", "text": lines.join("\n") }
+            "text": { "type": "mrkdwn", "text": stage_lines(view, &rows, &links) }
         }));
 
         let done = rows.iter().filter(|r| r.state.is_terminal()).count();
@@ -517,7 +642,10 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
         if overall == OverallState::Failed {
             footer.push_str("  ·  details in thread");
         }
-        let skipped = rows.iter().filter(|r| r.state == StageState::Skipped).count();
+        let skipped = rows
+            .iter()
+            .filter(|r| r.state == StageState::Skipped)
+            .count();
         if skipped > 0 && overall == OverallState::Succeeded {
             footer.push_str(&format!("  ·  {skipped} skipped"));
         }
@@ -527,6 +655,39 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
         }));
     }
 
+    let awaiting = view
+        .stages
+        .iter()
+        .find(|s| stage_state(view, s) == StageState::AwaitingApproval);
+    let primary = match (overall, awaiting) {
+        (OverallState::WaitingForApproval, Some(stage)) => button(
+            "Review plan",
+            &links.stage(&stage.stage_id),
+            "review_plan",
+            true,
+        ),
+        (OverallState::Failed, _) => button("See what failed", &links.logs(), "view_failure", true),
+        _ => button("View release", &links.release(), "view_release", true),
+    };
+    let commit = event
+        .release
+        .as_ref()
+        .map(|r| r.context_web.clone())
+        .unwrap_or_default();
+    let actions: Vec<Value> = [
+        primary,
+        button("Logs", &links.logs(), "view_logs", false)
+            .filter(|_| overall != OverallState::Failed),
+        button("Source", &commit, "view_source", false),
+        button("Project", &links.project(), "view_project", false),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !actions.is_empty() {
+        blocks.push(json!({ "type": "actions", "elements": actions }));
+    }
+
     SlackMessage {
         text: headline,
         color: color.to_string(),
@@ -534,9 +695,58 @@ pub fn render_parent(view: &ReleaseView) -> SlackMessage {
     }
 }
 
-fn metadata_context(event: &NotificationEvent) -> Value {
+fn row_line(row: &Row, emoji: &SlackEmojiSet) -> String {
+    let mut line = format!("{}  {}", row.state.emoji(emoji), row.label);
+    match (row.state, row.started, row.completed) {
+        (s, Some(a), Some(b)) if s.is_terminal() => {
+            line.push_str(&format!("  ·  {}", format_duration((b - a).num_seconds())));
+        }
+        (StageState::Running, Some(a), _) => {
+            line.push_str(&format!("  ·  since {}", slack_time(a)));
+        }
+        _ => {}
+    }
+    line
+}
+
+/// Slack rejects the whole message when a section passes 3000 characters, and
+/// links make each row about three times longer: a long pipeline drops the
+/// links first, then rows, rather than the message.
+fn stage_lines(view: &ReleaseView, rows: &[Row], links: &Links) -> String {
+    const LIMIT: usize = 2900;
+    let render = |rows: &[Row]| -> String {
+        rows.iter()
+            .map(|r| row_line(r, view.emoji))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let linked = render(rows);
+    if linked.len() <= LIMIT {
+        return linked;
+    }
+    let plain_rows = if links.base.is_empty() {
+        rows.to_vec()
+    } else {
+        self::rows(view, &Links::none())
+    };
+    let mut lines: Vec<String> = plain_rows.iter().map(|r| row_line(r, view.emoji)).collect();
+    while lines.join("\n").len() > LIMIT && lines.len() > 1 {
+        lines.pop();
+    }
+    let hidden = plain_rows.len() - lines.len();
+    if hidden > 0 {
+        lines.push(format!("…and {hidden} more"));
+    }
+    lines.join("\n")
+}
+
+fn metadata_context(event: &NotificationEvent, links: &Links) -> Value {
     let r = event.release.as_ref().expect("caller checked release");
-    let mut parts = vec![format!("*{}* / {}", esc(&event.project), esc(&r.slug))];
+    let mut parts = vec![format!(
+        "*{}* / {}",
+        link(&links.project(), &esc(&event.project)),
+        link(&links.release(), &esc(&r.slug))
+    )];
     if !r.commit_branch.is_empty() {
         parts.push(format!("`{}`", esc(&r.commit_branch)));
     }
@@ -569,6 +779,16 @@ pub struct ThreadPost {
 }
 
 impl ThreadPost {
+    fn with_button(mut self, label: &str, url: &str, action_id: &str, primary: bool) -> Self {
+        if let (Some(b), Some(section)) = (
+            button(label, url, action_id, primary),
+            self.blocks.first_mut(),
+        ) {
+            section["accessory"] = b;
+        }
+        self
+    }
+
     fn new(key: String, text: String) -> Self {
         let blocks = vec![json!({
             "type": "section",
@@ -607,7 +827,7 @@ pub struct ThreadDetail<'a> {
 /// the caller skips keys it has posted.
 pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost> {
     let mut posts = Vec::new();
-    let url = release_url(view);
+    let links = Links::new(view);
 
     if let Some(artifacts) = detail.artifacts
         && let Some(post) = changes_post(view, artifacts)
@@ -617,25 +837,26 @@ pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost
 
     for stage in super::router::topo_sort_stages(view.stages) {
         let state = stage_state(view, &stage);
-        let env = esc(stage.environment.as_deref().unwrap_or("unknown"));
+        let env = name_link(
+            &links.stage(&stage.stage_id),
+            &esc(stage.environment.as_deref().unwrap_or("unknown")),
+        );
         if stage.stage_type == "plan" {
             if let Some(plan) = detail.plans.get(&stage.stage_id) {
-                posts.push(plan_post(&stage.stage_id, &env, plan));
+                posts.push(plan_post(&stage.stage_id, &env, plan, &links));
             }
             if state == StageState::AwaitingApproval {
-                let link = if url.is_empty() {
-                    "in Forest".to_string()
-                } else {
-                    format!("in <{url}|Forest>")
-                };
-                posts.push(ThreadPost::new(
-                    format!("approval:{}:requested", stage.stage_id),
-                    format!(
-                        "{} *Approval needed to deploy to `{env}`.* Review the plan and approve or reject it {link}. Any member of *{}* can approve.",
-                        view.emoji.get("approval"),
-                        esc(&view.event.organisation),
-                    ),
-                ));
+                posts.push(
+                    ThreadPost::new(
+                        format!("approval:{}:requested", stage.stage_id),
+                        format!(
+                            "{} *Approval needed to deploy to {env}.* Review the plan, then approve or reject it in Forest. Any member of *{}* can approve.",
+                            view.emoji.get("approval"),
+                            esc(&view.event.organisation),
+                        ),
+                    )
+                    .with_button("Review plan", &links.stage(&stage.stage_id), "review_plan", true),
+                );
             }
             let decision = stage
                 .approval_status
@@ -652,7 +873,7 @@ pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost
                 };
                 posts.push(ThreadPost::new(
                     format!("approval:{}:{decision}", stage.stage_id),
-                    format!("{emoji} Plan for `{env}` was {decision}."),
+                    format!("{emoji} Plan for {env} was {decision}."),
                 ));
             }
         }
@@ -671,9 +892,9 @@ pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost
         {
             posts.push(failure_post(
                 format!("failure:stage:{}", stage.stage_id),
-                &format!("{} `{env}`", stage_noun(&stage.stage_type)),
+                &format!("{} {env}", stage_noun(&stage.stage_type)),
                 err,
-                &url,
+                &links,
                 view.emoji,
             ));
         }
@@ -689,28 +910,32 @@ pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost
                     (Some(a), Some(b)) => format!(" in {}", format_duration((b - a).num_seconds())),
                     _ => String::new(),
                 };
-                let logs = if url.is_empty() {
-                    String::new()
+                let logs = if is_linkable(&links.logs()) {
+                    format!("  ·  {}", link(&links.logs(), "logs"))
                 } else {
-                    format!("  ·  <{url}|logs>")
+                    String::new()
                 };
                 posts.push(ThreadPost::new(
                     format!("deploy:{name}"),
                     format!(
-                        "{} Deployed `{}` ({}){took}{logs}",
+                        "{} Deployed {} ({}){took}{logs}",
                         view.emoji.get("succeeded"),
-                        esc(name),
+                        name_link(&links.destination(name), &esc(name)),
                         esc(&d.environment)
                     ),
                 ));
             }
             "failed" => posts.push(failure_post(
                 format!("failure:{name}"),
-                &format!("Deploy to `{}` ({})", esc(name), esc(&d.environment)),
+                &format!(
+                    "Deploy to {} ({})",
+                    name_link(&links.destination(name), &esc(name)),
+                    esc(&d.environment)
+                ),
                 d.error
                     .as_deref()
                     .unwrap_or("no error message was reported"),
-                &url,
+                &links,
                 view.emoji,
             )),
             _ => {}
@@ -732,22 +957,15 @@ fn failure_post(
     key: String,
     what: &str,
     err: &str,
-    url: &str,
+    links: &Links,
     emoji: &SlackEmojiSet,
 ) -> ThreadPost {
     let excerpt = esc(&truncate(err.trim(), 1500).replace("```", "'''"));
-    let logs = if url.is_empty() {
-        String::new()
-    } else {
-        format!("\nFull logs: <{url}|release in Forest>")
-    };
     ThreadPost::new(
         key,
-        format!(
-            "{} *{what} failed*\n```{excerpt}```{logs}",
-            emoji.get("failed")
-        ),
+        format!("{} *{what} failed*\n```{excerpt}```", emoji.get("failed")),
     )
+    .with_button("Full logs", &links.logs(), "view_logs", false)
 }
 
 /// Parses terraform's `Plan: 1 to add, 2 to change, 0 to destroy.` line.
@@ -766,7 +984,7 @@ pub fn plan_summary(output: &str) -> Option<(u64, u64, u64)> {
     Some((count("to add"), count("to change"), count("to destroy")))
 }
 
-fn plan_post(stage_id: &str, env: &str, plan: &PlanOutput) -> ThreadPost {
+fn plan_post(stage_id: &str, env: &str, plan: &PlanOutput, links: &Links) -> ThreadPost {
     let mut outputs: Vec<(String, String)> = plan
         .outputs
         .iter()
@@ -775,7 +993,7 @@ fn plan_post(stage_id: &str, env: &str, plan: &PlanOutput) -> ThreadPost {
     if outputs.is_empty() && !plan.plan_output.is_empty() {
         outputs.push((env.to_string(), plan.plan_output.clone()));
     }
-    let mut lines = vec![format!(":clipboard: *Plan for `{env}`*")];
+    let mut lines = vec![format!(":clipboard: *Plan for {env}*")];
     for (name, out) in outputs {
         let line = match plan_summary(&out) {
             Some((0, 0, 0)) => format!("• `{name}`: no changes"),
@@ -793,7 +1011,12 @@ fn plan_post(stage_id: &str, env: &str, plan: &PlanOutput) -> ThreadPost {
         };
         lines.push(line);
     }
-    ThreadPost::new(format!("plan:{stage_id}"), lines.join("\n"))
+    ThreadPost::new(format!("plan:{stage_id}"), lines.join("\n")).with_button(
+        "Full plan",
+        &links.plan(stage_id),
+        "view_plan",
+        false,
+    )
 }
 
 fn changes_post(view: &ReleaseView, artifacts: &[Artifact]) -> Option<ThreadPost> {
@@ -823,11 +1046,14 @@ fn changes_post(view: &ReleaseView, artifacts: &[Artifact]) -> Option<ThreadPost
     }
 
     let mut lines = vec![match previous {
-        Some(p) => format!(
-            ":scroll: *{} changes since the previous release* (`{}`)",
-            changes.len(),
-            esc(&sorted[start + 1 + p].slug)
-        ),
+        Some(p) => {
+            let previous = &sorted[start + 1 + p].slug;
+            format!(
+                ":scroll: *{} changes since the previous release* ({})",
+                changes.len(),
+                name_link(&Links::new(view).release_of(previous), &esc(previous))
+            )
+        }
         None => format!(":scroll: *{} changes in this first release*", changes.len()),
     }];
     for a in changes.iter().take(SHOWN) {
@@ -841,7 +1067,8 @@ fn changes_post(view: &ReleaseView, artifacts: &[Artifact]) -> Option<ThreadPost
             _ if !sha.is_empty() => format!("`{}`", esc(sha)),
             _ => String::new(),
         };
-        let mut line = format!("• {sha} {}", truncate(&esc(a.context.title.trim()), 200)).replace("•  ", "• ");
+        let mut line =
+            format!("• {sha} {}", truncate(&esc(a.context.title.trim()), 200)).replace("•  ", "• ");
         if let Some(user) = a.source.as_ref().and_then(|s| s.user.as_deref()) {
             line.push_str(&format!(" — {}", esc(user)));
         }
