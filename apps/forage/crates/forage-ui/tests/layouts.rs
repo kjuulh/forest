@@ -97,3 +97,19 @@ fn org_settings_layout_with_the_sidebar_and_mobile_pills() {
     assert!(out.contains("<p>content</p>"), "{out}");
     insta::assert_snapshot!(out);
 }
+
+#[test]
+fn the_shell_marks_the_current_tab_and_has_no_inline_script_or_handlers() {
+    let body = |out: &mut String| out.push_str("<p>content</p>");
+    let html = Shell { chrome: &chrome(), head: None, scripts: None, children: &body }.render_to_string();
+    assert!(html.contains(r#"href="/orgs/acme/projects/api/settings" aria-current="page""#), "{html}");
+    assert!(!html.contains("<script>"), "{html}");
+    assert!(!html.contains("<style>"), "{html}");
+    assert!(!regex_lite_on(&html), "{html}");
+}
+
+fn regex_lite_on(html: &str) -> bool {
+    html.split_whitespace().any(|w| {
+        w.starts_with("on") && w.contains("=\"") && w[2..].split('=').next().is_some_and(|n| n.chars().all(|c| c.is_ascii_lowercase()))
+    })
+}

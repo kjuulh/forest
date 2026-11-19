@@ -35,7 +35,6 @@ RUN --mount=type=ssh cargo build --release -p forage-server
 FROM gcr.io/distroless/cc-debian13:latest
 
 COPY --from=builder /mnt/src/target/release/forage-server /usr/local/bin/forage-server
-COPY --from=builder /mnt/src/templates /templates
 COPY --from=builder /mnt/src/static /static
 
 ARG GIT_SHA=""
@@ -44,7 +43,6 @@ ENV FOREST_GIT_SHA=$GIT_SHA
 ENV FOREST_BUILD_TIME=$BUILD_TIME
 
 WORKDIR /
-ENV FORAGE_TEMPLATES_PATH=/templates
 
 EXPOSE 3000
 

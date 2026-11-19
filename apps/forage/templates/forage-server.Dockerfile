@@ -37,11 +37,9 @@ RUN ./target/release/forage-server --help || true
 FROM gcr.io/distroless/cc-debian13:latest
 
 COPY --from=builder /mnt/src/target/release/forage-server /usr/local/bin/forage-server
-COPY --from=builder /mnt/src/templates /templates
 COPY --from=builder /mnt/src/static /static
 
 WORKDIR /
-ENV FORAGE_TEMPLATES_PATH=/templates
 
 EXPOSE 3000
 

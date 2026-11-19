@@ -1336,13 +1336,7 @@ impl ForestPlatform for MockPlatformClient {
 }
 
 pub(crate) fn make_templates() -> TemplateEngine {
-    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
-    TemplateEngine::from_path(&workspace_root.join("templates"))
-        .expect("templates must load for tests")
+    TemplateEngine::unhashed()
 }
 
 pub(crate) fn test_state() -> (AppState, Arc<InMemorySessionStore>) {

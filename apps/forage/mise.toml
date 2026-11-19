@@ -89,7 +89,7 @@ run = "cargo sqlx prepare --workspace"
 
 [tasks."tailwind:build"]
 description = "Build tailwind CSS"
-sources = ["templates/**/*.jinja", "crates/forage-ui/templates/**/*.sedge", "crates/forage-ui/src/**/*.rs", "crates/forage-server/templates/**/*.sedge", "static/css/input.css", "static/js/**/*.js"]
+sources = ["crates/forage-ui/templates/**/*.sedge", "crates/forage-ui/src/**/*.rs", "crates/forage-server/templates/**/*.sedge", "static/css/input.css", "static/js/**/*.js"]
 outputs = ["static/css/style.css"]
 run = "tailwindcss -i static/css/input.css -o static/css/style.css --minify"
 

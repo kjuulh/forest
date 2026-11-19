@@ -1,115 +1,52 @@
 use std::path::Path;
 
-use anyhow::Context;
-use minijinja::Environment;
 use sha2::Digest;
+
+fn content_hash(path: &Path) -> String {
+    match std::fs::read(path) {
+        Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
+        Err(_) => "dev".to_string(),
+    }
+}
 
 fn asset_href(path: &str) -> String {
     static HASHES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
         std::sync::LazyLock::new(Default::default);
     let mut hashes = HASHES.lock().unwrap_or_else(|e| e.into_inner());
-    let hash = hashes.entry(path.to_string()).or_insert_with(|| {
-        match std::fs::read(Path::new("static").join(path)) {
-            Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
-            Err(_) => "dev".to_string(),
-        }
-    });
+    let hash = hashes
+        .entry(path.to_string())
+        .or_insert_with(|| content_hash(&Path::new("static").join(path)));
     format!("/static/{path}?v={hash}")
 }
 
 #[derive(Clone)]
 pub struct TemplateEngine {
-    env: Environment<'static>,
     assets: forage_ui::chrome::Assets,
     build: forage_ui::chrome::BuildStamp,
 }
 
 impl TemplateEngine {
-    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        if !path.exists() {
-            anyhow::bail!("templates directory not found: {}", path.display());
-        }
-
-        let mut env = Environment::new();
-        env.set_loader(minijinja::path_loader(path));
-        env.set_formatter(|out, state, value| {
-            if value.is_none() || value.is_undefined() {
-                return Ok(());
-            }
-            minijinja::escape_formatter(out, state, value)
-        });
-        env.add_filter("timeago", |v: String| -> String {
-            forage_ui::format::timeago(&v)
-        });
-        env.add_filter("timeuntil", |v: String| -> String {
-            forage_ui::format::timeuntil(&v)
-        });
-        env.add_filter("datetime", |v: String| -> String {
-            forage_ui::format::datetime(&v)
-        });
-        env.add_filter("urlencode", |v: String| -> String {
-            forage_ui::format::urlencode(&v)
-        });
-        env.add_filter("short_sha", |v: String| -> String {
-            crate::manifest_view::ManifestView::short_sha(&v)
-        });
-        env.add_filter("human_size", |v: u64| -> String {
-            crate::manifest_view::ManifestView::human_size(v)
-        });
-        env.add_filter("anchor", |v: String| -> String {
-            forage_core::integrations::slack_release::anchor_id(&v)
-        });
-        env.add_filter("prettify_url", |v: String| -> String {
-            forage_core::platform::prettify_url(&v)
-        });
-
-        env.add_function("asset", |path: String| -> String { asset_href(&path) });
-        env.add_global("css_hash", "dev");
-        env.add_global("ui_js_hash", "dev");
-        env.add_global("components_js_hash", "dev");
-
+    pub fn unhashed() -> Self {
         let build = crate::build_info::BuildInfo::from_env();
-        env.add_global("build_commit", build.commit.clone());
-        env.add_global("build_time", build.build_time.clone());
-
-        Ok(Self {
-            env,
+        Self {
             assets: forage_ui::chrome::Assets::default(),
             build: forage_ui::chrome::BuildStamp {
                 commit: build.commit,
                 time: build.build_time,
             },
-        })
+        }
     }
 
     pub fn new() -> anyhow::Result<Self> {
-        let mut engine = Self::from_path(Path::new("templates"))?;
-        engine.compute_asset_hashes();
-        Ok(engine)
-    }
-
-    fn compute_asset_hashes(&mut self) {
-        fn asset_hash(path: &str) -> String {
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    let digest = sha2::Sha256::digest(&bytes);
-                    format!("{digest:x}")[..12].to_string()
-                }
-                Err(_) => "dev".to_string(),
-            }
-        }
-
-        self.assets = forage_ui::chrome::Assets {
-            css_hash: asset_hash("static/css/style.css"),
-            ui_js_hash: asset_hash("static/js/ui.js"),
-            components_js_hash: asset_hash("static/js/components/forage-components.js"),
+        let mut engine = Self::unhashed();
+        engine.assets = forage_ui::chrome::Assets {
+            css_hash: content_hash(Path::new("static/css/style.css")),
+            ui_js_hash: content_hash(Path::new("static/js/ui.js")),
+            components_js_hash: content_hash(Path::new(
+                "static/js/components/forage-components.js",
+            )),
         };
-        self.env
-            .add_global("css_hash", self.assets.css_hash.clone());
-        self.env
-            .add_global("ui_js_hash", self.assets.ui_js_hash.clone());
-        self.env
-            .add_global("components_js_hash", self.assets.components_js_hash.clone());
+        Ok(engine)
     }
 
     pub fn assets(&self) -> &forage_ui::chrome::Assets {
@@ -123,42 +60,4 @@ impl TemplateEngine {
     pub fn asset_href(&self, path: &str) -> String {
         asset_href(path)
     }
-
-    #[cfg(test)]
-    pub fn render_str(&self, source: &str, ctx: minijinja::Value) -> anyhow::Result<String> {
-        Ok(self.env.render_str(source, ctx)?)
-    }
-
-    pub fn render(&self, template: &str, ctx: minijinja::Value) -> anyhow::Result<String> {
-        let tmpl = self
-            .env
-            .get_template(template)
-            .with_context(|| format!("template not found: {template}"))?;
-        tmpl.render(ctx)
-            .with_context(|| format!("failed to render template: {template}"))
-    }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn none_renders_as_nothing_and_everything_else_is_still_escaped() {
-        let engine = TemplateEngine::from_path(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates"),
-        )
-        .expect("load templates");
-        let html = engine
-            .env
-            .render_named_str(
-                "test.html.jinja",
-                r#"<input value="{{ unset }}">{{ missing }}|{{ text }}|{{ zero }}|{{ no }}"#,
-                minijinja::context! { unset => None::<String>, text => "<b>", zero => 0, no => false },
-            )
-            .unwrap();
-        assert_eq!(html, r#"<input value="">|&lt;b&gt;|0|false"#);
-    }
-
-}
-
