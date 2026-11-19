@@ -31,6 +31,9 @@ pub(crate) struct ProviderState {
     pub post_error: Option<String>,
     pub posted: Vec<(String, String)>,
     pub updated: Vec<(String, String)>,
+    pub post_bodies: Vec<Value>,
+    pub update_bodies: Vec<Value>,
+    pub rate_limit_next: u32,
     pub lookups: Vec<String>,
     pub gh_user: Value,
     pub gh_user_installations: Vec<i64>,
@@ -110,9 +113,10 @@ impl FakeProviders {
         self.state
             .lock()
             .unwrap()
-            .posted
+            .post_bodies
             .iter()
-            .map(|(c, _)| c.clone())
+            .filter(|b| b.get("thread_ts").is_none())
+            .map(|b| b["channel"].as_str().unwrap_or_default().to_string())
             .collect()
     }
 }
@@ -136,18 +140,29 @@ async fn lookup_by_email(State(s): S, Query(q): Query<HashMap<String, String>>) 
     }
 }
 
-async fn post_message(State(s): S, Json(body): Json<Value>) -> Json<Value> {
+async fn post_message(State(s): S, Json(body): Json<Value>) -> axum::response::Response {
+    use axum::response::IntoResponse;
     let mut st = s.lock().unwrap();
+    if st.rate_limit_next > 0 {
+        st.rate_limit_next -= 1;
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            [("retry-after", "1")],
+            "",
+        )
+            .into_response();
+    }
     if let Some(err) = &st.post_error {
-        return Json(json!({ "ok": false, "error": err }));
+        return Json(json!({ "ok": false, "error": err })).into_response();
     }
     let channel = body["channel"].as_str().unwrap_or_default().to_string();
     st.posted.push((
         channel.clone(),
         body["text"].as_str().unwrap_or_default().to_string(),
     ));
+    st.post_bodies.push(body);
     let ts = format!("1700000000.{:06}", st.posted.len());
-    Json(json!({ "ok": true, "channel": channel, "ts": ts }))
+    Json(json!({ "ok": true, "channel": channel, "ts": ts })).into_response()
 }
 
 async fn update_message(State(s): S, Json(body): Json<Value>) -> Json<Value> {
@@ -156,6 +171,7 @@ async fn update_message(State(s): S, Json(body): Json<Value>) -> Json<Value> {
         body["channel"].as_str().unwrap_or_default().to_string(),
         body["ts"].as_str().unwrap_or_default().to_string(),
     ));
+    st.update_bodies.push(body);
     Json(json!({ "ok": true }))
 }
 

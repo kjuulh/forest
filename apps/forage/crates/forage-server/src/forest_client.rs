@@ -148,6 +148,43 @@ impl GrpcForestClient {
         project: Option<&str>,
         include_completed: bool,
     ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
+        self.release_intent_states(
+            service_token,
+            organisation,
+            project,
+            include_completed,
+            convert_pipeline_stage_state,
+        )
+        .await
+    }
+
+    /// Like `get_release_intent_states_with_token`, but keeps the statuses the
+    /// web UI folds into PENDING (`AWAITING_SIGNAL`, `SUPERSEDED`): a release
+    /// notification must tell a superseded stage from one still to run.
+    pub async fn get_release_intent_states_for_notifications(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        project: &str,
+    ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
+        self.release_intent_states(
+            service_token,
+            organisation,
+            Some(project),
+            true,
+            convert_pipeline_stage_state_for_notifications,
+        )
+        .await
+    }
+
+    async fn release_intent_states(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+        include_completed: bool,
+        convert_stage: fn(forage_grpc::PipelineStageState) -> forage_core::platform::PipelineRunStageState,
+    ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
         let req = bearer_request(
             service_token,
             forage_grpc::GetReleaseIntentStatesRequest {
@@ -176,7 +213,7 @@ impl GrpcForestClient {
                 stages: ri
                     .stages
                     .into_iter()
-                    .map(convert_pipeline_stage_state)
+                    .map(convert_stage)
                     .collect(),
                 steps: ri
                     .steps
@@ -1336,6 +1373,7 @@ fn convert_pipeline_stage_state(
         Ok(forage_grpc::PipelineRunStageType::Deploy) => "deploy",
         Ok(forage_grpc::PipelineRunStageType::Wait) => "wait",
         Ok(forage_grpc::PipelineRunStageType::Plan) => "plan",
+        Ok(forage_grpc::PipelineRunStageType::Gate) => "gate",
         _ => "unknown",
     };
     let status = match forage_grpc::PipelineRunStageStatus::try_from(s.status) {
@@ -1365,6 +1403,21 @@ fn convert_pipeline_stage_state(
         gate_deadline: s.gate_deadline,
         gate_waiting_on: s.gate_waiting_on,
     }
+}
+
+fn convert_pipeline_stage_state_for_notifications(
+    s: forage_grpc::PipelineStageState,
+) -> forage_core::platform::PipelineRunStageState {
+    let status = match forage_grpc::PipelineRunStageStatus::try_from(s.status) {
+        Ok(forage_grpc::PipelineRunStageStatus::AwaitingSignal) => Some("AWAITING_SIGNAL"),
+        Ok(forage_grpc::PipelineRunStageStatus::Superseded) => Some("SUPERSEDED"),
+        _ => None,
+    };
+    let mut stage = convert_pipeline_stage_state(s);
+    if let Some(status) = status {
+        stage.status = status.into();
+    }
+    stage
 }
 
 fn convert_release_step_state(
@@ -4690,6 +4743,26 @@ fn map_oauth_flow_status(status: tonic::Status) -> OAuthFlowError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_stage_states_keep_superseded_and_awaiting_signal() {
+        let stage = |status: forage_grpc::PipelineRunStageStatus| forage_grpc::PipelineStageState {
+            stage_id: "prod".into(),
+            stage_type: forage_grpc::PipelineRunStageType::Gate as i32,
+            status: status as i32,
+            ..Default::default()
+        };
+        let superseded = stage(forage_grpc::PipelineRunStageStatus::Superseded);
+        assert_eq!(convert_pipeline_stage_state(superseded.clone()).status, "PENDING");
+        let s = convert_pipeline_stage_state_for_notifications(superseded);
+        assert_eq!(s.status, "SUPERSEDED");
+        assert_eq!(s.stage_type, "gate");
+        let waiting = stage(forage_grpc::PipelineRunStageStatus::AwaitingSignal);
+        assert_eq!(
+            convert_pipeline_stage_state_for_notifications(waiting).status,
+            "AWAITING_SIGNAL"
+        );
+    }
 
     fn make_org(id: &str, name: &str) -> forage_grpc::Organisation {
         forage_grpc::Organisation {

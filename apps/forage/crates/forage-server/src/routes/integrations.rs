@@ -5,6 +5,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use forage_core::integrations::router::{NotificationEvent, ReleaseContext};
+use forage_core::integrations::slack_release::{EMOJI_SLOTS, SlackEmojiSet};
 use forage_core::integrations::{
     validate_integration_name, validate_webhook_url, CreateIntegrationInput, IntegrationConfig,
     IntegrationType,
@@ -40,6 +41,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/orgs/{org}/settings/integrations/{id}/rules",
             post(update_rules),
+        )
+        .route(
+            "/orgs/{org}/settings/integrations/{id}/emoji",
+            post(update_emoji),
         )
         .route(
             "/orgs/{org}/settings/integrations/{id}/toggle",
@@ -432,6 +437,30 @@ async fn integration_detail(
         None
     };
 
+    let emoji = if integration.integration_type == IntegrationType::Slack {
+        let set = store
+            .get_slack_emoji_set(&org)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        Some(
+            EMOJI_SLOTS
+                .iter()
+                .map(|(field, fallback, label)| {
+                    context! {
+                        field => field,
+                        fallback => fallback,
+                        label => label,
+                        value => set.configured(field),
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+
     let html = state
         .templates
         .render(
@@ -461,7 +490,9 @@ async fn integration_detail(
                 deliveries => deliveries_ctx,
                 test_sent => query.test.is_some(),
                 baseline => baseline,
-                saved => query.saved.is_some(),
+                emoji => emoji,
+                emoji_saved => query.saved.as_deref() == Some("emoji"),
+                saved => query.saved.as_deref().is_some_and(|s| s != "emoji"),
                 error => query.error,
             },
         )
@@ -506,6 +537,46 @@ async fn update_rules(
         org, id
     ))
     .into_response())
+}
+
+async fn update_emoji(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, id)): Path<(String, String)>,
+    Form(form): Form<std::collections::BTreeMap<String, String>>,
+) -> Result<Response, Response> {
+    let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
+    require_admin(&state, cached_org)?;
+    require_integration_store(&state)?;
+    validate_csrf(&session, form.get("_csrf").map(String::as_str).unwrap_or(""))?;
+
+    let store = state.integration_store.as_ref().unwrap();
+    let integration = store
+        .get_integration(&org, &id)
+        .await
+        .map_err(|e| internal_error(&state, "get integration", &e))?;
+    if integration.integration_type != IntegrationType::Slack {
+        return Err(error_page(
+            &state,
+            axum::http::StatusCode::BAD_REQUEST,
+            "Not available",
+            "Status emoji apply to Slack integrations only.",
+        ));
+    }
+
+    let Ok(set) = SlackEmojiSet::from_fields(&form) else {
+        return Ok(Redirect::to(&format!(
+            "/orgs/{org}/settings/integrations/{id}?error=Emoji+names+may+only+use+lowercase+letters%2C+digits+and+-+_+%2B+%27#emoji"
+        ))
+        .into_response());
+    };
+    store
+        .set_slack_emoji_set(&org, &set, &session.user.username)
+        .await
+        .map_err(|e| internal_error(&state, "save slack emoji", &e))?;
+    tracing::info!(org = %org, by = %session.user.user_id, "slack status emoji changed");
+
+    Ok(Redirect::to(&format!("/orgs/{org}/settings/integrations/{id}?saved=emoji#emoji")).into_response())
 }
 
 #[derive(Deserialize)]

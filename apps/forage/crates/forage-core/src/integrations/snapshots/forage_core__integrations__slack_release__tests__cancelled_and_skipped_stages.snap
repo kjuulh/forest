@@ -1,0 +1,56 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: case.parent()
+---
+{
+  "blocks": [
+    {
+      "accessory": {
+        "text": {
+          "text": "View release",
+          "type": "plain_text"
+        },
+        "type": "button",
+        "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor"
+      },
+      "text": {
+        "text": ":black_right_pointing_double_triangle_with_vertical_bar: *Release cancelled: understory/agent-gateway*",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "text": {
+        "text": ":memo: feat(tasks): default a task to task-general (#152)",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "*agent-gateway* / vivaciously-ultimate-condor  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "text": {
+        "text": ":black_right_pointing_double_triangle_with_vertical_bar:  Deploy to `dev` skipped  ·  1m 12s\n:black_right_pointing_double_triangle_with_vertical_bar:  Deploy to `prod` skipped  ·  1m 12s",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "2/2 stages finished  ·  took 1m 12s",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    }
+  ],
+  "text": "Release cancelled: understory/agent-gateway"
+}

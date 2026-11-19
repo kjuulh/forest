@@ -491,7 +491,7 @@ pub fn format_pipeline_blocks(
     blocks
 }
 
-fn topo_sort_stages(
+pub(crate) fn topo_sort_stages(
     stages: &[crate::platform::PipelineRunStageState],
 ) -> Vec<crate::platform::PipelineRunStageState> {
     use std::collections::{HashMap, VecDeque};
@@ -770,11 +770,15 @@ mod tests {
             environment: "production".into(),
             status: "succeeded".into(),
             error: None,
+            started_at: None,
+            completed_at: None,
         });
         dests.insert("staging".into(), super::super::DestinationStatus {
             environment: "staging".into(),
             status: "started".into(),
             error: None,
+            started_at: None,
+            completed_at: None,
         });
         let msg = format_slack_message(&event, &dests, "");
         assert_eq!(msg.color, "#0d6efd");
@@ -794,11 +798,15 @@ mod tests {
             environment: "production".into(),
             status: "succeeded".into(),
             error: None,
+            started_at: None,
+            completed_at: None,
         });
         dests.insert("staging".into(), super::super::DestinationStatus {
             environment: "staging".into(),
             status: "succeeded".into(),
             error: None,
+            started_at: None,
+            completed_at: None,
         });
         let msg = format_slack_message(&event, &dests, "");
         assert_eq!(msg.color, "#36a64f");
@@ -812,6 +820,8 @@ mod tests {
             environment: "production".into(),
             status: "started".into(),
             error: None,
+            started_at: None,
+            completed_at: None,
         });
         let msg = format_slack_message(&event, &dests, "");
         assert_eq!(msg.color, "#0d6efd");
@@ -825,6 +835,8 @@ mod tests {
             environment: "production".into(),
             status: "failed".into(),
             error: Some("OOM killed".into()),
+            started_at: None,
+            completed_at: None,
         });
         let msg = format_slack_message(&event, &dests, "");
         assert_eq!(msg.color, "#dc3545");

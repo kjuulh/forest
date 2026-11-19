@@ -4,6 +4,8 @@ use forage_core::integrations::{
     SlackUserLink, NOTIFICATION_TYPES,
 };
 use forage_core::integrations::baseline::{DirectoryMatch, SlackBaseline};
+use forage_core::integrations::SlackReleaseLock;
+use forage_core::integrations::slack_release::SlackEmojiSet;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -514,7 +516,7 @@ impl IntegrationStore for PgIntegrationStore {
         let iid =
             Uuid::parse_str(integration_id).map_err(|e| IntegrationError::Store(e.to_string()))?;
         let row: Option<SlackMessageRefRow> = sqlx::query_as(
-            "SELECT id, integration_id, release_id, channel_id, message_ts, last_event_type, destinations, release_title, created_at, updated_at
+            "SELECT id, integration_id, release_id, channel_id, message_ts, last_event_type, destinations, release_title, thread_keys, rendered_hash, destination_count, created_at, updated_at
              FROM slack_message_refs WHERE integration_id = $1 AND release_id = $2",
         )
         .bind(iid)
@@ -532,6 +534,9 @@ impl IntegrationStore for PgIntegrationStore {
             last_event_type: r.last_event_type,
             destinations: serde_json::from_value(r.destinations).unwrap_or_default(),
             release_title: r.release_title,
+            thread_keys: serde_json::from_value(r.thread_keys).unwrap_or_default(),
+            rendered_hash: r.rendered_hash,
+            destination_count: r.destination_count,
             created_at: r.created_at.to_rfc3339(),
             updated_at: r.updated_at.to_rfc3339(),
         }))
@@ -546,9 +551,13 @@ impl IntegrationStore for PgIntegrationStore {
         let destinations_json = serde_json::to_value(&msg_ref.destinations)
             .map_err(|e| IntegrationError::Store(e.to_string()))?;
         sqlx::query(
-            "INSERT INTO slack_message_refs (id, integration_id, release_id, channel_id, message_ts, last_event_type, destinations, release_title, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            "INSERT INTO slack_message_refs (id, integration_id, release_id, channel_id, message_ts, last_event_type, destinations, release_title, rendered_hash, destination_count, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
              ON CONFLICT (integration_id, release_id) DO UPDATE SET
+               thread_keys = CASE WHEN slack_message_refs.message_ts = EXCLUDED.message_ts
+                                  THEN slack_message_refs.thread_keys ELSE '[]'::jsonb END,
+               rendered_hash = EXCLUDED.rendered_hash,
+               destination_count = GREATEST(slack_message_refs.destination_count, EXCLUDED.destination_count),
                message_ts = EXCLUDED.message_ts,
                last_event_type = EXCLUDED.last_event_type,
                destinations = EXCLUDED.destinations,
@@ -563,6 +572,107 @@ impl IntegrationStore for PgIntegrationStore {
         .bind(&msg_ref.last_event_type)
         .bind(destinations_json)
         .bind(&msg_ref.release_title)
+        .bind(&msg_ref.rendered_hash)
+        .bind(msg_ref.destination_count)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn lock_slack_release(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+    ) -> Result<Box<dyn SlackReleaseLock>, IntegrationError> {
+        let store = |e: sqlx::Error| IntegrationError::Store(e.to_string());
+        let mut tx = self.pool.begin().await.map_err(store)?;
+        sqlx::query("SET LOCAL lock_timeout = '120s'")
+            .execute(&mut *tx)
+            .await
+            .map_err(store)?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("slack-release:{integration_id}:{release_id}"))
+            .execute(&mut *tx)
+            .await
+            .map_err(store)?;
+        Ok(Box::new(PgReleaseLock(tx)))
+    }
+
+    async fn claim_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<bool, IntegrationError> {
+        let iid =
+            Uuid::parse_str(integration_id).map_err(|e| IntegrationError::Store(e.to_string()))?;
+        let claimed = sqlx::query(
+            "UPDATE slack_message_refs
+             SET thread_keys = thread_keys || jsonb_build_array($3::text)
+             WHERE integration_id = $1 AND release_id = $2 AND NOT thread_keys ? $3",
+        )
+        .bind(iid)
+        .bind(release_id)
+        .bind(key)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?
+        .rows_affected();
+        Ok(claimed == 1)
+    }
+
+    async fn release_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<(), IntegrationError> {
+        let iid =
+            Uuid::parse_str(integration_id).map_err(|e| IntegrationError::Store(e.to_string()))?;
+        sqlx::query(
+            "UPDATE slack_message_refs SET thread_keys = thread_keys - $3
+             WHERE integration_id = $1 AND release_id = $2",
+        )
+        .bind(iid)
+        .bind(release_id)
+        .bind(key)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_slack_emoji_set(
+        &self,
+        organisation: &str,
+    ) -> Result<Option<SlackEmojiSet>, IntegrationError> {
+        let row: Option<(serde_json::Value,)> =
+            sqlx::query_as("SELECT emoji FROM slack_emoji_sets WHERE organisation = $1")
+                .bind(organisation)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| IntegrationError::Store(e.to_string()))?;
+        Ok(row.map(|(v,)| serde_json::from_value(v).unwrap_or_default()))
+    }
+
+    async fn set_slack_emoji_set(
+        &self,
+        organisation: &str,
+        set: &SlackEmojiSet,
+        updated_by: &str,
+    ) -> Result<(), IntegrationError> {
+        let emoji =
+            serde_json::to_value(set).map_err(|e| IntegrationError::Store(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO slack_emoji_sets (organisation, emoji, updated_by, updated_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (organisation) DO UPDATE SET
+               emoji = EXCLUDED.emoji, updated_by = EXCLUDED.updated_by, updated_at = NOW()",
+        )
+        .bind(organisation)
+        .bind(emoji)
+        .bind(updated_by)
         .execute(&self.pool)
         .await
         .map_err(|e| IntegrationError::Store(e.to_string()))?;
@@ -768,8 +878,24 @@ struct SlackMessageRefRow {
     last_event_type: String,
     destinations: serde_json::Value,
     release_title: String,
+    thread_keys: serde_json::Value,
+    rendered_hash: String,
+    destination_count: i32,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// A transaction holding `pg_advisory_xact_lock`: ending the transaction is
+/// what releases the lock.
+struct PgReleaseLock(sqlx::Transaction<'static, sqlx::Postgres>);
+
+#[async_trait::async_trait]
+impl SlackReleaseLock for PgReleaseLock {
+    async fn release(self: Box<Self>) {
+        if let Err(e) = self.0.commit().await {
+            tracing::warn!(error = %e, "releasing slack release lock");
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]

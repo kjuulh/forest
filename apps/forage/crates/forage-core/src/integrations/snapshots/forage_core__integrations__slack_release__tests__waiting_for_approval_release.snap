@@ -1,0 +1,56 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: case.parent()
+---
+{
+  "blocks": [
+    {
+      "accessory": {
+        "text": {
+          "text": "View release",
+          "type": "plain_text"
+        },
+        "type": "button",
+        "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor"
+      },
+      "text": {
+        "text": ":raised_hand: *Waiting for approval: understory/agent-gateway*",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "text": {
+        "text": ":memo: feat(tasks): default a task to task-general (#152)",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "*agent-gateway* / vivaciously-ultimate-condor  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "text": {
+        "text": ":white_check_mark:  Deployed to `dev`  ·  1m 12s\n:raised_hand:  Plan for `prod` needs approval\n:hourglass_flowing_sand:  Deploy to `prod`",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "1/3 stages complete  ·  started <!date^1795084190^{time}|10:29 UTC>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    }
+  ],
+  "text": "Waiting for approval: understory/agent-gateway"
+}

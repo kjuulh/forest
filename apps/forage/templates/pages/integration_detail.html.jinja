@@ -55,6 +55,11 @@
         </div>
     </div>
 
+    {% if emoji_saved is defined and emoji_saved %}
+    <div class="mb-6 px-4 py-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg">
+        Status emoji saved.
+    </div>
+    {% endif %}
     {% if saved is defined and saved %}
     <div class="mb-6 px-4 py-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg">
         Individual notification settings saved.
@@ -155,6 +160,29 @@
             </div>
         </form>
         {% endif %}
+    </div>
+    {% endif %}
+
+    {% if emoji %}
+    <div class="mb-8" id="emoji">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Status emoji</h2>
+        <p class="text-sm text-gray-500 mb-3">
+            Release messages show each stage with an emoji. Use your workspace's custom emoji (an animated one makes a real spinner), without the colons. These apply to every Slack integration in this organisation. Leave a field empty for the standard emoji shown.
+        </p>
+        <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/emoji" class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {% for e in emoji %}
+                <label class="block text-sm">
+                    <span class="block font-medium text-gray-900">{{ e.label }}</span>
+                    <input type="text" name="{{ e.field }}" value="{{ e.value }}" placeholder="{{ e.fallback }}" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+                </label>
+                {% endfor %}
+            </div>
+            <div class="px-4 py-3 flex justify-end">
+                <button type="submit" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Save</button>
+            </div>
+        </form>
     </div>
     {% endif %}
 

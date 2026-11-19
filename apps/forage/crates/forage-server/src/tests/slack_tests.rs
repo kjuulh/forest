@@ -582,3 +582,104 @@ async fn reinstall_slack_invalid_csrf_returns_403() {
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
+
+async fn create_slack_integration(
+    integrations: &forage_core::integrations::InMemoryIntegrationStore,
+) -> String {
+    integrations
+        .create_integration(&CreateIntegrationInput {
+            organisation: "testorg".into(),
+            integration_type: IntegrationType::Slack,
+            name: "#deploys".into(),
+            config: IntegrationConfig::Slack {
+                team_id: "T123".into(),
+                team_name: "My Team".into(),
+                channel_id: "C456".into(),
+                channel_name: "#deploys".into(),
+                access_token: "xoxb-test".into(),
+                webhook_url: String::new(),
+            },
+            created_by: "user-123".into(),
+        })
+        .await
+        .unwrap()
+        .id
+}
+
+async fn post_emoji(app: axum::Router, cookie: String, id: &str, body: &str) -> axum::response::Response {
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/orgs/testorg/settings/integrations/{id}/emoji"))
+            .header("cookie", cookie)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn admin_saves_org_status_emoji_and_sees_them_on_the_page() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let cookie = create_test_session(&sessions).await;
+    let id = create_slack_integration(&integrations).await;
+
+    let resp = post_emoji(
+        app.clone(),
+        cookie.clone(),
+        &id,
+        "_csrf=test-csrf&running=%3Asonicfastafboi%3A&celebrate=party-parrot&queued=",
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    let set = integrations.get_slack_emoji_set("testorg").await.unwrap().unwrap();
+    assert_eq!(set.running, "sonicfastafboi");
+    assert_eq!(set.celebrate, "party-parrot");
+    assert_eq!(set.queued, "");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/orgs/testorg/settings/integrations/{id}?saved=emoji"))
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("Status emoji saved."));
+    assert!(text.contains("value=\"sonicfastafboi\""));
+    assert!(text.contains("placeholder=\"hourglass_flowing_sand\""));
+}
+
+#[tokio::test]
+async fn invalid_status_emoji_is_refused_without_saving() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let cookie = create_test_session(&sessions).await;
+    let id = create_slack_integration(&integrations).await;
+
+    let resp = post_emoji(app, cookie, &id, "_csrf=test-csrf&running=%3Cscript%3E").await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert!(resp.headers()["location"].to_str().unwrap().contains("error="));
+    assert!(integrations.get_slack_emoji_set("testorg").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn status_emoji_need_an_admin_and_a_valid_csrf_token() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let id = create_slack_integration(&integrations).await;
+
+    let member = create_test_session_member(&sessions).await;
+    let resp = post_emoji(app.clone(), member, &id, "_csrf=test-csrf&running=loading").await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let admin = create_test_session(&sessions).await;
+    let resp = post_emoji(app, admin, &id, "_csrf=wrong&running=loading").await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(integrations.get_slack_emoji_set("testorg").await.unwrap().is_none());
+}

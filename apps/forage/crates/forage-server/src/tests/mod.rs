@@ -27,6 +27,7 @@ mod platform_tests;
 mod project_settings_tests;
 mod registry_tests;
 mod org_connection_tests;
+mod slack_release_tests;
 mod slack_tests;
 mod token_tests;
 mod visibility_tests;

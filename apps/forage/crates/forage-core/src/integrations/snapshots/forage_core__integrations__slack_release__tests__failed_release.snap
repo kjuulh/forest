@@ -1,0 +1,56 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: case.parent()
+---
+{
+  "blocks": [
+    {
+      "accessory": {
+        "text": {
+          "text": "View release",
+          "type": "plain_text"
+        },
+        "type": "button",
+        "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor"
+      },
+      "text": {
+        "text": ":rotating_light: *Release failed: understory/agent-gateway*",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "text": {
+        "text": ":memo: feat(tasks): default a task to task-general (#152)",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "*agent-gateway* / vivaciously-ultimate-condor  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "text": {
+        "text": ":white_check_mark:  Deployed to `dev`  ·  1m 12s\n:x:  Deploy to `prod` failed  ·  1m 12s",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "2/2 stages finished  ·  took 1m 12s  ·  details in thread",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    }
+  ],
+  "text": "Release failed: understory/agent-gateway"
+}

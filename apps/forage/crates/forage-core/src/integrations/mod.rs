@@ -4,6 +4,7 @@ pub mod email;
 pub mod nats;
 pub mod router;
 pub mod signing;
+pub mod slack_release;
 pub mod webhook;
 
 use serde::{Deserialize, Serialize};
@@ -122,6 +123,10 @@ pub struct DestinationStatus {
     pub environment: String,
     pub status: String,
     pub error: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +141,14 @@ pub struct SlackMessageRef {
     pub destinations: HashMap<String, DestinationStatus>,
     #[serde(default)]
     pub release_title: String,
+    /// Thread replies already posted under this message. Written only by
+    /// `claim_slack_thread_key`, never by `upsert_slack_message_ref`.
+    #[serde(default)]
+    pub thread_keys: Vec<String>,
+    #[serde(default)]
+    pub rendered_hash: String,
+    #[serde(default)]
+    pub destination_count: i32,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -315,6 +328,43 @@ pub trait IntegrationStore: Send + Sync {
         msg_ref: &SlackMessageRef,
     ) -> Result<(), IntegrationError>;
 
+    /// Serialises the Slack message work for one release across replicas.
+    /// Hold the lock until the message and its ref are written, then
+    /// `release` it.
+    async fn lock_slack_release(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+    ) -> Result<Box<dyn SlackReleaseLock>, IntegrationError>;
+
+    /// Atomically records that a thread reply is about to be posted. Returns
+    /// false when it already was (here or on another replica).
+    async fn claim_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<bool, IntegrationError>;
+
+    async fn release_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<(), IntegrationError>;
+
+    async fn get_slack_emoji_set(
+        &self,
+        organisation: &str,
+    ) -> Result<Option<slack_release::SlackEmojiSet>, IntegrationError>;
+
+    async fn set_slack_emoji_set(
+        &self,
+        organisation: &str,
+        set: &slack_release::SlackEmojiSet,
+        updated_by: &str,
+    ) -> Result<(), IntegrationError>;
+
     async fn get_slack_baseline(
         &self,
         integration_id: &str,
@@ -411,6 +461,18 @@ pub fn validate_integration_name(name: &str) -> Result<(), IntegrationError> {
     Ok(())
 }
 
+#[async_trait::async_trait]
+pub trait SlackReleaseLock: Send {
+    async fn release(self: Box<Self>);
+}
+
+struct InMemoryReleaseLock(#[allow(dead_code)] tokio::sync::OwnedMutexGuard<()>);
+
+#[async_trait::async_trait]
+impl SlackReleaseLock for InMemoryReleaseLock {
+    async fn release(self: Box<Self>) {}
+}
+
 pub struct InMemoryIntegrationStore {
     integrations: std::sync::Mutex<Vec<Integration>>,
     rules: std::sync::Mutex<Vec<NotificationRule>>,
@@ -419,6 +481,8 @@ pub struct InMemoryIntegrationStore {
     slack_user_links: std::sync::Mutex<Vec<SlackUserLink>>,
     slack_message_refs: std::sync::Mutex<Vec<SlackMessageRef>>,
     slack_baselines: std::sync::Mutex<HashMap<String, baseline::SlackBaseline>>,
+    slack_emoji_sets: std::sync::Mutex<HashMap<String, slack_release::SlackEmojiSet>>,
+    release_locks: std::sync::Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     directory_matches: std::sync::Mutex<HashMap<(String, String), baseline::DirectoryMatch>>,
     github_installations: std::sync::Mutex<HashMap<i64, (String, String)>>,
 }
@@ -433,6 +497,8 @@ impl InMemoryIntegrationStore {
             slack_user_links: std::sync::Mutex::new(Vec::new()),
             slack_message_refs: std::sync::Mutex::new(Vec::new()),
             slack_baselines: std::sync::Mutex::new(HashMap::new()),
+            slack_emoji_sets: std::sync::Mutex::new(HashMap::new()),
+            release_locks: std::sync::Mutex::new(HashMap::new()),
             directory_matches: std::sync::Mutex::new(HashMap::new()),
             github_installations: std::sync::Mutex::new(HashMap::new()),
         }
@@ -759,10 +825,93 @@ impl IntegrationStore for InMemoryIntegrationStore {
         if let Some(existing) = refs.iter_mut().find(|r| {
             r.integration_id == msg_ref.integration_id && r.release_id == msg_ref.release_id
         }) {
-            *existing = msg_ref.clone();
+            let thread_keys = if existing.message_ts == msg_ref.message_ts {
+                std::mem::take(&mut existing.thread_keys)
+            } else {
+                Vec::new()
+            };
+            *existing = SlackMessageRef {
+                thread_keys,
+                ..msg_ref.clone()
+            };
         } else {
-            refs.push(msg_ref.clone());
+            refs.push(SlackMessageRef {
+                thread_keys: Vec::new(),
+                ..msg_ref.clone()
+            });
         }
+        Ok(())
+    }
+
+    async fn lock_slack_release(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+    ) -> Result<Box<dyn SlackReleaseLock>, IntegrationError> {
+        let lock = {
+            let mut locks = self.release_locks.lock().unwrap();
+            locks.retain(|_, l| std::sync::Arc::strong_count(l) > 1);
+            locks
+                .entry(format!("{integration_id}/{release_id}"))
+                .or_default()
+                .clone()
+        };
+        Ok(Box::new(InMemoryReleaseLock(lock.lock_owned().await)))
+    }
+
+    async fn claim_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<bool, IntegrationError> {
+        let mut refs = self.slack_message_refs.lock().unwrap();
+        let Some(r) = refs
+            .iter_mut()
+            .find(|r| r.integration_id == integration_id && r.release_id == release_id)
+        else {
+            return Ok(false);
+        };
+        if r.thread_keys.iter().any(|k| k == key) {
+            return Ok(false);
+        }
+        r.thread_keys.push(key.to_string());
+        Ok(true)
+    }
+
+    async fn release_slack_thread_key(
+        &self,
+        integration_id: &str,
+        release_id: &str,
+        key: &str,
+    ) -> Result<(), IntegrationError> {
+        let mut refs = self.slack_message_refs.lock().unwrap();
+        if let Some(r) = refs
+            .iter_mut()
+            .find(|r| r.integration_id == integration_id && r.release_id == release_id)
+        {
+            r.thread_keys.retain(|k| k != key);
+        }
+        Ok(())
+    }
+
+    async fn get_slack_emoji_set(
+        &self,
+        organisation: &str,
+    ) -> Result<Option<slack_release::SlackEmojiSet>, IntegrationError> {
+        Ok(self.slack_emoji_sets.lock().unwrap().get(organisation).cloned())
+    }
+
+    async fn set_slack_emoji_set(
+        &self,
+        organisation: &str,
+        set: &slack_release::SlackEmojiSet,
+        _updated_by: &str,
+    ) -> Result<(), IntegrationError> {
+        self.slack_emoji_sets
+            .lock()
+            .unwrap()
+            .insert(organisation.to_string(), set.clone());
         Ok(())
     }
 

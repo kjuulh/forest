@@ -776,7 +776,7 @@ async fn retries_and_redeliveries_update_the_same_dm_instead_of_duplicating() {
         .iter()
         .filter(|(c, _)| c == "UALICE")
         .count();
-    assert_eq!(updates, 2);
+    assert_eq!(updates, 1, "the identical redelivery leaves the DM untouched");
 }
 
 #[tokio::test]
