@@ -16,6 +16,7 @@ mod pretty_json;
 mod providers;
 mod recipients;
 mod routes;
+mod security_headers;
 mod serve_grpc;
 mod serve_http;
 mod session_reaper;
@@ -82,6 +83,7 @@ pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
     Router::new()
         .route(MAINTENANCE_CSS_PATH, axum::routing::get(maintenance_css))
         .fallback(maintenance_page)
+        .layer(axum::middleware::from_fn(security_headers::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(templates)
@@ -113,10 +115,16 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(routes::router().layer(axum::middleware::from_fn(sedx::middleware)))
         .route("/static/sedx.js", axum::routing::get(sedx_js))
+        .route(
+            security_headers::REPORT_PATH,
+            axum::routing::post(security_headers::report)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
         .route_layer(axum::middleware::from_fn(http_metrics::layer))
         .layer(axum::middleware::from_fn(page_timing::layer))
+        .layer(axum::middleware::from_fn(security_headers::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

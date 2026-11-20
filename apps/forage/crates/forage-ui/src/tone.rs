@@ -82,7 +82,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn environment_tones_match_the_jinja_env_badge() {
+    fn environment_tones_follow_the_environment_name() {
         assert_eq!(Tone::for_environment("prod"), Tone::Pink);
         assert_eq!(Tone::for_environment("platform-prod"), Tone::Pink);
         assert_eq!(Tone::for_environment("preprod"), Tone::Orange);

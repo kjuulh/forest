@@ -1,7 +1,7 @@
 # forage frontend
 
 Svelte custom elements bundled into `static/js/components/forage-components.js`
-and mounted by the MiniJinja templates.
+and mounted by the sedge pages.
 
 ```sh
 npm install

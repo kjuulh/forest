@@ -40,6 +40,7 @@ mod release_pages_tests;
 mod trigger_pages_tests;
 mod org_connection_tests;
 mod slack_release_tests;
+mod security_headers_tests;
 mod slack_tests;
 mod token_tests;
 mod visibility_tests;
