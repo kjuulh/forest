@@ -1,10 +1,3 @@
-//! `forest context …` — kubectl-style profile switcher.
-//!
-//! See TASKS/019-context.md. Each context is a `(server URL, auth state)`
-//! bundle. One context is active at a time; the active one is selected by
-//! per-invocation `--context`, `FOREST_CONTEXT`, or the registry's `active`
-//! field.
-
 use clap::{Args, Parser, Subcommand};
 
 use crate::contexts::ContextStore;
@@ -61,8 +54,6 @@ impl ContextCommand {
         }
     }
 }
-
-// --- list ----------------------------------------------------------------
 
 #[derive(Args)]
 pub struct ListCommand {}
@@ -131,8 +122,6 @@ impl ListCommand {
     }
 }
 
-// --- active --------------------------------------------------------------
-
 #[derive(Args)]
 pub struct ActiveCommand {}
 
@@ -144,8 +133,6 @@ impl ActiveCommand {
         Ok(())
     }
 }
-
-// --- use -----------------------------------------------------------------
 
 #[derive(Args)]
 pub struct UseCommand {
@@ -161,8 +148,6 @@ impl UseCommand {
         Ok(())
     }
 }
-
-// --- create --------------------------------------------------------------
 
 #[derive(Args)]
 pub struct CreateCommand {
@@ -188,8 +173,6 @@ impl CreateCommand {
     }
 }
 
-// --- delete --------------------------------------------------------------
-
 #[derive(Args)]
 pub struct DeleteCommand {
     name: String,
@@ -210,8 +193,6 @@ impl DeleteCommand {
     }
 }
 
-// --- rename --------------------------------------------------------------
-
 #[derive(Args)]
 pub struct RenameCommand {
     old: String,
@@ -227,8 +208,6 @@ impl RenameCommand {
     }
 }
 
-// --- set-server ----------------------------------------------------------
-
 #[derive(Args)]
 pub struct SetServerCommand {
     name: String,
@@ -243,8 +222,6 @@ impl SetServerCommand {
         Ok(())
     }
 }
-
-// --- set-web-url ---------------------------------------------------------
 
 #[derive(Args)]
 pub struct SetWebUrlCommand {
@@ -275,8 +252,6 @@ impl SetWebUrlCommand {
         Ok(())
     }
 }
-
-// --- provision -----------------------------------------------------------
 
 #[derive(Args)]
 pub struct ProvisionCommand {

@@ -1,12 +1,3 @@
-//! Developer Settings — organisation-owned OAuth applications.
-//!
-//! These pages let org admins register and manage "Sign in with Forest" OAuth
-//! apps. All state lives in forest-server; this module is the UI + delegation
-//! layer (mirrors the `integrations` module's shape). The client_secret is
-//! shown exactly once, immediately after create / rotate.
-//!
-//! `result_large_err` is allowed module-wide, matching the rest of `routes/`:
-//! handlers return `Result<Response, Response>` where `Response` is large.
 #![allow(clippy::result_large_err)]
 
 use axum::extract::{Path, Query, State};
@@ -15,10 +6,9 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use forage_core::platform::{OAuthApp, PlatformError, validate_slug};
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error, orgs_context};
+use super::{error_page, internal_error, report_error};
 use crate::auth::Session;
 use crate::state::AppState;
 
@@ -38,8 +28,6 @@ pub fn router() -> Router<AppState> {
             post(delete_app),
         )
 }
-
-// ─── Shared guards (per the integrations.rs convention) ──────────────
 
 fn require_org_membership<'a>(
     state: &AppState,
@@ -98,33 +86,16 @@ fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     }
 }
 
-/// Map a forest-side platform error to a user-facing message for re-display on
-/// the form (validation failures) vs a hard error page (everything else).
 fn flash_for(err: &PlatformError) -> Option<String> {
     match err {
-        PlatformError::InvalidArgument(m)
-        | PlatformError::AlreadyExists(m)
-        | PlatformError::PermissionDenied(m) => Some(m.clone()),
+        PlatformError::InvalidArgument(_)
+        | PlatformError::AlreadyExists(_)
+        | PlatformError::PermissionDenied(_) => {
+            Some(report_error("OAuth application settings", err))
+        }
         _ => None,
     }
 }
-
-// ─── View-model helpers ──────────────────────────────────────────────
-
-fn app_context(app: &OAuthApp) -> minijinja::Value {
-    context! {
-        app_id => &app.app_id,
-        name => &app.name,
-        description => &app.description,
-        homepage_url => &app.homepage_url,
-        client_id => &app.client_id,
-        redirect_uris => &app.redirect_uris,
-        scopes => &app.scopes,
-        grant_types => &app.grant_types,
-    }
-}
-
-// ─── Forms / queries ─────────────────────────────────────────────────
 
 #[derive(Deserialize, Default)]
 struct PageQuery {
@@ -151,20 +122,23 @@ struct AppForm {
     scope_email: Option<String>,
     #[serde(default)]
     scope_components_publish: Option<String>,
-    /// An app may hold both grants — acting for a user and acting as
-    /// itself, the way a GitHub App does.
+    #[serde(default)]
+    scope_tokens_introspect: Option<String>,
+    #[serde(default)]
+    scope_datagateway_apply: Option<String>,
+    #[serde(default)]
+    scope_datagateway_read: Option<String>,
     #[serde(default)]
     grant_authorization_code: Option<String>,
     #[serde(default)]
     grant_client_credentials: Option<String>,
+    #[serde(default)]
+    grant_device_code: Option<String>,
 }
 
+const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
 impl AppForm {
-    /// Which grants the ticked boxes add up to.
-    ///
-    /// An empty result is left empty rather than defaulted here — Forest
-    /// treats that as `authorization_code`, and duplicating the default
-    /// in two places is how they drift apart.
     fn grant_type_list(&self) -> Vec<String> {
         let mut out = Vec::new();
         if self.grant_authorization_code.is_some() {
@@ -173,10 +147,12 @@ impl AppForm {
         if self.grant_client_credentials.is_some() {
             out.push("client_credentials".to_string());
         }
+        if self.grant_device_code.is_some() {
+            out.push(DEVICE_CODE_GRANT.to_string());
+        }
         out
     }
 
-    /// Split the redirect-URI textarea (one per line) into trimmed entries.
     fn redirect_uri_list(&self) -> Vec<String> {
         self.redirect_uris
             .lines()
@@ -199,6 +175,15 @@ impl AppForm {
         if self.scope_components_publish.is_some() {
             scopes.push("components:publish".to_string());
         }
+        if self.scope_tokens_introspect.is_some() {
+            scopes.push("tokens:introspect".to_string());
+        }
+        if self.scope_datagateway_apply.is_some() {
+            scopes.push("datagateway:apply".to_string());
+        }
+        if self.scope_datagateway_read.is_some() {
+            scopes.push("datagateway:read".to_string());
+        }
         scopes
     }
 }
@@ -208,8 +193,6 @@ struct CsrfForm {
     #[serde(rename = "_csrf")]
     csrf: String,
 }
-
-// ─── List ────────────────────────────────────────────────────────────
 
 async fn list_apps(
     State(state): State<AppState>,
@@ -226,31 +209,20 @@ async fn list_apps(
         .await
         .map_err(|e| internal_error(&state, "list oauth apps", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/developers.html.jinja",
-            context! {
-                title => format!("Developer settings - {org} - Forest"),
-                description => "Manage OAuth applications",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                apps => apps.iter().map(app_context).collect::<Vec<_>>(),
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DevelopersPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("Developer settings - {org} - Forest"),
+            "Manage OAuth applications".into(),
+        ),
+        org: org.clone(),
+        error: query.error,
+        apps,
+    };
+    Ok(Html(crate::views::pages::developers::render(&page)).into_response())
 }
-
-// ─── New app form ────────────────────────────────────────────────────
 
 async fn new_app_page(
     State(state): State<AppState>,
@@ -262,30 +234,20 @@ async fn new_app_page(
     require_admin(&state, cached_org)?;
     require_oauth_client(&state)?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/developer_app_new.html.jinja",
-            context! {
-                title => format!("New OAuth app - {org} - Forest"),
-                description => "Register a new OAuth application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DeveloperAppNewPage {
+        chrome: crate::views::org_settings::chrome(
+            &state,
+            &session,
+            &org,
+            format!("New OAuth app - {org} - Forest"),
+            "Register a new OAuth application".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        error: query.error,
+    };
+    Ok(Html(crate::views::pages::developer_app_new::render(&page)).into_response())
 }
-
-// ─── Create ──────────────────────────────────────────────────────────
 
 async fn create_app(
     State(state): State<AppState>,
@@ -324,23 +286,21 @@ async fn create_app(
         }
     };
 
-    // Render the detail page directly so the freshly-minted secret can be
-    // shown exactly once (it is never retrievable again).
     render_app_detail(
         &state,
         &session,
         &org,
         &created.app,
         Some(&created.client_secret),
+        None,
     )
 }
-
-// ─── Detail ──────────────────────────────────────────────────────────
 
 async fn app_detail(
     State(state): State<AppState>,
     session: Session,
     Path((org, app_id)): Path<(String, String)>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Response, Response> {
     let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
     require_admin(&state, cached_org)?;
@@ -359,7 +319,7 @@ async fn app_detail(
             other => internal_error(&state, "get oauth app", &other),
         })?;
 
-    render_app_detail(&state, &session, &org, &app, None)
+    render_app_detail(&state, &session, &org, &app, None, query.error)
 }
 
 fn render_app_detail(
@@ -368,31 +328,24 @@ fn render_app_detail(
     org: &str,
     app: &OAuthApp,
     client_secret: Option<&str>,
+    error: Option<String>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/developer_app.html.jinja",
-            context! {
-                title => format!("{} - Developer settings - Forest", app.name),
-                description => "OAuth application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => org,
-                orgs => orgs_context(&session.user.orgs),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                app => app_context(app),
-                client_secret => client_secret,
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::org_pages::DeveloperAppPage {
+        chrome: crate::views::org_settings::chrome(
+            state,
+            session,
+            org,
+            format!("{} - Developer settings - Forest", app.name),
+            "OAuth application".into(),
+        ),
+        org: org.to_string(),
+        csrf_token: session.csrf_token.clone(),
+        app: app.clone(),
+        client_secret: client_secret.map(Into::into),
+        error,
+    };
+    Ok(Html(crate::views::pages::developer_app::render(&page)).into_response())
 }
-
-// ─── Update ──────────────────────────────────────────────────────────
 
 async fn update_app(
     State(state): State<AppState>,
@@ -436,8 +389,6 @@ async fn update_app(
     }
 }
 
-// ─── Rotate secret ───────────────────────────────────────────────────
-
 async fn rotate_secret(
     State(state): State<AppState>,
     session: Session,
@@ -460,10 +411,9 @@ async fn rotate_secret(
         &org,
         &rotated.app,
         Some(&rotated.client_secret),
+        None,
     )
 }
-
-// ─── Delete ──────────────────────────────────────────────────────────
 
 async fn delete_app(
     State(state): State<AppState>,
@@ -499,13 +449,28 @@ mod tests {
             scope_profile: None,
             scope_email: None,
             scope_components_publish: None,
+            scope_tokens_introspect: None,
+            scope_datagateway_apply: None,
+            scope_datagateway_read: None,
             grant_authorization_code: auth_code.then(|| "on".to_string()),
             grant_client_credentials: client_creds.then(|| "on".to_string()),
+            grant_device_code: None,
         }
     }
 
-    /// The GitHub-App shape: one credential that both signs a user in
-    /// and calls as itself. Ticking both boxes has to produce both.
+    #[test]
+    fn the_device_box_keeps_the_device_grant() {
+        let mut form = form(true, false);
+        form.grant_device_code = Some("on".to_string());
+        assert_eq!(
+            form.grant_type_list(),
+            vec![
+                "authorization_code".to_string(),
+                DEVICE_CODE_GRANT.to_string()
+            ]
+        );
+    }
+
     #[test]
     fn both_boxes_ticked_yields_both_grants() {
         assert_eq!(
@@ -529,9 +494,6 @@ mod tests {
         );
     }
 
-    /// Neither box ticked sends an empty list, deliberately: Forest owns
-    /// the default. Defaulting here too would put the same rule in two
-    /// places, which is how the two drift apart.
     #[test]
     fn no_boxes_defers_the_default_to_forest() {
         assert!(form(false, false).grant_type_list().is_empty());

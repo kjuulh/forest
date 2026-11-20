@@ -1,15 +1,3 @@
-//! `WaitRelease` on a release parked awaiting plan approval.
-//!
-//! The stream stays open until the release is terminal, and a parked release
-//! is not terminal until someone approves the plan. `forest release show`
-//! read the stream to the end before printing anything, so it printed the
-//! header and hung: the person asked to approve a plan could not see it.
-//!
-//! The server now says when its first pass (the replay of everything persisted)
-//! is over, and says what each stage waits on, so a client can stop at the
-//! replay or tell "parked" from "about to run". Found on 2026-09-24 with
-//! `unhappily-trim-brill` in `kjuulh/grund-cloudflare`.
-
 use forest_grpc_interface::{
     DeployStageConfig, PipelineStage, PlanStageConfig, Project, ReleaseRequest, WaitReleaseEvent,
     WaitReleaseRequest, pipeline_stage, wait_release_event::Event,
@@ -18,8 +6,6 @@ use forest_grpc_interface::{
 use crate::accepttest::fixtures::{GivenReleaseFlow, testcase};
 use crate::accepttest::release_flow::ReleaseFlowData;
 
-/// Local copy: the identical helper is module-private in each flow module, and
-/// they each keep their own rather than widening it.
 fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     let mut req = tonic::Request::new(inner);
     let val: tonic::metadata::MetadataValue<_> =
@@ -28,8 +14,6 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
-/// A pipeline release whose plan stage has run and parked awaiting approval,
-/// with a deploy stage behind it. Returns the token and the intent id.
 async fn a_release_parked_on_plan_approval() -> anyhow::Result<(
     crate::accepttest::fixtures::Given<ReleaseFlowData>,
     String,
@@ -119,10 +103,6 @@ async fn a_release_parked_on_plan_approval() -> anyhow::Result<(
         .release_intent_id
         .parse()?;
 
-    // The fixture runs no coordinator and no runner, so put the intent where
-    // they would leave it once the plan ran: the plan stage ACTIVE and awaiting
-    // approval (approval is tracked beside the status, not as a value of it),
-    // the deploy stage PENDING behind it.
     sqlx::query!(
         "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
         intent_id,
@@ -199,9 +179,6 @@ async fn a_parked_release_replays_its_stages_then_says_the_replay_is_complete() 
     Ok(())
 }
 
-/// The marker is about the replay, not about every poll: sent once. And the
-/// stream still does not end, because `show --follow` relies on it to wait for
-/// the approval.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_replay_marker_is_sent_once_and_the_stream_stays_open() -> anyhow::Result<()> {
     let (given, token, intent_id) = a_release_parked_on_plan_approval().await?;
@@ -228,8 +205,6 @@ async fn the_replay_marker_is_sent_once_and_the_stream_stays_open() -> anyhow::R
         }
     }
 
-    // Longer than the server's 2s poll, so at least one more pass runs. A
-    // parked release has nothing new to say on it.
     let after = next_event(&mut stream, std::time::Duration::from_secs(5)).await;
     assert!(
         after.is_none(),

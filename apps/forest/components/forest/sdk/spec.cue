@@ -1,173 +1,88 @@
-// Forest SDK base types for component definitions.
-//
-// These types are the contract between component authors and the Forest runtime.
-// Import this file alongside your forest.component.cue to get the base types.
-//
-// Usage:
-//   #Spec: #ForestSpec & { ... }
-//   #Commands: #ForestCommands & { ... }
-//   #Hooks: #ForestHooks & { ... }
-
 package sdk
 
 #ForestProject: {
 	name:         string & =~"^[a-z][a-z0-9-]*$"
 	organisation: string & =~"^[a-z][a-z0-9-]*$"
 
-	// Optional human-readable description shown on the project Overview
-	// header. `forest publish` pushes this to the server on every
-	// publish; missing here = cleared server-side.
-	// See specs/features/009-project-metadata.md.
 	description?: string
 
-	// Blessed project metadata. Surfaced in the project Overview's
-	// "About" sidebar (links + identity).
 	metadata?: #ProjectMetadata
 
-	// Where this project deploys, keyed by environment name, and what it
-	// contributes about itself at each one.
-	//
-	// The same shape a component usage block takes, because it is the same
-	// question — which destinations, and what config travels with the release.
-	// A project needs it without a component whenever the thing being released
-	// already exists and has no manifests to render: an ECS service rolled by
-	// `forest/generic@1`, say, where the only project-specific fact is which
-	// service it is.
-	//
-	// Its absence here is why a project could not both use this schema and say
-	// where it deploys: `#ForestProject` is closed, so `project: env:` was
-	// rejected outright, and every deploying project had to drop the schema to
-	// get a deployment spec.
 	env?: {
 		[string]: #ForestEnvironmentConfig
 	}
 }
 
 #ProjectMetadata: {
-	// Upstream source repository.
 	git_url?: string
-	// Public landing page / marketing site.
 	homepage?: string
-	// Docs site URL.
 	docs_url?: string
-	// Issue tracker / Slack channel / on-call link.
 	support_url?: string
-	// Business or team domain — e.g. "payments", "infra".
 	domain?: string
-	// Responsible team or person.
 	owner?: string
-	// Free-form labels used by organisation-scoped rule selectors.
 	tags?: [...string]
 }
 
+// A component is published with `forest publish` and consumed by version:
+// projects through `dependencies`, tools through `forest global add`.
+//
+// Every published version is immutable, prereleases included: publishing the
+// same version again is refused, so each new build needs a new version.
 #ForestComponent: {
-	name:    string
+	name: string
+
+	// A SemVer version. A stable release (`1.3.0`) is what consumers get by
+	// default. A prerelease (`1.3.0-rc.1`, `1.3.0-alpha.10`) is never picked
+	// for anyone who did not ask for it: it is installed by exact version
+	// (`@1.3.0-rc.1`) or by opting a tool in with `forest global add
+	// <org>/<name> --prerelease`. Number prereleases upwards (`rc.1`, `rc.2`,
+	// …, compared numerically) and publish the final `1.3.0` when done; it
+	// supersedes its RCs for everyone following them. Set a prerelease
+	// without editing this file with `FOREST_COMPONENT_VERSION=1.3.0-rc.1`:
+	// `forest publish` publishes under it, and forest's rust/go/docker build
+	// components stamp it into the binary. A build of your own (`prebuilt`)
+	// must stamp it itself; `forest components version` prints the version
+	// `forest publish` will use. Build metadata (`1.3.0+build.5`) is not a
+	// prerelease.
 	version: string & =~#"^\d+\.\d+\.\d+"#
 
 	codegen?: #ForestCodegen
 	upload?:  #ForestComponentUpload
 
-	// Optional file-set declaration. When `paths.include` is set,
-	// `forest components publish` only uploads files matching one of
-	// the globs (built-in safety excludes still apply on top). Absent
-	// ⇒ "include everything except defaults and `.forestignore`".
 	paths?: #ForestComponentPaths
 
-	// Alternative to `upload`: declare an external manifest pointing at
-	// upstream URLs (e.g. GitHub Releases). Mutually exclusive with
-	// `upload` at publish time. See TASKS/018-global-tools.md §1a.2b.
 	external?: #ForestExternal
 
-	// Artifacts shipped alongside the published binary and materialised into
-	// the local cache when the tool is fetched. See TASKS/023-global-tool-env.md.
 	include?: #ForestInclude
 
-	// External tools this component shells out to at runtime (e.g. a build
-	// component that invokes `cargo`). Forest verifies each is on PATH before
-	// dispatching to the component and fails up front with an actionable
-	// diagnostic, rather than letting the missing binary blow up mid-run.
-	// DATA-312.
 	requires?: #ForestRequires
 
-	// Which files publish ships. Optional — the default is the component
-	// tree minus the non-overridable excludes.
 	paths?: #ForestPaths
 }
 
-// `paths` — what a publish carries.
-//
-// The default is everything in the component directory except the
-// non-overridable excludes (`.git/`, `target/`, `node_modules/`,
-// vendored cue deps, and the `.forest/component/{output,package}` trees
-// that publish itself writes). That default is deliberate: whatever a
-// consumer reads at deploy time — `templates/`, `init/`, the CUE — is
-// carried without anyone having to remember it.
 #ForestPaths: {
-	// Subtract from what would otherwise ship. The normal knob, and the
-	// safe polarity: forgetting an exclude ships something harmless,
-	// which is recoverable. Equivalent to a `.forestignore` file, in the
-	// spec where it is visible.
 	exclude?: [...string]
 
-	// Restrict the publish to these globs.
-	//
-	// OPT-IN, and sharp. An allowlist is exactly how `templates/` came to
-	// be published by no path at all: the payload was a hand-picked list
-	// and a directory was simply absent from it, which a consumer only
-	// discovered as "No configuration files" at apply time. Forgetting an
-	// entry here means a consumer silently receives nothing.
-	//
-	// Prefer `exclude`. Reach for this only when a component's directory
-	// genuinely holds something that must not ship and cannot be named
-	// the other way round.
 	include?: [...string]
 }
 
-// `requires` — the component's runtime tool contract. Forest checks these are
-// present on PATH before invoking the component. DATA-312.
 #ForestRequires: {
 	tools?: [...#ForestRequiredTool]
 }
 
 #ForestRequiredTool: {
-	// Binary expected on PATH, e.g. "cargo", "go", "docker".
 	name: string & =~"^[a-zA-Z][a-zA-Z0-9._-]*$"
 
-	// Optional install hint shown when the tool is missing.
 	hint?: string
 }
 
-// `include` — things shipped beside the binary. Forward-looking container
-// (future: files, …). TASKS/023, DATA-588.
 #ForestInclude: {
-	// Default environment variables, auto-applied as defaults when the tool
-	// runs (the ambient shell environment always wins). Keys are POSIX env
-	// names; values are plain strings.
 	env?: {[=~"^[A-Za-z_][A-Za-z0-9_]*$"]: string}
 
-	// Shell integration this tool ships. Declaring it here is what lets
-	// `eval "$(forest shell zsh)"` load the tool's completions/functions with
-	// no per-tool line in the user's rc file. DATA-588.
 	shell?: #ForestShellIntegration
 }
 
-// `include.shell` — how forest obtains this tool's shell-integration script.
-//
-// Tools that ship an rc-file snippet used to make every user add
-// `eval "$(<tool> init zsh)"` by hand — a manual step which, because global
-// tools install lazily, also turned shell startup into a cold-cache download.
-// Declaring it here inverts that: forest runs the command once when the tool is
-// fetched, caches the output, and serves it from `forest shell <shell>`.
-//
-//	include: shell: init: {
-//	    zsh:  ["init", "zsh"]
-//	    fish: ["completion", "fish"]
-//	}
 #ForestShellIntegration: {
-	// Shell name → argv to run against this tool's own binary to print its
-	// integration script on stdout. Keyed by shell because tools spell it
-	// differently (`init zsh` vs `completion fish`) and may not support all
-	// three. Omit a shell to opt out of it; the argv must be non-empty.
 	init?: {[=~"^(zsh|bash|fish)$"]: [...string] & [_, ...]}
 }
 
@@ -180,19 +95,10 @@ package sdk
 	source:   string | *"."
 	registry: string | *"registry.forage.sh"
 
-	// For type ∈ {rust, go, docker, typescript, deno}: the cross-compile
-	// matrix `forest build` should produce. For type=prebuilt this is
-	// optional — the platform set is derived from `prebuilt` instead.
 	architectures?: {
 		[#ForestArchitectures]: #ForestArchitecture
 	}
 
-	// type=prebuilt: per-platform paths (relative to forest.cue) of
-	// existing binaries to upload as-is. Skips `forest build` and the
-	// `_meta/describe` probe — the tool facet must be declared via
-	// `#Tool` in forest.component.cue. The uploaded payload still
-	// lands as `kind=binary`, so downloads are auth-gated through the
-	// registry exactly like a built component.
 	prebuilt?: {
 		[#ForestArchitectures]: {
 			[#ForestArch]: string
@@ -236,34 +142,14 @@ package sdk
 
 #ForestSource: "rust" | "go" | "docker" | "typescript" | "deno" | "prebuilt"
 
-// ============================================================
-// Tools (TASKS/018-global-tools.md §1a.1)
-// ============================================================
-
-// Tool facet attached to a component. Presence in `forest.component.cue`
-// makes the component callable as a CLI tool via argv passthrough.
-// A `#Tool` may coexist with `#Commands` (HYBRID_COMPONENT) or stand alone
-// (TOOL_BINARY when paired with `upload:`, TOOL_EXTERNAL when paired with
-// `external:`).
 #ForestTool: {
-	// Shim filename on PATH. Must match the regex below.
 	name: string & =~"^[a-zA-Z][a-zA-Z0-9._-]{0,63}$"
 
-	// In-scope value: true. `false` is reserved for a future spec.
 	argv_passthrough: bool | *true
 
-	// Optional one-line description rendered by `forest global list` /
-	// `forest components search`.
 	description?: string
 }
 
-// ============================================================
-// External tools (TASKS/018-global-tools.md §1a.2b)
-// ============================================================
-
-// External manifest: the component is hosted outside the Forest
-// registry (typically GitHub Releases). `forest publish` does not
-// build a binary — it just records the upstream URLs + hashes.
 #ForestExternal: {
 	platforms: [...#ForestExternalPlatform]
 }
@@ -272,63 +158,43 @@ package sdk
 	os:   #ForestArchitectures
 	arch: #ForestArch
 
-	// HTTPS-only. `http://` and `file://` are rejected at publish time.
 	url: string & =~"^https://"
 
-	// Extracted-binary sha256 (the bytes that get exec'd).
 	sha256: string & =~#"^[0-9a-f]{64}$"#
 
-	// Archive format. `none` means the URL serves a bare executable.
 	archive: "none" | "tar.gz" | "tar.xz" | "tar.zst" | "zip" | *"none"
 
-	// Path within the archive to the binary. Required iff archive != "none".
-	// Must canonicalise per TASKS/018-global-tools.md §1a.2d.
 	binary_in_archive?: string
 
-	// Optional sha256 of the downloaded archive (defence-in-depth).
 	archive_sha256?: string & =~#"^[0-9a-f]{64}$"#
 
-	// Posix mode applied after extraction. Default 0755.
 	executable_mode?: string | *"0755"
 }
 
-// ============================================================
-// Consumer project types
-// ============================================================
-
-// Dependency declaration — either a version spec or a local path.
 #ForestDependency: {
 	version: string
 } | {
 	path: string
 }
 
-// Dependencies map: component reference → dependency spec.
-// Keys are "org/name" format (e.g., "forest-contrib/terraform-service").
 #ForestDependencies: {
 	[string]: #ForestDependency
 }
 
-// Project-level commands (e.g., dev, build, test).
-// Each command is a list of shell commands executed sequentially.
 #ForestProjectCommands: {
 	[string]: [...string]
 }
 
-// Destination reference inside an environment config.
 #ForestDestinationRef: {
 	destination: string
 	type:        string
 }
 
-// Per-environment configuration for a component.
 #ForestEnvironmentConfig: {
 	destinations: [...#ForestDestinationRef]
 	config?: {...}
 }
 
-// Component usage block in a consumer project.
-// Maps environment names to their config + a base config.
 #ForestComponentUsage: {
 	env?: {
 		[string]: #ForestEnvironmentConfig

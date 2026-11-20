@@ -1,42 +1,3 @@
-//! The supersede-pending policy: collapsing a queue of pending releases to the
-//! newest one. See `design/SKIP-TO-LATEST.md`.
-//!
-//! These drive `supersede::collapse_queue` — the single decision point the
-//! scheduler calls — against a real database, with the queue seeded directly so
-//! each test controls it exactly. The seeded rows deliberately name a
-//! destination that was never registered: the scheduler runs process-wide in
-//! this fixture, and a target it cannot resolve is one it leaves alone, so a
-//! background sweep can neither drain the queue mid-assertion nor make the
-//! outcome depend on timing. `collapse_queue` never reads the destination row —
-//! it is handed the environment — so nothing under test is stubbed out.
-//!
-//! Deliberately few. The invariants — the newest is never superseded, no older
-//! release wins, the plan is order-independent and idempotent, the branch guard
-//! — are proved exhaustively by the pure tests in `services/supersede.rs`,
-//! which need no database and no fixture. These five cover only what the pure
-//! layer cannot: that the decision reaches the database as the right status and
-//! reason, that a disabled policy writes nothing, that an in-flight deploy is
-//! left alone, that concurrent evaluators agree, and that a collapsed pipeline
-//! run ends SUPERSEDED rather than FAILED.
-//!
-//! The five run as one `#[tokio::test]`, in order, rather than as five. Each
-//! `#[tokio::test]` builds its own runtime, and direct pool work binds
-//! connections to it; when the runtime dies with the test those connections
-//! are left broken in the pool the whole suite shares (sqlx logs *"a Tokio 1.x
-//! context was found, but it is being shutdown"*). The rest of the suite
-//! reaches the database through gRPC, so its work happens on the fixture's
-//! long-lived runtime and it never notices. These do not, and as separate
-//! tests they failed on `PoolTimedOut` during setup — in whichever one drew the
-//! short straw, never on an assertion. One runtime for the module removes the
-//! failure class outright. Each scenario keeps its own name, and a failure says
-//! which one.
-//!
-//! The fixture now hands every test its own pool for direct database work, so
-//! that failure class is gone suite-wide and this module no longer needs the
-//! single runtime to be correct — see `fixtures::scoped_to_this_test`. Leaving
-//! it as one test all the same: the five are a sequence over one seeded queue,
-//! and that is how they read.
-
 use forest_server::intent_coordinator;
 use forest_server::services::policy::PolicyRegistryState;
 use forest_server::services::release_event_store::ReleaseEventStoreState;
@@ -46,17 +7,12 @@ use uuid::Uuid;
 use crate::accepttest::fixtures::{Fixture, GivenReleaseFlow, fixture, testcase};
 use crate::accepttest::release_flow::ReleaseFlowData;
 
-/// A project, an environment, and a queue of pending releases against one
-/// target key.
 struct Seeded {
     fixture: Fixture,
     project_id: Uuid,
     destination_id: Uuid,
     environment: String,
-    /// Queued releases, oldest first.
     releases: Vec<Uuid>,
-    /// The in-flight release that keeps the background scheduler off this
-    /// target — see `queue_releases`.
     sentinel: Uuid,
 }
 
@@ -93,7 +49,6 @@ impl Seeded {
         .expect("event count")
     }
 
-    /// Run the decision for one release, exactly as the scheduler does.
     async fn collapse(&self, candidate: Uuid) -> Verdict {
         supersede::collapse_queue(
             &self.fixture.state.release_event_store(),
@@ -109,14 +64,6 @@ impl Seeded {
     }
 }
 
-/// One project for the whole module, built once.
-///
-/// Isolation between tests comes from the target key and the environment name,
-/// not from a fresh project each time: every test takes a destination id of its
-/// own and an environment of its own, and the policy is keyed on that
-/// environment. Registering a user and uploading an artifact per test put
-/// enough load on the shared fixture server to make registration itself fail,
-/// which is a fixture problem being reported as a policy problem.
 static PROJECT: tokio::sync::OnceCell<(Fixture, Uuid)> = tokio::sync::OnceCell::const_new();
 
 async fn shared_project() -> anyhow::Result<(Fixture, Uuid)> {
@@ -158,15 +105,11 @@ async fn shared_project() -> anyhow::Result<(Fixture, Uuid)> {
     Ok((f.clone(), *id))
 }
 
-/// The shared project plus an environment name nothing else uses.
 async fn a_project() -> anyhow::Result<(Fixture, Uuid, String)> {
     let (f, project_id) = shared_project().await?;
     Ok((f, project_id, format!("supersede-env-{}", Uuid::now_v7())))
 }
 
-/// Turn the supersede-pending policy on for `environment`. Named after the
-/// environment, since policy names are unique per project and the project is
-/// shared.
 async fn enable_policy(f: &Fixture, project_id: Uuid, environment: &str, same_branch_only: bool) {
     sqlx::query!(
         r#"INSERT INTO policies (project_id, name, policy_type, config)
@@ -184,22 +127,6 @@ async fn enable_policy(f: &Fixture, project_id: Uuid, environment: &str, same_br
     .expect("create supersede_pending policy");
 }
 
-/// `n` releases queued against one target, oldest first, each in its own
-/// (non-pipeline) intent — the individual-deployment shape.
-///
-/// Returns the sentinel first, then the queued releases.
-///
-/// The sentinel is an `ASSIGNED` release for the same target, and it is what
-/// keeps this test isolated from the fixture's background scheduler:
-/// `pick_queued_releases` skips any target that already has something
-/// `ASSIGNED` or `RUNNING`, so the sweep never touches these rows. Without it
-/// the sweep retries every seeded release every five seconds forever — the rows
-/// name a destination that does not exist, so they can never drain — and that
-/// churn starves the ten-connection pool the whole suite shares. It is also the
-/// honest setup: a queue only builds up behind a deploy that is already going.
-///
-/// `collapse_queue` reads only `QUEUED` rows, so the sentinel is invisible to
-/// the code under test.
 async fn queue_releases(
     f: &Fixture,
     project_id: Uuid,
@@ -214,7 +141,6 @@ async fn queue_releases(
     (sentinel, ids)
 }
 
-/// One release row for a target, `offset_secs` from now in the queue order.
 async fn insert_release(
     f: &Fixture,
     project_id: Uuid,
@@ -268,7 +194,6 @@ async fn seeded(n: usize, policy: bool) -> anyhow::Result<Seeded> {
     if policy {
         enable_policy(&f, project_id, &environment, false).await;
     }
-    // Never registered: see the module comment.
     let destination_id = Uuid::now_v7();
     let (sentinel, releases) = queue_releases(&f, project_id, destination_id, n).await;
 
@@ -282,9 +207,6 @@ async fn seeded(n: usize, policy: bool) -> anyhow::Result<Seeded> {
     })
 }
 
-/// Leave nothing behind: a still-`QUEUED` row for a destination that was never
-/// registered can never drain, and the scheduler's sweep would retry it every
-/// five seconds for the life of the database.
 async fn cleanup(s: &Seeded) {
     let _ = sqlx::query!(
         "UPDATE release_states
@@ -299,18 +221,10 @@ async fn cleanup(s: &Seeded) {
     .await;
 }
 
-// ── The decision reaches the database ────────────────────────────────
-
-/// The headline: a queue of five individual deployments for one target
-/// collapses to one. The four it overtook end SUPERSEDED — not failed, not
-/// deployed — each saying which release took its place, and the newest is
-/// untouched and still dispatchable.
 async fn a_queue_of_pending_deploys_collapses_to_the_newest() -> anyhow::Result<()> {
     let s = seeded(5, true).await?;
     let newest = *s.releases.last().unwrap();
 
-    // The scheduler reaches the oldest first — that is the order its sweep
-    // picks in.
     assert_eq!(s.collapse(s.releases[0]).await, Verdict::Superseded);
 
     for older in &s.releases[..4] {
@@ -347,8 +261,6 @@ async fn a_queue_of_pending_deploys_collapses_to_the_newest() -> anyhow::Result<
     Ok(())
 }
 
-/// With no policy configured, forest behaves exactly as it does today: every
-/// queued release stays queued and every one of them deploys in turn.
 async fn with_the_policy_off_nothing_is_superseded() -> anyhow::Result<()> {
     let s = seeded(4, false).await?;
 
@@ -369,16 +281,9 @@ async fn with_the_policy_off_nothing_is_superseded() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── In-progress work is never interrupted ────────────────────────────
-
-/// A deploy already in flight when newer releases arrive finishes. The queue
-/// behind it still collapses, so the target runs two deploys — the one already
-/// going, then the newest — rather than all of them.
 async fn a_running_deploy_is_left_alone_and_the_queue_behind_it_collapses() -> anyhow::Result<()> {
     let s = seeded(3, true).await?;
 
-    // The sentinel is the deploy already going; promote it to RUNNING, which is
-    // where it would be once a runner picked it up.
     let in_flight = s.sentinel;
     sqlx::query!(
         "UPDATE release_states SET status = 'RUNNING', started_at = now()
@@ -411,11 +316,6 @@ async fn a_running_deploy_is_left_alone_and_the_queue_behind_it_collapses() -> a
     Ok(())
 }
 
-// ── Race safety ──────────────────────────────────────────────────────
-
-/// Concurrent evaluation cannot strand the newest and cannot supersede anything
-/// twice. Two evaluators is enough to cover both interleavings that matter:
-/// racing for the same row, and finding your own candidate already retired.
 async fn concurrent_collapses_agree_on_exactly_one_survivor() -> anyhow::Result<()> {
     let s = seeded(3, true).await?;
     let newest = *s.releases.last().unwrap();
@@ -469,23 +369,14 @@ async fn concurrent_collapses_agree_on_exactly_one_survivor() -> anyhow::Result<
     Ok(())
 }
 
-// ── Pipeline runs: the same mechanism, one level up ──────────────────
-
-/// A queue of pipeline runs is the same queue: their deploy stages put
-/// `release_states` rows against the same target key. Collapsing it must leave
-/// the overtaken runs SUPERSEDED rather than FAILED — a collapsed queue that
-/// pages whoever owns the project is worse than the queue.
 async fn a_queue_of_pipeline_runs_collapses_and_the_overtaken_runs_are_not_failures()
 -> anyhow::Result<()> {
     let (f, project_id, environment) = a_project().await?;
     enable_policy(&f, project_id, &environment, false).await;
 
     let destination_id = Uuid::now_v7();
-    // Keeps the background scheduler off this target — see `queue_releases`.
     let sentinel = insert_release(&f, project_id, destination_id, "ASSIGNED", -1).await;
 
-    // Three pipeline runs, each `deploy → verify`, each with its deploy stage
-    // ACTIVE and one queued release against the shared destination.
     let stages = serde_json::json!({
         "deploy": { "type": "deploy", "environment": environment, "depends_on": [] },
         "verify": { "type": "wait", "duration_seconds": 60, "depends_on": ["deploy"] },
@@ -557,7 +448,6 @@ async fn a_queue_of_pipeline_runs_collapses_and_the_overtaken_runs_are_not_failu
         "the newest pipeline run still deploys",
     );
 
-    // Drive the coordinator, as the NATS nudge does in production.
     for (intent_id, _) in &runs {
         intent_coordinator::evaluate(&f.state, *intent_id).await?;
     }
@@ -598,10 +488,6 @@ async fn a_queue_of_pipeline_runs_collapses_and_the_overtaken_runs_are_not_failu
     Ok(())
 }
 
-// ── Driver ───────────────────────────────────────────────────────────
-
-/// The scenarios above, in order, on one runtime. See the module comment for
-/// why they are not five separate `#[tokio::test]`s.
 #[tokio::test(flavor = "multi_thread")]
 async fn supersede_pending_policy() -> anyhow::Result<()> {
     use anyhow::Context;

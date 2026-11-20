@@ -61,7 +61,11 @@ A typed client wrapping forest-server's UsersService:
 - gRPC errors mapped to user-friendly messages in form re-renders
 - Invalid credentials: "Invalid username/email or password" (no enumeration)
 - Duplicate email/username on register: "Already registered"
-- Network error to forest-server: 502 Bad Gateway page
+- Dependency failures keep the existing status/flow: login/signup/MFA forms re-render with 200, while unexpected page failures use the existing 500 boundary; other route-specific errors retain their status/redirect.
+- Unexpected backend/store/template errors show only a generic message and a server-minted UUID reference. The central 500 page also returns that UUID in `X-Error-Id`; caller-supplied correlation headers are not reused.
+- Browser forms, redirects and approval HTML/JSON do not echo free-form backend diagnostics. Expected local validation and credential errors retain useful safe messages.
+- Structured server diagnostics retain the error chain with `error_id` and operation context. Recognized credential assignments, authorization values, opaque token formats and credential-bearing URL material are redacted. Request bodies, headers and session inputs are not added to these records.
+- Redaction is not proof that arbitrary upstream prose is secret-free. Upstream errors still avoid secret material, and diagnostic logs remain an operator-only surface. Authorized release plans/logs and the Forest CLI/gRPC contracts are deliberately unchanged.
 
 ## Edge Cases
 - Forest-server unreachable: show error page, don't crash

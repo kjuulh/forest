@@ -5253,6 +5253,68 @@ pub mod notification_service_client {
             self.inner.unary(req, path, codec).await
         }
         ///
+        pub async fn reset_notification_preference(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ResetNotificationPreferenceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetNotificationPreferenceResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.NotificationService/ResetNotificationPreference",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.NotificationService",
+                        "ResetNotificationPreference",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn get_user_notification_preferences(
+            &mut self,
+            request: impl tonic::IntoRequest<
+                super::GetUserNotificationPreferencesRequest,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNotificationPreferencesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.NotificationService/GetUserNotificationPreferences",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.NotificationService",
+                        "GetUserNotificationPreferences",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
         pub async fn listen_notifications(
             &mut self,
             request: impl tonic::IntoRequest<super::ListenNotificationsRequest>,
@@ -5338,6 +5400,22 @@ pub mod notification_service_server {
             request: tonic::Request<super::SetNotificationPreferenceRequest>,
         ) -> std::result::Result<
             tonic::Response<super::SetNotificationPreferenceResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn reset_notification_preference(
+            &self,
+            request: tonic::Request<super::ResetNotificationPreferenceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetNotificationPreferenceResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn get_user_notification_preferences(
+            &self,
+            request: tonic::Request<super::GetUserNotificationPreferencesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetNotificationPreferencesResponse>,
             tonic::Status,
         >;
         /// Server streaming response type for the ListenNotifications method.
@@ -5533,6 +5611,114 @@ pub mod notification_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = SetNotificationPreferenceSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.NotificationService/ResetNotificationPreference" => {
+                    #[allow(non_camel_case_types)]
+                    struct ResetNotificationPreferenceSvc<T: NotificationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: NotificationService,
+                    > tonic::server::UnaryService<
+                        super::ResetNotificationPreferenceRequest,
+                    > for ResetNotificationPreferenceSvc<T> {
+                        type Response = super::ResetNotificationPreferenceResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::ResetNotificationPreferenceRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificationService>::reset_notification_preference(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ResetNotificationPreferenceSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.NotificationService/GetUserNotificationPreferences" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetUserNotificationPreferencesSvc<T: NotificationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: NotificationService,
+                    > tonic::server::UnaryService<
+                        super::GetUserNotificationPreferencesRequest,
+                    > for GetUserNotificationPreferencesSvc<T> {
+                        type Response = super::GetNotificationPreferencesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetUserNotificationPreferencesRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NotificationService>::get_user_notification_preferences(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetUserNotificationPreferencesSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -6194,6 +6380,157 @@ pub mod o_auth_apps_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn initiate_o_auth_device_authorization(
+            &mut self,
+            request: impl tonic::IntoRequest<
+                super::InitiateOAuthDeviceAuthorizationRequest,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<super::InitiateOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OAuthAppsService/InitiateOAuthDeviceAuthorization",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OAuthAppsService",
+                        "InitiateOAuthDeviceAuthorization",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn lookup_o_auth_device_authorization(
+            &mut self,
+            request: impl tonic::IntoRequest<
+                super::LookupOAuthDeviceAuthorizationRequest,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<super::LookupOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OAuthAppsService/LookupOAuthDeviceAuthorization",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OAuthAppsService",
+                        "LookupOAuthDeviceAuthorization",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn approve_o_auth_device_authorization(
+            &mut self,
+            request: impl tonic::IntoRequest<
+                super::ApproveOAuthDeviceAuthorizationRequest,
+            >,
+        ) -> std::result::Result<
+            tonic::Response<super::ApproveOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OAuthAppsService/ApproveOAuthDeviceAuthorization",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OAuthAppsService",
+                        "ApproveOAuthDeviceAuthorization",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn deny_o_auth_device_authorization(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DenyOAuthDeviceAuthorizationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DenyOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OAuthAppsService/DenyOAuthDeviceAuthorization",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OAuthAppsService",
+                        "DenyOAuthDeviceAuthorization",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn exchange_o_auth_device_code(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ExchangeOAuthDeviceCodeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExchangeOAuthDeviceCodeResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OAuthAppsService/ExchangeOAuthDeviceCode",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OAuthAppsService",
+                        "ExchangeOAuthDeviceCode",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -6319,6 +6656,41 @@ pub mod o_auth_apps_service_server {
             request: tonic::Request<super::GetOAuthConsentRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetOAuthConsentResponse>,
+            tonic::Status,
+        >;
+        async fn initiate_o_auth_device_authorization(
+            &self,
+            request: tonic::Request<super::InitiateOAuthDeviceAuthorizationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InitiateOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        >;
+        async fn lookup_o_auth_device_authorization(
+            &self,
+            request: tonic::Request<super::LookupOAuthDeviceAuthorizationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::LookupOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        >;
+        async fn approve_o_auth_device_authorization(
+            &self,
+            request: tonic::Request<super::ApproveOAuthDeviceAuthorizationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ApproveOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        >;
+        async fn deny_o_auth_device_authorization(
+            &self,
+            request: tonic::Request<super::DenyOAuthDeviceAuthorizationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DenyOAuthDeviceAuthorizationResponse>,
+            tonic::Status,
+        >;
+        async fn exchange_o_auth_device_code(
+            &self,
+            request: tonic::Request<super::ExchangeOAuthDeviceCodeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExchangeOAuthDeviceCodeResponse>,
             tonic::Status,
         >;
     }
@@ -7171,6 +7543,273 @@ pub mod o_auth_apps_service_server {
                     };
                     Box::pin(fut)
                 }
+                "/forest.v1.OAuthAppsService/InitiateOAuthDeviceAuthorization" => {
+                    #[allow(non_camel_case_types)]
+                    struct InitiateOAuthDeviceAuthorizationSvc<T: OAuthAppsService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OAuthAppsService,
+                    > tonic::server::UnaryService<
+                        super::InitiateOAuthDeviceAuthorizationRequest,
+                    > for InitiateOAuthDeviceAuthorizationSvc<T> {
+                        type Response = super::InitiateOAuthDeviceAuthorizationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::InitiateOAuthDeviceAuthorizationRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OAuthAppsService>::initiate_o_auth_device_authorization(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = InitiateOAuthDeviceAuthorizationSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OAuthAppsService/LookupOAuthDeviceAuthorization" => {
+                    #[allow(non_camel_case_types)]
+                    struct LookupOAuthDeviceAuthorizationSvc<T: OAuthAppsService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OAuthAppsService,
+                    > tonic::server::UnaryService<
+                        super::LookupOAuthDeviceAuthorizationRequest,
+                    > for LookupOAuthDeviceAuthorizationSvc<T> {
+                        type Response = super::LookupOAuthDeviceAuthorizationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::LookupOAuthDeviceAuthorizationRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OAuthAppsService>::lookup_o_auth_device_authorization(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = LookupOAuthDeviceAuthorizationSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OAuthAppsService/ApproveOAuthDeviceAuthorization" => {
+                    #[allow(non_camel_case_types)]
+                    struct ApproveOAuthDeviceAuthorizationSvc<T: OAuthAppsService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OAuthAppsService,
+                    > tonic::server::UnaryService<
+                        super::ApproveOAuthDeviceAuthorizationRequest,
+                    > for ApproveOAuthDeviceAuthorizationSvc<T> {
+                        type Response = super::ApproveOAuthDeviceAuthorizationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::ApproveOAuthDeviceAuthorizationRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OAuthAppsService>::approve_o_auth_device_authorization(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ApproveOAuthDeviceAuthorizationSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OAuthAppsService/DenyOAuthDeviceAuthorization" => {
+                    #[allow(non_camel_case_types)]
+                    struct DenyOAuthDeviceAuthorizationSvc<T: OAuthAppsService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OAuthAppsService,
+                    > tonic::server::UnaryService<
+                        super::DenyOAuthDeviceAuthorizationRequest,
+                    > for DenyOAuthDeviceAuthorizationSvc<T> {
+                        type Response = super::DenyOAuthDeviceAuthorizationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::DenyOAuthDeviceAuthorizationRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OAuthAppsService>::deny_o_auth_device_authorization(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DenyOAuthDeviceAuthorizationSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OAuthAppsService/ExchangeOAuthDeviceCode" => {
+                    #[allow(non_camel_case_types)]
+                    struct ExchangeOAuthDeviceCodeSvc<T: OAuthAppsService>(pub Arc<T>);
+                    impl<
+                        T: OAuthAppsService,
+                    > tonic::server::UnaryService<super::ExchangeOAuthDeviceCodeRequest>
+                    for ExchangeOAuthDeviceCodeSvc<T> {
+                        type Response = super::ExchangeOAuthDeviceCodeResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::ExchangeOAuthDeviceCodeRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OAuthAppsService>::exchange_o_auth_device_code(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ExchangeOAuthDeviceCodeSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 _ => {
                     Box::pin(async move {
                         let mut response = http::Response::new(
@@ -7611,7 +8250,6 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "UpdateProject"));
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn get_destination_states(
             &mut self,
             request: impl tonic::IntoRequest<super::GetDestinationStatesRequest>,
@@ -7874,7 +8512,6 @@ pub mod release_service_server {
             tonic::Response<super::UpdateProjectResponse>,
             tonic::Status,
         >;
-        ///
         async fn get_destination_states(
             &self,
             request: tonic::Request<super::GetDestinationStatesRequest>,
@@ -11203,8 +11840,69 @@ pub mod organisation_service_client {
                 .insert(GrpcMethod::new("forest.v1.OrganisationService", "ListMembers"));
             self.inner.unary(req, path, codec).await
         }
-        /** Admin: manage the per-org auto-invite allowlist.
+        /** "public" lets anyone signed in read, and anyone see on the public pages, every component the organisation
+ publishes. It grants no write and exposes nothing else. Needs an org admin.
 */
+        pub async fn set_organisation_visibility(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SetOrganisationVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetOrganisationVisibilityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/SetOrganisationVisibility",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "SetOrganisationVisibility",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /** What non-members can read of the organisation and, when named, one of its
+ projects. Needs membership. `can_change` is whether the caller may change
+ either, by the same rule that guards the writes.
+*/
+        pub async fn get_visibility(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetVisibilityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/GetVisibility",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "GetVisibility"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
         pub async fn add_allowed_domain(
             &mut self,
             request: impl tonic::IntoRequest<super::AddAllowedDomainRequest>,
@@ -11321,8 +12019,7 @@ pub mod organisation_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** User: see and accept auto-invite join offers.
-*/
+        ///
         pub async fn list_join_offers(
             &mut self,
             request: impl tonic::IntoRequest<super::ListJoinOffersRequest>,
@@ -11455,8 +12152,28 @@ pub mod organisation_service_server {
             tonic::Response<super::ListMembersResponse>,
             tonic::Status,
         >;
-        /** Admin: manage the per-org auto-invite allowlist.
+        /** "public" lets anyone signed in read, and anyone see on the public pages, every component the organisation
+ publishes. It grants no write and exposes nothing else. Needs an org admin.
 */
+        async fn set_organisation_visibility(
+            &self,
+            request: tonic::Request<super::SetOrganisationVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetOrganisationVisibilityResponse>,
+            tonic::Status,
+        >;
+        /** What non-members can read of the organisation and, when named, one of its
+ projects. Needs membership. `can_change` is whether the caller may change
+ either, by the same rule that guards the writes.
+*/
+        async fn get_visibility(
+            &self,
+            request: tonic::Request<super::GetVisibilityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetVisibilityResponse>,
+            tonic::Status,
+        >;
+        ///
         async fn add_allowed_domain(
             &self,
             request: tonic::Request<super::AddAllowedDomainRequest>,
@@ -11488,8 +12205,7 @@ pub mod organisation_service_server {
             tonic::Response<super::VerifyAllowedDomainResponse>,
             tonic::Status,
         >;
-        /** User: see and accept auto-invite join offers.
-*/
+        ///
         async fn list_join_offers(
             &self,
             request: tonic::Request<super::ListJoinOffersRequest>,
@@ -11951,6 +12667,106 @@ pub mod organisation_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListMembersSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/SetOrganisationVisibility" => {
+                    #[allow(non_camel_case_types)]
+                    struct SetOrganisationVisibilitySvc<T: OrganisationService>(
+                        pub Arc<T>,
+                    );
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<
+                        super::SetOrganisationVisibilityRequest,
+                    > for SetOrganisationVisibilitySvc<T> {
+                        type Response = super::SetOrganisationVisibilityResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::SetOrganisationVisibilityRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::set_organisation_visibility(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SetOrganisationVisibilitySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/GetVisibility" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetVisibilitySvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::GetVisibilityRequest>
+                    for GetVisibilitySvc<T> {
+                        type Response = super::GetVisibilityResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetVisibilityRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::get_visibility(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetVisibilitySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

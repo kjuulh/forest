@@ -1,0 +1,27 @@
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+props crate::views::org_pages::UsagePage { chrome, org, project_count };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Usage}>
+    <h2 class="text-lg font-bold mb-6">Preview access</h2>
+    <div class="space-y-6">
+      <div class="p-5 border border-gray-200 rounded-lg">
+        <h3 class="font-bold">Private Preview</h3>
+        <p class="text-sm text-gray-500 mt-1">Invite-only and free during preview. Billing is inactive, your organisation will not be charged, and there is no SLA.</p>
+      </div>
+      <div class="p-5 border border-gray-200 rounded-lg">
+        <h3 class="font-bold">Workspace summary</h3>
+        <div class="mt-4">
+          <p class="text-2xl font-bold">{*project_count}</p>
+          <p class="text-xs text-gray-500 mt-1">Projects</p>
+        </div>
+      </div>
+      <div class="p-5 border border-gray-200 rounded-lg">
+        <h3 class="font-bold">Preview limits</h3>
+        <p class="text-sm text-gray-500 mt-1">Current member, artifact, provider, and Forest Runtime limits are communicated during onboarding. Usage export, projected runtime cost, budget alerts, hard limits, and advance notification must ship before any overage charging.</p>
+      </div>
+      <p class="text-xs text-gray-400">Future paid pricing has not been set. Customer-owned provider execution and CI minutes will not be billed as Forest compute; managed Forest Runtime consumption will be measured separately after the runtime is production-ready.</p>
+    </div>
+  </OrgSettings>
+</Shell>

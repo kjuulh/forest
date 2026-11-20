@@ -1,5 +1,7 @@
 # Forest Development Guidelines
 
+A change to CLI, server or manifest behaviour updates the `forest` skill (`apps/forest/plugin/skills/forest/`) and the docs in the same change; see "Keep the skill current" in the root `AGENTS.md`.
+
 ## Authorization
 
 Every new gRPC endpoint MUST include authorization checks using `crate::grpc::authorize`. Before any business logic:

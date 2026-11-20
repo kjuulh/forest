@@ -1,4 +1,3 @@
-/** Status display configuration — matches live-events.js */
 export const STATUS_CONFIG = {
   SUCCEEDED: { label: "Deployed to", stageLabel: "Deployed to", color: "text-green-600", icon: "check-circle", iconColor: "text-green-500" },
   RUNNING: { label: "Deploying to", stageLabel: "Deploying to", color: "text-yellow-700", icon: "pulse", iconColor: "text-yellow-500" },
@@ -35,8 +34,6 @@ export function pipelineSummary(stages) {
   if (anyFailed) return { label: "Pipeline failed", color: "text-red-600", icon: "x-circle", iconColor: "text-red-500", done, total };
   if (anyPlanAwaiting) return { label: "Awaiting plan approval", color: "text-purple-700", icon: "shield", iconColor: "text-purple-500", done, total };
   if (anyApprovalBlocked) return { label: "Awaiting approval", color: "text-emerald-700", icon: "shield", iconColor: "text-emerald-500", done, total };
-  // Ahead of the plain wait stage: a gate is waiting on something a person may
-  // have to go and look at, where a wait stage just needs the clock to run out.
   if (anyGateAwaiting) return { label: "Waiting for signals", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyWaiting) return { label: "Waiting for time window", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyRunning) return { label: "Deploying to", color: "text-yellow-700", icon: "pulse", iconColor: "text-yellow-500", done, total };

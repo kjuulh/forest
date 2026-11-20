@@ -21,7 +21,7 @@ impl DestinationLogger {
             let attempt = uuid::Uuid::now_v7();
             let release = _release.clone();
 
-            let max_size = 1024 * 1000; // 1MB
+            let max_size = 1024 * 1000;
 
             let mut buffer: Vec<LogLine> = Vec::new();
             let mut current_size = 0;
@@ -122,9 +122,6 @@ impl DestinationLogger {
         Self { input }
     }
 
-    /// A logger for work that is not a release — a drift check — and so has
-    /// no release log to write to. Lines are drained and dropped; the caller
-    /// captures what it needs from the command itself.
     pub fn detached() -> Self {
         let (input, mut output) = tokio::sync::mpsc::unbounded_channel::<(LogChannel, String)>();
         tokio::spawn(async move { while output.recv().await.is_some() {} });

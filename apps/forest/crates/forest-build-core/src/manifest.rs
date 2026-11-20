@@ -1,11 +1,3 @@
-//! Read a project's build inputs from its CUE manifest (DATA-312).
-//!
-//! A build component is dispatched with the project root as `work_dir` but no
-//! structured build parameters. It recovers name / version / source /
-//! architectures by evaluating the project's `*.cue` files with `cue export`
-//! — the same data the bespoke `forest build` read inline. This is why a build
-//! component declares `cue` among its required tools.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -13,31 +5,22 @@ use anyhow::{Context, bail};
 
 use crate::{FOREST_VERSION_ENV, Toolchain};
 
-/// The component version supplied by the environment, if any (DATA-583).
-///
-/// Blank and whitespace-only values are treated as unset: CI writes this from
-/// shell interpolation, and an unset input expands to the empty string. Falling
-/// back to the manifest is the right answer there — building `""` is not.
 fn version_override() -> Option<String> {
     let raw = std::env::var(FOREST_VERSION_ENV).ok()?;
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-/// The inputs needed to drive a build, recovered from the project manifest.
 #[derive(Debug)]
 pub struct BuildRequest {
     pub name: String,
     pub version: String,
-    /// Directory to run the toolchain in (project root joined with `upload.source`).
     pub source: PathBuf,
-    /// Where artifacts are written: `<work_dir>/.forest/component/output`.
     pub out_base: PathBuf,
     pub architectures: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 impl Toolchain {
-    /// The CUE `upload.type` string this toolchain corresponds to.
     pub fn upload_type(self) -> &'static str {
         match self {
             Toolchain::Rust => "rust",
@@ -47,9 +30,7 @@ impl Toolchain {
     }
 }
 
-/// Evaluate the project's CUE files and extract the build inputs for the given
-/// toolchain. Fails with an actionable message if the declared `upload.type`
-/// doesn't match this build component's toolchain.
+/// Fails if the declared `upload.type` does not match `toolchain`.
 pub async fn read_build_request(
     toolchain: Toolchain,
     work_dir: &Path,
@@ -71,14 +52,6 @@ pub async fn read_build_request(
         .get("version")
         .and_then(|v| v.as_str())
         .unwrap_or("0.1.0");
-    // DATA-583: a tag-triggered CI release publishes under a version the
-    // manifest does not know, and the version is *stamped into the binary*
-    // (`-ldflags -X main.version=…` for Go, the same env for Rust). If the
-    // build kept reading forest.cue while `forest publish --version` moved,
-    // the artifact would misreport itself. The env var is the only channel
-    // available: a build component is a separate process dispatched with the
-    // project root and no structured parameters, so it inherits the
-    // environment and nothing else.
     let version = version_override().unwrap_or_else(|| cue_version.to_string());
     if version != cue_version {
         tracing::info!("component version overridden by {FOREST_VERSION_ENV}: {version}");
@@ -131,8 +104,6 @@ pub async fn read_build_request(
     })
 }
 
-/// Run `cue export --out json` over every `*.cue` file in `work_dir`. Inherits
-/// the ambient `CUE_REGISTRY` (forest sets it before spawning the component).
 async fn export_cue(work_dir: &Path) -> anyhow::Result<serde_json::Value> {
     let mut cue_files = Vec::new();
     for entry in

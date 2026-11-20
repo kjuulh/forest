@@ -221,8 +221,6 @@ impl AppService for AppsServer {
         Ok(tonic::Response::new(SuspendAppResponse {}))
     }
 
-    // -- Token management ---------------------------------------------------------
-
     async fn create_app_token(
         &self,
         request: tonic::Request<CreateAppTokenRequest>,
@@ -362,8 +360,6 @@ impl AppService for AppsServer {
         Ok(tonic::Response::new(RevokeAppTokenResponse {}))
     }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 fn app_to_grpc(app: crate::services::apps::AppInfo) -> App {
     let permissions: Vec<String> = serde_json::from_value(app.permissions).unwrap_or_default();

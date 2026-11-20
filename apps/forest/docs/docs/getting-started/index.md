@@ -10,6 +10,7 @@ infrastructure through a deployment provider.
 2. [Authentication](authentication.md) — Connect to a Forest server
 3. [Your First Project](first-project.md) — Create and configure a project
 4. [Your First Release](first-release.md) — Release through the destination configured for an environment
+5. [Using Forest with Claude Code](claude-code.md) — Install the `forest` skill so agents use the real commands
 
 Each section builds on the previous one. By the end, the application has
 environment-specific configuration and one release workflow independent of

@@ -1,0 +1,212 @@
+use forage_core::integrations::DeliveryStatus;
+use forage_ui::AlertKind;
+use forage_ui::components::{ActivePill, BackToIntegrations, CsrfField, ErrorBlock, Flash, IntegrationLogo, SectionLabel};
+use forage_ui::layouts::Shell;
+use crate::views::org_settings::{ConfigView, attempted_at, integration_href, message, prefix, short_id};
+component DeliveryBadge(status: DeliveryStatus) {
+{match *status {
+  DeliveryStatus::Delivered => { <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Delivered</span> }
+  DeliveryStatus::Failed => { <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700">Failed</span> }
+  DeliveryStatus::Skipped => { <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Skipped</span> }
+  DeliveryStatus::Pending => { <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700">Pending</span> }
+}}
+}
+component RuleSwitch(on: bool, label: &str) {
+<button type="submit" class={if *on { "w-9 h-5 rounded-full relative transition-colors bg-gray-900" } else { "w-9 h-5 rounded-full relative transition-colors bg-gray-300" }} title={format!("{} {}", if *on { "Disable" } else { "Enable" }, label.to_lowercase())}>
+  <span class={if *on { "block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]" } else { "block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[3px]" }}></span>
+</button>
+}
+props crate::views::org_settings::IntegrationDetailPage { chrome, org, csrf_token, id, name, kind, enabled, config, can_reinstall, rules, deliveries, test_sent, baseline, emoji, emoji_saved, saved, error };
+
+<Shell chrome={chrome}>
+  {let href = integration_href(org, id);}
+  <section class="app-container py-12">
+    <BackToIntegrations org={org} />
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+      <div class="flex items-start gap-4">
+        <IntegrationLogo kind={kind.as_str()} box_class="w-12 h-12" icon_class="w-6 h-6 text-gray-600" />
+        <div>
+          <h1 class="text-2xl font-bold">{name}</h1>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-sm text-gray-500">{kind.display_name()}</span>
+            <ActivePill enabled={*enabled} />
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        {if *can_reinstall {
+          <form method="POST" action="{href}/reinstall" class="inline">
+            <CsrfField token={csrf_token} name="_csrf" />
+            <button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Reinstall</button>
+          </form>
+        }}
+        <form method="POST" action="{href}/toggle" class="inline">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <input type="hidden" name="enabled" value={if *enabled { "false" } else { "true" }}>
+          <button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">{if *enabled { Pause } else { Resume }}</button>
+        </form>
+        <form method="POST" action="{href}/delete" class="inline" data-confirm="Uninstall this integration? This cannot be undone.">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <button type="submit" class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">Uninstall</button>
+        </form>
+      </div>
+    </div>
+
+    {if *emoji_saved { <Flash kind={AlertKind::Success}>Status emoji saved.</Flash> }}
+    {if *saved { <Flash kind={AlertKind::Success}>Individual notification settings saved.</Flash> }}
+    {if let Some(error) = message(error) { <Flash kind={AlertKind::Error}>{error}</Flash> }}
+    {if *test_sent { <Flash kind={AlertKind::Success}>Test notification sent. Check your endpoint for delivery.</Flash> }}
+
+    <div class="mb-8">
+      <SectionLabel>Configuration</SectionLabel>
+      <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {match config {
+          ConfigView::Webhook { url, has_secret } => {
+            <div class="px-4 py-3 flex items-center justify-between">
+              <span class="text-sm text-gray-500">Payload URL</span>
+              <span class="text-sm text-gray-900 font-mono">{url}</span>
+            </div>
+            {if *has_secret {
+              <div class="px-4 py-3 flex items-center justify-between">
+                <span class="text-sm text-gray-500">Signing</span>
+                <span class="text-sm text-gray-900">HMAC-SHA256 enabled</span>
+              </div>
+            }}
+          }
+          ConfigView::Slack { detail } => {
+            <div class="px-4 py-3">
+              <span class="text-sm text-gray-900">{detail}</span>
+            </div>
+          }
+        }}
+      </div>
+    </div>
+
+    <div class="mb-8">
+      <SectionLabel>Events</SectionLabel>
+      <p class="text-sm text-gray-500 mb-3">Choose which deployment events trigger this integration.</p>
+      <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {for rule in rules.iter() {
+          <div class="flex items-center justify-between px-4 py-3">
+            <div>
+              <span class="text-sm text-gray-700">{rule.label}</span>
+            </div>
+            <form method="POST" action="{href}/rules" class="inline">
+              <CsrfField token={csrf_token} name="_csrf" />
+              <input type="hidden" name="notification_type" value={rule.notification_type}>
+              <input type="hidden" name="enabled" value={if rule.enabled { "false" } else { "true" }}>
+              <RuleSwitch on={rule.enabled} label={rule.label.as_str()} />
+            </form>
+          </div>
+        }}
+      </div>
+    </div>
+
+    {if let Some(baseline) = baseline {
+      <div class="mb-8" id="individual">
+        <SectionLabel>Individual notifications</SectionLabel>
+        <p class="text-sm text-gray-500 mb-3">Forest messages the person a release belongs to (whoever ran it, or the commit author when their GitHub account is linked to Forest) about their own releases. Bots, CI and service accounts have no individual recipient; those releases only reach the channel above.</p>
+        {if let Some(sent_by) = &baseline.sent_by {
+          <div class="px-4 py-3 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg">
+            Another integration on this Slack workspace sends individual messages, so they are configured on <a class="underline" href="{integration_href(org, &sent_by.id)}#individual">{sent_by.name}</a>. Each member gets one message per workspace.
+          </div>
+        } else {
+          <form method="POST" action="{href}/baseline" class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            <CsrfField token={csrf_token} name="_csrf" />
+            <label class="flex items-start gap-3 px-4 py-3 cursor-pointer">
+              <input type="checkbox" name="directory_mapping" class="mt-1" checked={baseline.directory_mapping}>
+              <span>
+                <span class="block text-sm font-medium text-gray-900">Reach members without a personal Slack link</span>
+                <span class="block text-sm text-gray-500">Members of this Forest organisation are matched to the one active, non-guest account in this workspace with the same <em>verified</em> Forest email. Unverified emails, names and commit emails are never used. Nobody gets a Forest account, organisation membership or sign-in method from this.</span>
+              </span>
+            </label>
+            <div class="px-4 py-3">
+              <span class="block text-sm font-medium text-gray-900 mb-1">Organisation defaults</span>
+              <span class="block text-sm text-gray-500 mb-2">Used when a member hasn't chosen for themselves. A member's own choice on their account page always wins.</span>
+              <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-6">
+                {for d in baseline.defaults.iter() {
+                  <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" name="dm_{d.notification_type}" checked={d.enabled}>
+                    {d.label}
+                  </label>
+                }}
+              </div>
+            </div>
+            <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <span class="text-xs text-gray-400">{if !baseline.updated_by.is_empty() { Last changed by {baseline.updated_by} on {prefix(&baseline.updated_at, 10)} } else { Not configured yet: personal Slack links only. }}</span>
+              <div class="flex items-center gap-2">
+                <a href="{href}/coverage" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Member coverage</a>
+                <button type="submit" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Save</button>
+              </div>
+            </div>
+          </form>
+        }}
+      </div>
+    }}
+
+    {if !emoji.is_empty() {
+      <div class="mb-8" id="emoji">
+        <SectionLabel>Status emoji</SectionLabel>
+        <p class="text-sm text-gray-500 mb-3">Release messages show each stage with an emoji. Use your workspace's custom emoji (an animated one makes a real spinner), without the colons. These apply to every Slack integration in this organisation. Leave a field empty for the standard emoji shown.</p>
+        <form method="POST" action="{href}/emoji" class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {for e in emoji.iter() {
+              <label class="block text-sm">
+                <span class="block font-medium text-gray-900">{e.label}</span>
+                <input type="text" name={e.field} value={e.value} placeholder={e.fallback} maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+              </label>
+            }}
+          </div>
+          <div class="px-4 py-3 flex justify-end">
+            <button type="submit" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Save</button>
+          </div>
+        </form>
+      </div>
+    }}
+
+    <div class="mb-8">
+      <SectionLabel>Recent deliveries</SectionLabel>
+      {if !deliveries.is_empty() {
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notification</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-100">
+              {for d in deliveries.iter() {
+                {let (short, truncated) = short_id(&d.notification_id);}
+                <tr>
+                  <td class="px-4 py-2 align-top whitespace-nowrap"><DeliveryBadge status={d.status} /></td>
+                  <td class="px-4 py-2 align-top text-sm text-gray-700 font-mono truncate max-w-[200px]" title={d.notification_id}>{short}{if truncated { … }}</td>
+                  <td class="px-4 py-2 align-top text-sm text-gray-500 whitespace-nowrap">{attempted_at(&d.attempted_at)} UTC</td>
+                  <td class="px-4 py-2 align-top">{if let Some(err) = message(&d.error_message) { <ErrorBlock message={err} /> } else { <span class="text-sm text-gray-400">—</span> }}</td>
+                </tr>
+              }}
+            </tbody>
+          </table>
+        </div>
+      } else {
+        <div class="border border-gray-200 rounded-lg p-6 text-center">
+          <p class="text-sm text-gray-500">No deliveries yet. Send a test event or wait for a deployment notification.</p>
+        </div>
+      }}
+    </div>
+
+    <div class="mb-8">
+      <SectionLabel>Testing</SectionLabel>
+      <div class="border border-gray-200 rounded-lg p-4">
+        <p class="text-sm text-gray-500 mb-3">Send a test <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">release_succeeded</code> event to verify your endpoint is receiving payloads correctly.</p>
+        <form method="POST" action="{href}/test">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <button type="submit" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Send test event</button>
+        </form>
+      </div>
+    </div>
+  </section>
+</Shell>

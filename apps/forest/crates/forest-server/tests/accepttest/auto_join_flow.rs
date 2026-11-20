@@ -1,10 +1,3 @@
-//! Acceptance tests for the org auto-invite-by-verified-email-domain flow
-//! (DATA-252).
-//!
-//! Each test boots two real users (admin + joiner) against the default
-//! fixture, exercises the gRPC RPCs end-to-end against a real Postgres,
-//! and asserts both success and failure modes.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -32,9 +25,6 @@ fn unique_org_name() -> String {
     format!("autojoin-org-{}", uuid::Uuid::now_v7())
 }
 
-/// Register a user, immediately mark the email verified in-db (the
-/// magic-link flow is exercised elsewhere — here we just need a verified
-/// account quickly), log in, and return (token, user_id).
 async fn register_and_verify(fixture: &Fixture, email: &str) -> (String, uuid::Uuid) {
     let mut users = fixture.users();
     let username = unique_username();
@@ -56,8 +46,6 @@ async fn register_and_verify(fixture: &Fixture, email: &str) -> (String, uuid::U
         .await
         .expect("mark verified");
 
-    // If tokens were issued at register-time (verification not required on
-    // the default fixture) use them; otherwise log in.
     let token = if let Some(t) = registered.tokens {
         t.access_token
     } else {
@@ -77,7 +65,6 @@ async fn register_and_verify(fixture: &Fixture, email: &str) -> (String, uuid::U
     (token, user_id)
 }
 
-/// Create an org owned by the given user, return its UUID.
 async fn create_org(fixture: &Fixture, token: &str, name: &str) -> uuid::Uuid {
     let resp = fixture
         .organisations()
@@ -91,9 +78,6 @@ async fn create_org(fixture: &Fixture, token: &str, name: &str) -> uuid::Uuid {
     resp.organisation_id.parse().unwrap()
 }
 
-/// Helper: add the domain to the org and verify it via the mock DNS
-/// resolver (preload the expected TXT record before calling
-/// `verify_allowed_domain`).
 async fn add_and_verify_domain(
     fixture: &Fixture,
     admin_token: &str,
@@ -142,14 +126,10 @@ async fn add_and_verify_domain(
     );
 }
 
-// ── Happy path ───────────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn admin_can_add_domain_and_user_can_join() {
     let fixture = fixture().await.unwrap();
 
-    // Per-test domain so concurrent runs don't trample each other's
-    // allowlist rows or DNS mock entries.
     let domain = format!("co-{}.example", uuid::Uuid::now_v7().simple());
 
     let (admin_token, _admin_id) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
@@ -157,10 +137,8 @@ async fn admin_can_add_domain_and_user_can_join() {
 
     add_and_verify_domain(&fixture, &admin_token, org_id, &domain).await;
 
-    // A second user signs up with the same domain and verifies.
     let (joiner_token, joiner_id) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
 
-    // Offer is surfaced.
     let offers = fixture
         .organisations()
         .list_join_offers(authed_request(&joiner_token, ListJoinOffersRequest {}))
@@ -174,7 +152,6 @@ async fn admin_can_add_domain_and_user_can_join() {
         .expect("offer for our org is present");
     assert_eq!(our_offer.matched_domain, domain.to_lowercase());
 
-    // Accept.
     let accept_resp = fixture
         .organisations()
         .accept_join_offer(authed_request(
@@ -190,8 +167,6 @@ async fn admin_can_add_domain_and_user_can_join() {
     assert_eq!(member.user_id, joiner_id.to_string());
     assert_eq!(member.role, "member");
 
-    // Subsequent list_join_offers should no longer include this org —
-    // already-member filter kicks in.
     let after = fixture
         .organisations()
         .list_join_offers(authed_request(&joiner_token, ListJoinOffersRequest {}))
@@ -207,8 +182,6 @@ async fn admin_can_add_domain_and_user_can_join() {
     );
 }
 
-// ── Unverified domain grants nothing ─────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn unverified_domain_produces_no_offer() {
     let fixture = fixture().await.unwrap();
@@ -216,7 +189,6 @@ async fn unverified_domain_produces_no_offer() {
     let (admin_token, _) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
     let org_id = create_org(&fixture, &admin_token, &unique_org_name()).await;
 
-    // Add — but do NOT verify via DNS.
     fixture
         .organisations()
         .add_allowed_domain(authed_request(
@@ -259,8 +231,6 @@ async fn unverified_domain_produces_no_offer() {
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
 }
 
-// ── Verify flow: missing TXT → Missing; correct TXT → Verified ───────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_returns_missing_when_txt_absent() {
     let fixture = fixture().await.unwrap();
@@ -281,7 +251,6 @@ async fn verify_returns_missing_when_txt_absent() {
         .await
         .expect("add domain");
 
-    // Deliberately do NOT preload the DNS record.
     let verify = fixture
         .organisations()
         .verify_allowed_domain(authed_request(
@@ -347,7 +316,6 @@ async fn verify_rejects_wrong_txt_token() {
         .await
         .expect("add domain");
 
-    // Attacker plants their *own* random token. Should NOT verify.
     fixture.dns.set_txt(
         &format!("_forest-verify.{domain}"),
         "attacker-supplied-bogus-value",
@@ -371,14 +339,8 @@ async fn verify_rejects_wrong_txt_token() {
     );
 }
 
-// ── Multi-@ email bypass — must NOT produce an offer ─────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn multi_at_email_does_not_match_middle_segment() {
-    // Belt-and-suspenders test for the SQL fix: even if an upstream
-    // validation bug lets `attacker@victim.com@evil.com` into user_emails,
-    // the rightmost-@ domain extraction in the JOIN means we'd match
-    // 'evil.com' (which no legitimate org verifies), not 'victim.com'.
     let fixture = fixture().await.unwrap();
     let victim_domain = format!("victim-{}.example", uuid::Uuid::now_v7().simple());
 
@@ -386,11 +348,6 @@ async fn multi_at_email_does_not_match_middle_segment() {
     let org_id = create_org(&fixture, &admin_token, &unique_org_name()).await;
     add_and_verify_domain(&fixture, &admin_token, org_id, &victim_domain).await;
 
-    // Build an account whose verified email has a multi-@ shape with the
-    // victim domain in the *middle*. We insert directly into the DB
-    // because the forage `validate_email` layer rejects this — exactly
-    // what we want to prove also can't be reached via the SQL JOIN even
-    // if a future code path forgot the validation.
     let attacker_email_local = unique_email_at("attacker.test");
     let (attacker_token, attacker_user_id) =
         register_and_verify(&fixture, &attacker_email_local).await;
@@ -424,12 +381,6 @@ async fn multi_at_email_does_not_match_middle_segment() {
     );
 }
 
-// (The free-mail denylist was removed — DNS verification is the boundary now.
-//  Adding gmail.com or any other "public" mailbox is allowed; the row simply
-//  grants nothing until DNS verification succeeds, which the org can't do.)
-
-// ── Negative: non-admin cannot modify ────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn non_admin_cannot_add_allowed_domain() {
     let fixture = fixture().await.unwrap();
@@ -438,7 +389,6 @@ async fn non_admin_cannot_add_allowed_domain() {
     let (admin_token, _) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
     let org_id = create_org(&fixture, &admin_token, &unique_org_name()).await;
 
-    // A second user who is NOT a member of the org.
     let (outsider_token, _) =
         register_and_verify(&fixture, &unique_email_at("outsiders.test")).await;
 
@@ -458,8 +408,6 @@ async fn non_admin_cannot_add_allowed_domain() {
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
 }
 
-// ── Negative: unverified email yields no offer ───────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn unverified_email_does_not_get_offer() {
     let fixture = fixture().await.unwrap();
@@ -470,7 +418,6 @@ async fn unverified_email_does_not_get_offer() {
 
     add_and_verify_domain(&fixture, &admin_token, org_id, &domain).await;
 
-    // Register a joiner WITHOUT verifying the email.
     let joiner_email = unique_email_at(&domain);
     let registered = fixture
         .users()
@@ -482,8 +429,6 @@ async fn unverified_email_does_not_get_offer() {
         .await
         .expect("register joiner")
         .into_inner();
-    // The default (unrestricted) fixture issues tokens at register-time
-    // without requiring verification.
     let joiner_token = registered.tokens.expect("tokens").access_token;
 
     let offers = fixture
@@ -500,7 +445,6 @@ async fn unverified_email_does_not_get_offer() {
         "unverified email must not surface an offer"
     );
 
-    // Accepting anyway must be rejected.
     let err = fixture
         .organisations()
         .accept_join_offer(authed_request(
@@ -514,8 +458,6 @@ async fn unverified_email_does_not_get_offer() {
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
 }
 
-// ── Negative: domain removed before accept ───────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn accepting_after_domain_removed_fails() {
     let fixture = fixture().await.unwrap();
@@ -528,7 +470,6 @@ async fn accepting_after_domain_removed_fails() {
 
     let (joiner_token, _) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
 
-    // Confirm an offer exists at this point.
     let offers = fixture
         .organisations()
         .list_join_offers(authed_request(&joiner_token, ListJoinOffersRequest {}))
@@ -542,7 +483,6 @@ async fn accepting_after_domain_removed_fails() {
             .any(|o| o.organisation_id == org_id.to_string())
     );
 
-    // Admin removes the domain.
     let removed = fixture
         .organisations()
         .remove_allowed_domain(authed_request(
@@ -557,7 +497,6 @@ async fn accepting_after_domain_removed_fails() {
         .into_inner();
     assert!(removed.removed);
 
-    // Joiner's accept now fails: re-check is run inside the accept tx.
     let err = fixture
         .organisations()
         .accept_join_offer(authed_request(
@@ -570,8 +509,6 @@ async fn accepting_after_domain_removed_fails() {
         .expect_err("accept after removal must fail");
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
 }
-
-// ── Negative: malformed domain ───────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn malformed_domain_rejected() {
@@ -594,8 +531,6 @@ async fn malformed_domain_rejected() {
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
 }
 
-// ── Negative: auto_join_oauth policy gated until v1.1 ────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn auto_join_oauth_policy_rejected_in_v1() {
     let fixture = fixture().await.unwrap();
@@ -617,15 +552,8 @@ async fn auto_join_oauth_policy_rejected_in_v1() {
     assert_eq!(err.code(), tonic::Code::Unimplemented);
 }
 
-// ── OAuth signup records `verification_source = oauth_<provider>` ────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn oauth_signup_records_clean_verification_source() {
-    // Regression test for the bug where verification_source was stored as
-    // "oauth_oauth_provider_github" because the gRPC handler passes the
-    // raw protobuf enum string. After the fix, the value must be
-    // "oauth_github" (or "oauth_google") so future silent-JIT logic can
-    // pattern-match cleanly.
     let fixture = restricted_fixture().await.unwrap();
     let email = format!("oauth-test-{}@understory.io", uuid::Uuid::now_v7());
 

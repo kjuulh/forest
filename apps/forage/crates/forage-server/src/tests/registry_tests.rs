@@ -56,8 +56,6 @@ fn sample_detail() -> ComponentDetail {
     }
 }
 
-// ── Public search ──────────────────────────────────────────────
-
 #[tokio::test]
 async fn components_search_unauthenticated_returns_200() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -88,10 +86,7 @@ async fn components_search_unauthenticated_returns_200() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("testorg/deployment"));
     assert!(html.contains("v1.2.0"));
-    // Shape badge ("component") replaces the old kind badge in list views;
-    // the per-shape vocabulary is documented in `tool_shape_badge`.
     assert!(html.contains("component"));
-    // Marketing nav (no user)
     assert!(html.contains("Sign in"));
 }
 
@@ -186,18 +181,6 @@ async fn components_search_with_query() {
     assert!(html.contains("No components found"));
 }
 
-// ── Public surface only ever calls the public RPC ─────────────
-//
-// The risk we're protecting against: an anonymous visitor reaching
-// /components or /components/{org}/{name} and seeing private
-// components because forage previously fell back to a service-account
-// token. The fix routes these surfaces through *_public_components
-// RPCs which the backend hard-filters to visibility='public'. These
-// tests assert the route really calls the public variant: we configure
-// the public mock with an empty result and the legacy mock with a
-// private fixture; if the route accidentally hits the legacy method,
-// the private fixture leaks into the rendered HTML.
-
 #[tokio::test]
 async fn components_search_anonymous_uses_public_rpc_only() {
     let private = ComponentSummary {
@@ -205,13 +188,10 @@ async fn components_search_anonymous_uses_public_rpc_only() {
         ..sample_summary()
     };
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
-        // The legacy authed RPC must NEVER be called from the /components
-        // surface — if it is, the private fixture would leak through.
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![private],
             total_count: 1,
         })),
-        // The public RPC returns the empty result the user should see.
         search_public_components_result: Some(Ok(ComponentSearchResult {
             components: vec![],
             total_count: 0,
@@ -237,7 +217,6 @@ async fn components_search_anonymous_uses_public_rpc_only() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Private fixture must not appear.
     assert!(
         !html.contains("testorg/deployment"),
         "private component leaked into anonymous /components: {html}",
@@ -245,29 +224,12 @@ async fn components_search_anonymous_uses_public_rpc_only() {
     assert!(html.contains("No components published yet"));
 }
 
-// ── /components/{org}/{name} — GitHub-style permission model ────
-//
-// Same URL whether the component is public or private. The handler
-// uses the authenticated RPC when a session exists (so org members
-// see their own private components) and falls back to the public RPC
-// otherwise (anonymous viewers see only public components). Permission
-// gating lives in the backend's authenticated RPC — it returns
-// PermissionDenied / NotFound when the session lacks access.
-//
-// This mirrors github.com/<org>/<repo>: signed-in users with access
-// see private repos at the same URL public ones use.
-
 #[tokio::test]
 async fn component_detail_anonymous_404_on_private() {
-    // No session → only the public RPC is consulted, which returns
-    // NotFound for a private component. We don't peek at the authed
-    // RPC because no token is available.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
         ))),
-        // Authed result here is "would have worked" — we're asserting
-        // we DON'T reach it from an anonymous request.
         get_component_detail_result: Some(Ok(sample_detail())),
         ..Default::default()
     });
@@ -290,9 +252,6 @@ async fn component_detail_anonymous_404_on_private() {
 
 #[tokio::test]
 async fn component_detail_sessioned_200_for_private_when_has_access() {
-    // Sessioned org member viewing a private component. Public RPC
-    // returns NotFound (visibility != public), but the authenticated
-    // RPC succeeds because the session has access. The page renders.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
@@ -321,8 +280,6 @@ async fn component_detail_sessioned_200_for_private_when_has_access() {
 
 #[tokio::test]
 async fn component_detail_sessioned_404_when_no_access() {
-    // Sessioned but the user has no access to this private component.
-    // Both RPCs return NotFound. The page 404s — same UX as anonymous.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
@@ -385,9 +342,6 @@ async fn component_version_detail_anonymous_404_on_private() {
 
 #[tokio::test]
 async fn component_version_detail_sessioned_200_for_private_when_has_access() {
-    // The fix this PR is built around: a signed-in org member clicking
-    // through to a private component's version page from their project's
-    // Components tab MUST see the page, not a 404.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
@@ -452,8 +406,6 @@ async fn component_version_detail_sessioned_404_when_no_access() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-// ── Component detail ───────────────────────────────────────────
-
 #[tokio::test]
 async fn component_detail_returns_200_with_readme() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -487,7 +439,6 @@ async fn component_detail_returns_200_with_readme() {
     assert!(html.contains("linux_amd64"));
     assert!(html.contains("alice"));
     assert!(html.contains("forest components add"));
-    // Each release shows when it was published (DATA-312).
     assert!(html.contains("published"));
     assert!(
         html.contains("2026-01-02T00:00:00Z"),
@@ -519,8 +470,6 @@ async fn component_detail_not_found() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
-
-// ── Version-specific detail ────────────────────────────────────
 
 #[tokio::test]
 async fn component_version_detail_returns_200() {
@@ -554,8 +503,6 @@ async fn component_version_detail_returns_200() {
     assert!(html.contains("1.1.0"));
 }
 
-// ── Org-scoped component list ──────────────────────────────────
-
 #[tokio::test]
 async fn org_components_requires_auth() {
     let registry = MockRegistryClient::new();
@@ -573,7 +520,6 @@ async fn org_components_requires_auth() {
         .await
         .unwrap();
 
-    // Should redirect to login (302) or return 401/403
     assert_ne!(response.status(), StatusCode::OK);
 }
 
@@ -608,7 +554,7 @@ async fn org_components_returns_200_for_member() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("deployment"));
-    assert!(html.contains("Components")); // active tab
+    assert!(html.contains("Components"));
 }
 
 #[tokio::test]
@@ -632,14 +578,6 @@ async fn org_components_forbidden_for_non_member() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
-
-// ── Org-scoped install button (spec 011) ──────────────────────
-//
-// `/orgs/{org}/components` surfaces `forest global add <org>` so users
-// can subscribe their workstation to the entire org catalogue in one
-// command. The button mirrors the per-tool install dropdown on
-// `project_detail.html.jinja` but renders a *single* command (no version
-// pin — `forest global add` doesn't accept a version at org scope).
 
 #[tokio::test]
 async fn org_components_renders_install_command() {
@@ -683,10 +621,6 @@ async fn org_components_renders_install_command() {
 
 #[tokio::test]
 async fn org_components_install_command_uses_path_org_not_session_org() {
-    // The session belongs to the default test org, but the URL targets a
-    // different org slug. The install command must reflect the URL slug.
-    // This catches the regression where someone wires the button to a
-    // session variable instead of the route param.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![sample_summary()],
@@ -715,12 +649,6 @@ async fn org_components_install_command_uses_path_org_not_session_org() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Tightened (post-review A3): extract the literal text content of
-    // <pre id="org-install-cmd"> and assert exact equality, rather than
-    // a substring search against the whole document. The mock returns
-    // sample_summary() (organisation = "testorg"), which renders
-    // "testorg" in unrelated hrefs; a substring-only assertion is one
-    // careless edit away from a false negative.
     let cmd = extract_pre_text(&html, "org-install-cmd");
     assert_eq!(
         cmd, "forest global add second-org",
@@ -730,12 +658,6 @@ async fn org_components_install_command_uses_path_org_not_session_org() {
 
 #[tokio::test]
 async fn org_components_install_caption_uses_path_org() {
-    // Companion to the command assertion above (post-review C1). The
-    // dropdown caption ("Subscribes your workstation to <org>'s catalogue
-    // …") is the second place `org_name` lands in the markup. A
-    // future regression that hardcodes "your org" here would slip past
-    // a test that only checks the install command. We assert the
-    // caption span carries the path org slug.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![sample_summary()],
@@ -764,15 +686,10 @@ async fn org_components_install_caption_uses_path_org() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Caption template:
-    //   …Subscribes your workstation to <span class="font-mono">{{ org_name }}</span>…
-    // A successful render contains the exact span markup with the path org.
     assert!(
         html.contains(r#"<span class="font-mono">second-org</span>"#),
         "caption span should contain the path org name; got: {html}"
     );
-    // And the dropdown header line ("Subscribe to every tool in <org>")
-    // is the other org-naming spot inside the panel — same logic.
     assert!(
         html.contains("Subscribe to every tool in second-org"),
         "dropdown header should name the path org; got: {html}"
@@ -781,9 +698,6 @@ async fn org_components_install_caption_uses_path_org() {
 
 #[tokio::test]
 async fn org_components_install_button_hidden_when_no_components() {
-    // True-empty catalogue (no components, no query). Hide the install
-    // button — there is nothing for `forest global add` to install yet,
-    // and the empty-state CTA already tells the user to publish first.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![],
@@ -820,9 +734,6 @@ async fn org_components_install_button_hidden_when_no_components() {
 
 #[tokio::test]
 async fn org_components_install_button_visible_on_filtered_empty_search() {
-    // The catalogue is non-empty in principle, but the user's query
-    // filtered everything out. Still show the install button — the org
-    // *does* publish things, the user just narrowed too far.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![],
@@ -859,11 +770,6 @@ async fn org_components_install_button_visible_on_filtered_empty_search() {
 
 #[tokio::test]
 async fn org_components_empty_state_renders_when_no_components() {
-    // Sister of `_hidden_when_no_components` (post-review C4): the
-    // earlier test only asserts the install button does *not* render;
-    // it can't detect a regression that eats the entire `{% else %}`
-    // branch and leaves the page blank where the empty state used to
-    // live. This test pins the empty-state copy explicitly.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![],
@@ -904,12 +810,6 @@ async fn org_components_empty_state_renders_when_no_components() {
 
 #[tokio::test]
 async fn org_components_install_uses_native_details_element() {
-    // Markup-structure guard (post-review C2-lite). The spec promises
-    // keyboard accessibility via native <details>/<summary>; a
-    // regression to <div onclick="..."> would pass every other test
-    // (the strings would still render) but break Enter/Space toggling
-    // for keyboard users. We don't have a browser driver, but we
-    // *can* assert the element is structurally what we promised.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![sample_summary()],
@@ -938,10 +838,6 @@ async fn org_components_install_uses_native_details_element() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // base.html.jinja has its own <details>/<summary> elements for
-    // nav dropdowns, so we can't just grep for the first <summary>.
-    // Anchor on the install button's distinctive bg-green-600 class —
-    // that's unique to the install summary.
     let summary_marker = "<summary class=\"inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600";
     let summary_open = html
         .find(summary_marker)
@@ -954,12 +850,6 @@ async fn org_components_install_uses_native_details_element() {
         summary_slice.contains("Install"),
         "install <summary> must contain the visible label \"Install\"; got: {summary_slice}"
     );
-    // And the parent must be <details> — keyboard a11y guarantee.
-    // Stronger than "rfind('<details') is Some": that would false-pass
-    // if a nav <details> opened+closed earlier and the green summary
-    // landed inside a sibling <div>. Find the latest <details opening
-    // before the summary and assert no </details> intervenes — i.e.,
-    // that <details> is genuinely still open when the summary appears.
     let before_summary = &html[..summary_open];
     let parent_details_open = before_summary
         .rfind("<details")
@@ -973,16 +863,6 @@ async fn org_components_install_uses_native_details_element() {
 
 #[tokio::test]
 async fn org_context_nav_points_components_tab_at_org_components() {
-    // Routing regression guard for spec 011 (post-merge). PR #17
-    // briefly pointed the org-context nav at /components (global
-    // registry); that orphaned the org-scoped page and made the
-    // install button invisible from the nav. This test pins the
-    // correction: while inside an org, the Components nav tab must
-    // link to /orgs/{org}/components.
-    //
-    // We render the org-scoped page itself (any org-context page
-    // works — the nav is identical), then assert the nav <a> for
-    // Components has the org-scoped href, not the global one.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         search_components_result: Some(Ok(ComponentSearchResult {
             components: vec![sample_summary()],
@@ -1017,11 +897,6 @@ async fn org_context_nav_points_components_tab_at_org_components() {
     );
 }
 
-/// Extract the inner text of the first `<pre id="…">…</pre>` block,
-/// trimmed. Used by spec-011 tests to assert exact equality on the
-/// rendered install command rather than substring-matching against
-/// the whole document (which is brittle when unrelated content
-/// happens to contain the org slug).
 fn extract_pre_text(html: &str, id: &str) -> String {
     let needle = format!(r#"<pre id="{id}""#);
     let start = html
@@ -1038,12 +913,6 @@ fn extract_pre_text(html: &str, id: &str) -> String {
         .unwrap_or_else(|| panic!("unclosed <pre> for id {id}"));
     rest[..content_end].trim().to_string()
 }
-
-// ── Project-level Components tab ──────────────────────────────
-//
-// `/orgs/{org}/projects/{project}/components` is the project's full
-// Components tab — sibling of Releases. The Overview's sidebar shows a
-// top-3 summary; this page lists every version.
 
 #[tokio::test]
 async fn project_components_tab_renders_versions() {
@@ -1072,16 +941,12 @@ async fn project_components_tab_renders_versions() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Lists the versions from the mock fixture.
     assert!(html.contains("v1.2.0"));
     assert!(html.contains("v1.1.0"));
 }
 
-// ── No registry configured ─────────────────────────────────────
-
 #[tokio::test]
 async fn components_without_registry_returns_503() {
-    // Use default test_app which has no registry_client
     let response = test_app()
         .oneshot(
             Request::builder()
@@ -1094,13 +959,6 @@ async fn components_without_registry_returns_503() {
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ─── Merged surface (specs/features/007) ─────────────────────────────────
-//
-// Tools and components share one set of routes: `/components`, `/orgs/{org}/
-// components`, and `/components/{org}/{name}`. The detail page renders
-// shape-aware sections — Install + Invocation/Methods/Upstream + pretty
-// manifest — only when the artefact carries a tool facet.
 
 fn sample_tool_summary(shape: ToolShape) -> ComponentSummary {
     ComponentSummary {
@@ -1150,8 +1008,6 @@ fn sample_tool_detail(shape: ToolShape) -> ComponentDetail {
     }
 }
 
-/// A tool_binary artefact appears in the unified components list with the
-/// "tool" shape badge — no separate Tools tab to discover from.
 #[tokio::test]
 async fn components_list_shows_tool_shape_badge_for_tool_binary() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1183,12 +1039,9 @@ async fn components_list_shows_tool_shape_badge_for_tool_binary() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("forest-hello"));
-    // Shape badge `tool` is the text emitted by `tool_shape_badge` for
-    // ToolBinary.
     assert!(html.contains(">tool<"));
 }
 
-/// External-tool list rows surface the upstream host chip on the list view.
 #[tokio::test]
 async fn components_list_shows_upstream_host_for_external() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1222,7 +1075,6 @@ async fn components_list_shows_upstream_host_for_external() {
     assert!(html.contains(">tool-ext<"));
 }
 
-/// Tool shapes get the global-install copy block on the detail page.
 #[tokio::test]
 async fn component_detail_renders_install_block_for_tool_binary() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1250,20 +1102,13 @@ async fn component_detail_renders_install_block_for_tool_binary() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // MiniJinja HTML-escapes `/` in plain-text contexts; the on-the-wire
-    // form is `testorg&#x2f;forest-hello`. The browser textContent (used by
-    // the clipboard button) sees the unescaped `/`.
-    assert!(html.contains("forest global add testorg&#x2f;forest-hello"));
-    assert!(html.contains("forest global add testorg&#x2f;forest-hello@0.1.0"));
-    // Invocation block for argv-passthrough binaries.
+    assert!(html.contains("forest global add testorg/forest-hello"));
+    assert!(html.contains("forest global add testorg/forest-hello@0.1.0"));
     assert!(html.contains("Argv-passthrough"));
-    // Releases card with the latest pill.
     assert!(html.contains("v0.1.0"));
     assert!(html.contains("latest"));
 }
 
-/// Plain component shape does NOT get the global-install copy block — those
-/// surfaces only exist for artefacts with a tool facet.
 #[tokio::test]
 async fn component_detail_no_global_install_for_plain_component() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1290,15 +1135,10 @@ async fn component_detail_no_global_install_for_plain_component() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // No global-install block — components are added to a project via
-    // `forest components add` (kept as a sidebar action), never installed
-    // globally.
     assert!(!html.contains("forest global add"));
     assert!(html.contains("forest components add"));
 }
 
-/// Hybrid shape gets BOTH the Methods list AND the global-install block
-/// (it's the canonical "two surfaces" case).
 #[tokio::test]
 async fn component_detail_hybrid_shows_methods_and_install() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1325,15 +1165,12 @@ async fn component_detail_hybrid_shows_methods_and_install() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Install block (because hybrid has a tool facet).
     assert!(html.contains("forest global add"));
-    // Methods listed (because hybrid also exposes methods).
     assert!(html.contains("Methods"));
     assert!(html.contains("greet"));
     assert!(html.contains("status"));
 }
 
-/// External-tool detail surfaces the upstream host in its own section.
 #[tokio::test]
 async fn component_detail_external_shows_upstream_section() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
@@ -1364,8 +1201,6 @@ async fn component_detail_external_shows_upstream_section() {
     assert!(html.contains("github.com"));
 }
 
-/// Distribution section renders the manifest's `platforms` map as a native
-/// table (sha + human-readable size) — not raw JSON.
 #[tokio::test]
 async fn component_detail_distribution_table_renders_platforms() {
     let mut detail = sample_tool_detail(ToolShape::ToolBinary);
@@ -1400,15 +1235,11 @@ async fn component_detail_distribution_table_renders_platforms() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // The structured table is present.
     assert!(html.contains("Distribution"));
     assert!(html.contains("linux_amd64"));
-    // Short sha chip — the `short_sha` filter renders prefix + ellipsis + suffix.
     assert!(html.contains("5df1c9"));
     assert!(html.contains("ec945"));
-    // Human-readable size, not raw bytes.
     assert!(html.contains("428.6 KB"));
-    // Raw JSON disclosure remains as a fallback for power users.
     assert!(html.contains("View raw manifest JSON"));
 }
 

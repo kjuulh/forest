@@ -16,19 +16,10 @@ pub struct NotificationsServer {
     pub state: State,
 }
 
-/// Which feed the caller is reading.
-///
-/// A person gets their own notifications; the release channel is what shows
-/// them everybody else's, and a release with no owner is nobody's to receive.
-/// A machine credential — forage's fan-out listener under the service-account
-/// key, or an app token — reads the whole stream, because that is the feed the
-/// channel post is built from.
 fn extract_audience(extensions: &http::Extensions) -> Result<Audience, tonic::Status> {
     if let Some(actor) = extensions.get::<Actor>() {
         return Ok(Audience::from_actor(actor));
     }
-    // A JWT always arrives with an `Actor` beside it; this is the belt-and-
-    // braces path, and a user token can only ever be a personal audience.
     if let Some(claims) = extensions.get::<AppClaims>() {
         return claims
             .user_id
@@ -39,9 +30,6 @@ fn extract_audience(extensions: &http::Extensions) -> Result<Audience, tonic::St
     Err(tonic::Status::unauthenticated("missing auth context"))
 }
 
-/// Extract the actor's identity from request extensions.
-/// Prefers `AppClaims` (JWT user tokens) and falls back to `Actor`
-/// (service accounts and app tokens).
 fn extract_actor_id(extensions: &http::Extensions) -> Result<Uuid, tonic::Status> {
     if let Some(claims) = extensions.get::<AppClaims>() {
         return claims
@@ -110,6 +98,66 @@ impl NotificationService for NotificationsServer {
         }))
     }
 
+    async fn reset_notification_preference(
+        &self,
+        request: tonic::Request<ResetNotificationPreferenceRequest>,
+    ) -> std::result::Result<tonic::Response<ResetNotificationPreferenceResponse>, tonic::Status>
+    {
+        let user_id = extract_actor_id(request.extensions())?;
+
+        let req = request.into_inner();
+        let ntype = notification_type_to_str(req.notification_type());
+        let channel = notification_channel_to_str(req.channel());
+
+        self.state
+            .notification_registry()
+            .reset_preference(&user_id, ntype, channel)
+            .await
+            .to_internal_error()?;
+
+        Ok(Response::new(ResetNotificationPreferenceResponse {}))
+    }
+
+    /// Delivery services (Forage) read a recipient's explicit preferences
+    /// before routing a personal notification to them. Nobody else may read
+    /// another person's preferences, so only service accounts get through.
+    async fn get_user_notification_preferences(
+        &self,
+        request: tonic::Request<GetUserNotificationPreferencesRequest>,
+    ) -> std::result::Result<tonic::Response<GetNotificationPreferencesResponse>, tonic::Status>
+    {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        if !matches!(actor, Actor::ServiceAccount { .. }) {
+            return Err(tonic::Status::permission_denied(
+                "only service accounts may read another user's notification preferences",
+            ));
+        }
+
+        let user_id = request
+            .into_inner()
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        let prefs = self
+            .state
+            .notification_registry()
+            .get_preferences(&user_id)
+            .await
+            .to_internal_error()?;
+
+        Ok(Response::new(GetNotificationPreferencesResponse {
+            preferences: prefs
+                .into_iter()
+                .map(|p| NotificationPreference {
+                    notification_type: notification_type_from_str(&p.notification_type).into(),
+                    channel: notification_channel_from_str(&p.channel).into(),
+                    enabled: p.enabled,
+                })
+                .collect(),
+        }))
+    }
+
     type ListenNotificationsStream = ReceiverStream<Result<Notification, tonic::Status>>;
 
     async fn listen_notifications(
@@ -129,7 +177,6 @@ impl NotificationService for NotificationsServer {
 
         tokio::spawn(async move {
             let poll_interval = std::time::Duration::from_secs(2);
-            // Start from the current max sequence so we only deliver new notifications
             let mut last_sequence: i64 = registry.get_max_sequence().await.unwrap_or(0);
 
             loop {
@@ -150,7 +197,7 @@ impl NotificationService for NotificationsServer {
                             }
                             let grpc_notif = notification_record_to_grpc(notif);
                             if tx.send(Ok(grpc_notif)).await.is_err() {
-                                return; // Client disconnected
+                                return;
                             }
                         }
                     }
@@ -185,7 +232,6 @@ impl NotificationService for NotificationsServer {
             50
         };
 
-        // Return the most recent notifications (newest first)
         let notifications = self
             .state
             .notification_registry()
@@ -254,7 +300,7 @@ fn release_context_to_grpc(
 ) -> ReleaseContext {
     ReleaseContext {
         slug: ctx.slug.unwrap_or_default(),
-        organisation: String::new(), // populated from top-level fields
+        organisation: String::new(),
         project: String::new(),
         artifact_id: ctx.artifact_id.unwrap_or_default(),
         release_intent_id: ctx.release_intent_id.unwrap_or_default(),
@@ -270,6 +316,7 @@ fn release_context_to_grpc(
         context_web: ctx.context_web.unwrap_or_default(),
         error_message: ctx.error_message.unwrap_or_default(),
         destination_count: ctx.destination_count,
+        source_attribution: ctx.source_attribution.unwrap_or_default(),
     }
 }
 

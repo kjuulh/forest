@@ -12,7 +12,6 @@ pub use validation::{validate_email, validate_password, validate_username};
 
 use serde::{Deserialize, Serialize};
 
-/// Tokens returned by forest-server after login/register.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthTokens {
     pub access_token: String,
@@ -20,7 +19,6 @@ pub struct AuthTokens {
     pub expires_in_seconds: i64,
 }
 
-/// Minimal user info from forest-server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub user_id: String,
@@ -31,7 +29,6 @@ pub struct User {
     pub mfa_enabled: bool,
 }
 
-/// Public user profile (no emails).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserProfile {
     pub user_id: String,
@@ -46,7 +43,6 @@ pub struct UserEmail {
     pub verified: bool,
 }
 
-/// A personal access token (metadata only, no raw key).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalAccessToken {
     pub token_id: String,
@@ -57,7 +53,6 @@ pub struct PersonalAccessToken {
     pub expires_at: Option<String>,
 }
 
-/// Result of creating a PAT - includes the raw key shown once.
 #[derive(Debug, Clone)]
 pub struct CreatedToken {
     pub token: PersonalAccessToken,
@@ -75,9 +70,6 @@ pub enum AuthError {
     #[error("not authenticated")]
     NotAuthenticated,
 
-    /// The caller is authenticated but the operation is not allowed for
-    /// them (gRPC `PermissionDenied`). Distinct from `NotAuthenticated`
-    /// so the UI can surface a 403 rather than redirecting to login.
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
@@ -90,10 +82,6 @@ pub enum AuthError {
     #[error("not found")]
     NotFound,
 
-    /// Unlink would leave the account with no remaining sign-in method.
-    /// Surfaced by `unlink_oauth_provider` when the user has no password
-    /// and no other linked provider. Mapped from Forest's gRPC
-    /// `FailedPrecondition("last_auth_method")`.
     #[error("cannot disconnect the only remaining sign-in method")]
     LastAuthMethod,
 
@@ -101,38 +89,25 @@ pub enum AuthError {
     Other(String),
 }
 
-/// Result of a password login — may require MFA, or be blocked on
-/// email verification.
 #[derive(Debug, Clone)]
 pub enum LoginResult {
     Success(AuthTokens),
     MfaRequired { mfa_session_token: String },
-    /// The server requires the user to verify their email before logging
-    /// in. Forage shows a "verify your email" page with a resend form.
     EmailNotVerified,
 }
 
-/// Result of a native register call. May either log the user in
-/// immediately or request that the verification flow be driven before
-/// any session is created.
 #[derive(Debug, Clone)]
 pub enum RegisterResult {
     Success(AuthTokens),
-    /// Forest withheld tokens because email verification is required.
-    /// The user row exists; forage now triggers the verification email.
     VerificationRequired,
 }
 
-/// Result of an `add_email` call.
 #[derive(Debug, Clone)]
 pub struct AddEmailResult {
     pub email: UserEmail,
-    /// True when the server requires verification of the newly added
-    /// email. Forage uses this to drive a per-email verification flow.
     pub email_verification_required: bool,
 }
 
-/// MFA setup info (QR code provisioning URI + base32 secret).
 #[derive(Debug, Clone)]
 pub struct MfaSetup {
     pub mfa_id: String,
@@ -140,7 +115,6 @@ pub struct MfaSetup {
     pub secret: String,
 }
 
-/// Result of an OAuth login via forest-server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthLoginResult {
     pub user: User,
@@ -148,8 +122,6 @@ pub struct OAuthLoginResult {
     pub is_new_user: bool,
 }
 
-/// Trait for communicating with forest-server's UsersService.
-/// Object-safe via async_trait so we can use `Arc<dyn ForestAuth>`.
 #[async_trait::async_trait]
 pub trait ForestAuth: Send + Sync {
     async fn register(
@@ -234,8 +206,6 @@ pub trait ForestAuth: Send + Sync {
         email: &str,
     ) -> Result<AddEmailResult, AuthError>;
 
-    /// Service-account-only confirmation of an email after a token
-    /// redemption (called by the verify-email route).
     async fn confirm_email_verification(&self, email: &str) -> Result<(), AuthError>;
 
     async fn remove_email(
@@ -245,9 +215,7 @@ pub trait ForestAuth: Send + Sync {
         email: &str,
     ) -> Result<(), AuthError>;
 
-    /// Log in or create a user via a pre-verified OAuth identity.
-    /// The caller (Forage) has already exchanged the authorization code with
-    /// the provider. This call requires service-account auth.
+    /// Requires service-account auth and an identity the caller already verified.
     async fn oauth_login(
         &self,
         provider: &str,
@@ -257,21 +225,18 @@ pub trait ForestAuth: Send + Sync {
         picture_url: Option<&str>,
     ) -> Result<OAuthLoginResult, AuthError>;
 
-    /// Complete login after MFA challenge.
     async fn verify_login_mfa(
         &self,
         mfa_session_token: &str,
         code: &str,
     ) -> Result<AuthTokens, AuthError>;
 
-    /// Begin MFA setup (returns QR code provisioning URI).
     async fn setup_mfa(
         &self,
         access_token: &str,
         user_id: &str,
     ) -> Result<MfaSetup, AuthError>;
 
-    /// Verify MFA setup with a TOTP code.
     async fn verify_mfa_setup(
         &self,
         access_token: &str,
@@ -279,7 +244,6 @@ pub trait ForestAuth: Send + Sync {
         code: &str,
     ) -> Result<(), AuthError>;
 
-    /// Disable MFA (requires valid TOTP code).
     async fn disable_mfa(
         &self,
         access_token: &str,
@@ -287,25 +251,14 @@ pub trait ForestAuth: Send + Sync {
         code: &str,
     ) -> Result<(), AuthError>;
 
-    /// List the OAuth identities linked to a user (GitHub, Google, etc.).
-    /// Sourced from Forest's `identities` table via `GetUser`.
-    /// Slack identities are NOT included — they live in Forage's
-    /// `slack_user_links` and are merged in the route handler.
+    /// Excludes Slack identities, which live in Forage's `slack_user_links`.
     async fn list_linked_identities(
         &self,
         access_token: &str,
         user_id: &str,
     ) -> Result<Vec<linked::LinkedIdentity>, AuthError>;
 
-    /// Link an OAuth provider to an existing user.
-    /// Maps Forest's `LinkOAuthProvider` RPC. The provider profile must
-    /// already have been verified by the caller (OIDC exchange).
-    ///
-    /// Errors:
-    /// - `AuthError::AlreadyExists("provider")` — this external account is
-    ///   already linked to another Forage user.
-    /// - `AuthError::AlreadyExists("user_provider")` — this user already
-    ///   has a link for this provider; disconnect first.
+    /// `AlreadyExists("provider")`: taken by another user; `"user_provider"`: already linked here.
     async fn link_oauth_provider(
         &self,
         access_token: &str,
@@ -313,9 +266,7 @@ pub trait ForestAuth: Send + Sync {
         input: &linked::LinkOAuthInput,
     ) -> Result<(), AuthError>;
 
-    /// Unlink an OAuth provider from a user.
-    /// Maps Forest's `UnlinkOAuthProvider` RPC. Idempotent at the API
-    /// level (Forest returns success even if no row existed).
+    /// Idempotent: succeeds even when no link existed.
     async fn unlink_oauth_provider(
         &self,
         access_token: &str,
@@ -323,9 +274,6 @@ pub trait ForestAuth: Send + Sync {
         provider: linked::LinkedProvider,
     ) -> Result<(), AuthError>;
 
-    /// Approve a forest CLI device-login grant on behalf of the
-    /// browser-authenticated user. Service-account-only on the forest
-    /// side. See apps/forest/TASKS/022-device-login.md.
     async fn approve_device_login(
         &self,
         user_code: &str,
@@ -334,7 +282,6 @@ pub trait ForestAuth: Send + Sync {
         approving_user_agent: &str,
     ) -> Result<(), AuthError>;
 
-    /// Deny a forest CLI device-login grant. Service-account-only.
     async fn deny_device_login(
         &self,
         user_code: &str,
@@ -342,20 +289,15 @@ pub trait ForestAuth: Send + Sync {
     ) -> Result<(), AuthError>;
 }
 
-/// Identity info obtained from an OIDC provider after exchanging the auth code.
 #[derive(Debug, Clone)]
 pub struct OidcIdentity {
     pub sub: String,
     pub email: String,
     pub name: String,
     pub picture_url: Option<String>,
-    /// Provider-native handle (e.g. GitHub `login`). None when the
-    /// provider does not expose one separate from `name`.
     pub login: Option<String>,
 }
 
-/// Trait for exchanging an OAuth authorization code with a provider.
-/// Abstracted for testability — tests can mock this without an HTTP server.
 #[async_trait::async_trait]
 pub trait OidcExchange: Send + Sync {
     async fn exchange_code(

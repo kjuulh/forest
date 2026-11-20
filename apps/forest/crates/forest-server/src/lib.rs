@@ -7,8 +7,6 @@ pub mod domains;
 mod event_store;
 mod repositories;
 pub mod tls;
-/// Re-exported for the OAuth reaper acceptance test (repository layer is
-/// otherwise crate-internal).
 pub use repositories::oauth_apps::OAuthAppRepository;
 mod servehttp;
 pub mod services;
@@ -27,7 +25,9 @@ pub mod destinations;
 pub mod grpc;
 pub mod intent_coordinator;
 pub mod oauth_reaper;
+pub mod release_drain;
 pub mod release_reaper;
+pub mod replicas;
 pub mod runner_manager;
 pub mod scheduler;
 mod temp_dir;

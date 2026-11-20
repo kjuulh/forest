@@ -5,10 +5,6 @@ import (
 	"forest.sh/forest/deployment@v0"
 )
 
-// --- Input spec ---
-// Note: `environment` is NOT in the spec — it comes from the deployment
-// context (forest/config.json `env` field) and is available to terraform
-// via `local.full_config.env`.
 #Spec: sdk.#ForestSpec & {
 	name:     string & =~"^[a-z][a-z0-9-]*$"
 	replicas: int & >=1 & <=100 | *1
@@ -17,7 +13,6 @@ import (
 	env_vars: #EnvVars
 }
 
-// --- Commands ---
 #Commands: sdk.#ForestCommands & {
 	prepare: {
 		description: "Generate Terraform configuration files"
@@ -43,8 +38,6 @@ import (
 	}
 }
 
-// --- Hooks ---
-// Implements the forest/deployment contract.
 #Hooks: sdk.#ForestHooks & {
 	"forest/deployment": deployment.#DeploymentHooks & {
 		prepare: description: "Generate Terraform files for deployment"
@@ -53,7 +46,6 @@ import (
 	}
 }
 
-// --- Types ---
 #Port: {
 	name:      string
 	port:      int & >0 & <=65535

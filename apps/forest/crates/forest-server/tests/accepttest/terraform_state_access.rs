@@ -1,7 +1,3 @@
-//! Operator access to terraform@1 state (understory-io/forest#282): a
-//! short-lived backend credential, versioned reads, and force-unlock — each
-//! restricted to the organisation's admins.
-
 use axum::body::{Body, to_bytes};
 use base64::Engine as _;
 use forest_grpc_interface::*;
@@ -34,7 +30,6 @@ async fn register_user(f: &Fixture) -> String {
         .access_token
 }
 
-/// An org with a project and an environment, owned by a fresh user.
 struct World {
     token: String,
     org: String,
@@ -159,7 +154,6 @@ async fn an_admin_gets_a_credential_that_works_against_the_backend() {
     let w = world(&f).await;
     terraform_destination(&f, &w, "tf-only").await;
 
-    // Read-only by default.
     let ro = f
         .terraform_state()
         .issue_terraform_state_credential(authed(
@@ -271,7 +265,6 @@ async fn another_organisation_cannot_touch_the_state() {
         .await;
     assert!(unlock.is_err());
 
-    // Nor with no token at all.
     let anonymous = f
         .terraform_state()
         .get_terraform_state(tonic::Request::new(GetTerraformStateRequest {
@@ -287,7 +280,6 @@ async fn versions_are_readable_latest_first_and_by_number() {
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     terraform_destination(&f, &w, "tf-only").await;
-    // One terraform destination: the legacy id, as a run would resolve it.
     let state_id = forest_server::destinations::terraformv1::TerraformStateStore::legacy_state_id(
         &w.env,
         &w.project_id,
@@ -355,7 +347,6 @@ async fn several_terraform_destinations_need_one_named() {
     let w = world(&f).await;
     terraform_destination(&f, &w, "tf-a").await;
     terraform_destination(&f, &w, "tf-b").await;
-    // tf-a has run, so it owns the legacy id; tf-b has one of its own.
     let legacy = forest_server::destinations::terraformv1::TerraformStateStore::legacy_state_id(
         &w.env,
         &w.project_id,
@@ -450,15 +441,19 @@ async fn force_unlock_reports_what_it_removed() {
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     terraform_destination(&f, &w, "tf-only").await;
-    // One terraform destination: the legacy id, as a run would resolve it.
     let state_id = forest_server::destinations::terraformv1::TerraformStateStore::legacy_state_id(
         &w.env,
         &w.project_id,
     );
+    let owner = uuid::Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO terraform_state_locks (state_id, lock_id) VALUES ($1, 'crashed-apply')",
+        "INSERT INTO terraform_state_locks
+             (state_id, lock_id, operation, who, principal, release_id, replica)
+         VALUES ($1, 'crashed-apply', 'OperationTypeApply', 'root@task', $2, $3, 'replica-a')",
     )
     .bind(&state_id)
+    .bind(format!("release:{owner}@replica-a:org/dest"))
+    .bind(owner)
     .execute(&f.db)
     .await
     .unwrap();
@@ -476,6 +471,16 @@ async fn force_unlock_reports_what_it_removed() {
         .unwrap()
         .into_inner();
     assert_eq!(listed.lock_id, "crashed-apply");
+    let lock = listed.lock.expect("versions reports who holds the lock");
+    assert_eq!(lock.lock_id, "crashed-apply");
+    assert_eq!(lock.operation, "OperationTypeApply");
+    assert_eq!(lock.who, "root@task");
+    assert_eq!(lock.release_id, owner.to_string());
+    assert_eq!(lock.holder, format!("forest release {owner} on replica-a"));
+    assert_eq!(
+        lock.release_status, "",
+        "the owning release is not on record"
+    );
 
     let unlocked = f
         .terraform_state()
@@ -493,7 +498,6 @@ async fn force_unlock_reports_what_it_removed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_member_who_is_not_an_admin_is_refused_every_call() {
-    // Admin only, reads included: a pulled state carries secrets.
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     terraform_destination(&f, &w, "tf-only").await;

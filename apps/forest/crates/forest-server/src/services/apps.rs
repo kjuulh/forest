@@ -1,7 +1,5 @@
 use uuid::Uuid;
 
-// Return types shared between app_aggregate service and gRPC layer.
-
 pub struct AppInfo {
     pub id: Uuid,
     pub organisation_id: Uuid,

@@ -9,45 +9,54 @@ use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
     services::{
-        component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+        component_aggregate::{
+            BinaryArtifact, BinaryId, BinaryRange, ComponentServiceState, ComponentVersion,
+            DownloadBinaryError, FileStream,
+        },
         oauth_apps::SCOPE_COMPONENTS_PUBLISH,
     },
     state::State,
 };
 
-/// gRPC message payload size for binary downloads.
-///
-/// Unchanged from the pre-DATA-505 implementation on purpose — the wire shape
-/// stays byte-for-byte what older clients already expect. What changed is that
-/// these are now cut from a live S3 stream instead of from a fully buffered
-/// copy of the artifact.
 const DOWNLOAD_CHUNK_SIZE: usize = 1024 * 1024;
 
-/// Re-cut an object-storage byte stream into fixed-size gRPC messages.
-///
-/// S3 hands back HTTP body chunks of whatever size it likes (often tens of
-/// KiB). Emitting one gRPC message per S3 chunk would multiply per-message
-/// framing overhead, so chunks are coalesced up to `chunk_size` and flushed as
-/// they fill; the final message carries the remainder. An empty object yields
-/// no messages, exactly as before.
-///
-/// Pulling from S3 only happens when the consumer polls, so tonic's HTTP/2
-/// flow control backpressures all the way through to object storage and memory
-/// stays bounded at roughly one chunk.
 fn chunked_download(
     bytes: crate::object_store::ByteStream,
     chunk_size: usize,
+    start: u64,
+    artifact: BinaryArtifact,
 ) -> impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>> + Send {
     struct Cursor {
         bytes: crate::object_store::ByteStream,
         buffer: Vec<u8>,
+        offset: u64,
+        artifact: Option<BinaryArtifact>,
         finished: bool,
+    }
+
+    impl Cursor {
+        fn message(&mut self, chunk: Vec<u8>) -> DownloadBinaryResponse {
+            let offset = self.offset;
+            self.offset += chunk.len() as u64;
+            let (total_size, sha256) = match self.artifact.take() {
+                Some(a) => (a.size_bytes, a.sha256),
+                None => (0, String::new()),
+            };
+            DownloadBinaryResponse {
+                chunk,
+                offset,
+                total_size,
+                sha256,
+            }
+        }
     }
 
     futures::stream::unfold(
         Cursor {
             bytes,
             buffer: Vec::with_capacity(chunk_size),
+            offset: start,
+            artifact: Some(artifact),
             finished: false,
         },
         move |mut cursor| async move {
@@ -55,10 +64,13 @@ fn chunked_download(
                 return None;
             }
             loop {
-                if cursor.buffer.len() >= chunk_size {
-                    let remainder = cursor.buffer.split_off(chunk_size);
+                let first = cursor.artifact.is_some();
+                if cursor.buffer.len() >= chunk_size || (first && !cursor.buffer.is_empty()) {
+                    let cut = cursor.buffer.len().min(chunk_size);
+                    let remainder = cursor.buffer.split_off(cut);
                     let chunk = std::mem::replace(&mut cursor.buffer, remainder);
-                    return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                    let msg = cursor.message(chunk);
+                    return Some((Ok(msg), cursor));
                 }
                 match cursor.bytes.next().await {
                     Some(Ok(part)) => cursor.buffer.extend_from_slice(&part),
@@ -72,7 +84,8 @@ fn chunked_download(
                             return None;
                         }
                         let chunk = std::mem::take(&mut cursor.buffer);
-                        return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                        let msg = cursor.message(chunk);
+                        return Some((Ok(msg), cursor));
                     }
                 }
             }
@@ -113,11 +126,11 @@ impl RegistryService for RegistryServer {
         tracing::info!("get component");
         let actor = authorize::extract_actor(&request)?;
         let request = request.into_inner();
-        authorize::require_org_access(
+        authorize::require_component_read(
             &self.state.db,
             &actor,
             &request.organisation,
-            OrgRole::Member,
+            &request.name,
         )
         .await?;
 
@@ -140,7 +153,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentVersionResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let component = self
@@ -215,10 +228,6 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<UnpublishVersionResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let request = request.into_inner();
-        // TASKS/025: org member is sufficient — by symmetry with publish,
-        // anyone who can publish can unpublish. Admin-only escalation
-        // would create asymmetry that locks publishers out of cleaning
-        // their own mistakes.
         authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -266,8 +275,6 @@ impl RegistryService for RegistryServer {
             .context("invalid upload_context UUID")
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
 
-        // Tolerate unknown uploads: skip auth on no-op so client retries are
-        // safe even after server-side GC. If the upload exists, auth must pass.
         if let Ok(()) = authorize_upload(&self.state, &actor, upload_id).await {
             self.state
                 .component_service()
@@ -322,7 +329,7 @@ impl RegistryService for RegistryServer {
             .parse()
             .context("failed to parse uuid")
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-        authorize_component(&self.state, &actor, component_id).await?;
+        authorize_component_files(&self.state, &actor, component_id).await?;
 
         let mut stream = FileStream::new();
         let take_stream = stream.take_stream();
@@ -337,8 +344,6 @@ impl RegistryService for RegistryServer {
         Ok(tonic::Response::new(take_stream))
     }
 
-    // --- v2: binary component RPCs ---
-
     async fn upload_binary(
         &self,
         request: tonic::Request<tonic::Streaming<UploadBinaryRequest>>,
@@ -346,7 +351,6 @@ impl RegistryService for RegistryServer {
         let actor = authorize::extract_actor(&request)?;
         let mut stream = request.into_inner();
 
-        // First message must be metadata
         let first = stream
             .next()
             .await
@@ -369,7 +373,6 @@ impl RegistryService for RegistryServer {
 
         authorize_upload(&self.state, &actor, upload_id).await?;
 
-        // Collect binary chunks with size limit
         let mut binary_content = Vec::new();
         while let Some(msg) = stream.next().await {
             let msg = msg.map_err(|e| tonic::Status::internal(e.to_string()))?;
@@ -391,7 +394,6 @@ impl RegistryService for RegistryServer {
             }
         }
 
-        // Verify SHA-256
         use sha2::{Digest, Sha256};
         let actual_sha256 = hex::encode(Sha256::digest(&binary_content));
         if actual_sha256 != metadata.sha256 {
@@ -427,37 +429,53 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::DownloadBinaryStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
-        // Stream the object out of S3 rather than buffering it (DATA-505).
-        //
-        // This used to `download_binary(..)` the whole artifact into a `Vec`
-        // and then `.chunks(1 MiB).collect()` it into a second full copy of
-        // the file as a vector of ready-made messages. Time-to-first-byte was
-        // therefore the entire S3 GET, and peak RSS was ~2x the artifact per
-        // concurrent download — which is what made parallel downloads on the
-        // client side unattractive.
-        //
-        // The wire format is deliberately unchanged: still `DownloadBinary`,
-        // still ~1 MiB `DownloadBinaryResponse` messages. Older clients cannot
-        // tell the difference.
-        let byte_stream = self
+        let range = match (req.offset, req.length) {
+            (0, 0) => BinaryRange::Whole,
+            (_, 0) => {
+                return Err(tonic::Status::invalid_argument(
+                    "offset requires a non-zero length",
+                ));
+            }
+            (offset, length) => BinaryRange::Bytes { offset, length },
+        };
+        let expected_sha256 =
+            (!req.expected_sha256.is_empty()).then_some(req.expected_sha256.as_str());
+
+        let id = BinaryId {
+            organisation: &req.organisation,
+            name: &req.name,
+            version: &req.version,
+            os: &req.os,
+            arch: &req.arch,
+        };
+        let (artifact, byte_stream) = self
             .state
             .component_service()
-            .download_binary_stream(
-                &req.organisation,
-                &req.name,
-                &req.version,
-                &req.os,
-                &req.arch,
-            )
+            .download_binary_stream(&id, range, expected_sha256)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(|e| match e {
+                DownloadBinaryError::NotFound(_) => tonic::Status::not_found(e.to_string()),
+                DownloadBinaryError::DigestChanged { .. } => {
+                    tonic::Status::failed_precondition(e.to_string())
+                }
+                DownloadBinaryError::OutOfRange { .. } => {
+                    tonic::Status::out_of_range(e.to_string())
+                }
+                DownloadBinaryError::Other(e) => tonic::Status::internal(format!("{e:#}")),
+            })?;
 
+        let start = match range {
+            BinaryRange::Whole => 0,
+            BinaryRange::Bytes { offset, .. } => offset,
+        };
         Ok(tonic::Response::new(Box::pin(chunked_download(
             byte_stream,
             DOWNLOAD_CHUNK_SIZE,
+            start,
+            artifact,
         ))))
     }
 
@@ -490,7 +508,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentManifestResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let manifest_json = self
@@ -517,7 +535,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<ListComponentVersionsResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+        authorize::require_component_read(&self.state.db, &actor, &req.organisation, &req.name)
             .await?;
 
         let versions = self
@@ -541,8 +559,6 @@ impl RegistryService for RegistryServer {
         }))
     }
 
-    // --- Global-tools (TASKS/018-global-tools.md §1a.2c) ---
-
     type ListOrgToolsStream =
         Pin<Box<dyn Stream<Item = std::result::Result<OrgToolEntry, tonic::Status>> + Send>>;
 
@@ -552,8 +568,7 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::ListOrgToolsStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
-            .await?;
+        authorize::require_org_read(&self.state.db, &actor, &req.organisation).await?;
 
         let rows = self
             .state
@@ -580,8 +595,6 @@ impl RegistryService for RegistryServer {
         Ok(tonic::Response::new(Box::pin(stream)))
     }
 
-    // --- Registry UI / discovery ---
-
     async fn search_components(
         &self,
         request: tonic::Request<SearchComponentsRequest>,
@@ -589,14 +602,9 @@ impl RegistryService for RegistryServer {
         let actor = authorize::try_extract_actor(&request);
         let req = request.into_inner();
 
-        // Resolve visibility scope based on caller:
-        // - Anonymous: public projects only
-        // - Service account: all components (cross-org infra access)
-        // - User: public projects + private projects from their orgs
-        // - App: public projects + their org's private projects
         let member_orgs = match &actor {
-            None => vec![],                               // anonymous
-            Some(Actor::ServiceAccount { .. }) => vec![], // sees all via public_only=false
+            None => vec![],
+            Some(Actor::ServiceAccount { .. }) => vec![],
             Some(Actor::User { user_id }) => sqlx::query_scalar::<_, String>(
                 "SELECT o.name FROM organisations o
                      JOIN organisation_members om ON om.organisation_id = o.id
@@ -647,18 +655,10 @@ impl RegistryService for RegistryServer {
         let actor = authorize::try_extract_actor(&request);
         let req = request.into_inner();
 
-        // Check access: authenticated users need org membership for private components.
-        // Unauthenticated users can only see public components.
         let is_authenticated = actor.is_some();
         if let Some(ref actor) = actor {
-            // Authenticated: enforce org membership (service accounts bypass this)
-            authorize::require_org_access(
-                &self.state.db,
-                actor,
-                &req.organisation,
-                OrgRole::Member,
-            )
-            .await?;
+            authorize::require_component_read(&self.state.db, actor, &req.organisation, &req.name)
+                .await?;
         }
 
         let detail = self
@@ -674,20 +674,10 @@ impl RegistryService for RegistryServer {
                 ))
             })?;
 
-        // Unauthenticated users can only see components from public projects.
         if !is_authenticated {
-            let is_public: Option<bool> = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                    SELECT 1 FROM projects p
-                    WHERE p.organisation = $1 AND p.project = $2 AND p.visibility = 'public'
-                )",
-            )
-            .bind(&req.organisation)
-            .bind(&req.name)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
-            let is_public = is_public.unwrap_or(false);
+            let is_public =
+                authorize::component_is_public(&self.state.db, &req.organisation, &req.name)
+                    .await?;
 
             if !is_public {
                 return Err(tonic::Status::not_found(format!(
@@ -699,16 +689,6 @@ impl RegistryService for RegistryServer {
 
         Ok(tonic::Response::new(detail))
     }
-
-    // --- Public (unauthenticated) registry RPCs ---
-    //
-    // These never read the caller's identity. They always pass
-    // `see_all=false, member_orgs=[]` to the component service (search)
-    // or check `visibility = 'public'` explicitly (detail / manifest).
-    // The auth middleware in `auth_layer.rs` marks them as `AuthMode::None`
-    // so even an attached bearer token is ignored — by construction a
-    // misconfigured forage cannot escalate a service-account key into
-    // cross-org read access via these endpoints.
 
     async fn search_public_components(
         &self,
@@ -723,14 +703,7 @@ impl RegistryService for RegistryServer {
         let (rows, total_count) = self
             .state
             .component_service()
-            .search_components(
-                &req.query,
-                &req.organisation,
-                page_size,
-                offset,
-                /* see_all = */ false,
-                /* member_orgs = */ &[],
-            )
+            .search_components(&req.query, &req.organisation, page_size, offset, false, &[])
             .await
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
@@ -746,7 +719,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetPublicComponentDetailResponse>, tonic::Status> {
         let req = request.into_inner();
 
-        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        let is_public =
+            authorize::component_is_public(&self.state.db, &req.organisation, &req.name).await?;
         if !is_public {
             return Err(tonic::Status::not_found(format!(
                 "component not found: {}/{}",
@@ -783,7 +757,8 @@ impl RegistryService for RegistryServer {
     {
         let req = request.into_inner();
 
-        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        let is_public =
+            authorize::component_is_public(&self.state.db, &req.organisation, &req.name).await?;
         if !is_public {
             return Err(tonic::Status::not_found(format!(
                 "manifest not found for {}/{}@{}",
@@ -810,32 +785,8 @@ impl RegistryService for RegistryServer {
     }
 }
 
-/// Shared helper for the public RPCs. Returns `true` only when a row in
-/// `projects` exists with `visibility = 'public'`. A missing project row
-/// is treated as private (matches the default behaviour in
-/// `search_components` and `get_component_detail`).
-async fn is_public_project(
-    db: &sqlx::PgPool,
-    organisation: &str,
-    name: &str,
-) -> Result<bool, tonic::Status> {
-    sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(
-            SELECT 1 FROM projects p
-            WHERE p.organisation = $1 AND p.project = $2 AND p.visibility = 'public'
-        )",
-    )
-    .bind(organisation)
-    .bind(name)
-    .fetch_one(db)
-    .await
-    .map_err(|e| tonic::Status::internal(e.to_string()))
-}
-
-/// Maximum binary upload size: 500 MB.
 const MAX_BINARY_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
 
-/// Look up the owning organisation for an upload_context UUID, then check org access.
 async fn authorize_upload(
     state: &State,
     actor: &crate::actor::Actor,
@@ -855,13 +806,6 @@ async fn authorize_upload(
     Ok(())
 }
 
-/// An OAuth client-credentials token changes the registry only with the
-/// `components:publish` grant. Users, service accounts and legacy app tokens
-/// keep the org-member rule above.
-///
-/// The auth layer already refuses a scoped token on any method its scopes do
-/// not cover; this repeats the rule where the write happens, so a later
-/// change to that method list cannot quietly open publishing.
 fn require_component_publish_scope(actor: &Actor) -> Result<(), tonic::Status> {
     if let Actor::App {
         scopes: Some(scopes),
@@ -876,21 +820,20 @@ fn require_component_publish_scope(actor: &Actor) -> Result<(), tonic::Status> {
     Ok(())
 }
 
-/// Look up the owning organisation for a component UUID, then check org access.
-async fn authorize_component(
+async fn authorize_component_files(
     state: &State,
     actor: &crate::actor::Actor,
     component_id: Uuid,
 ) -> Result<(), tonic::Status> {
-    let org: String = sqlx::query_scalar("SELECT organisation FROM components WHERE id = $1")
-        .bind(component_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
-        .ok_or_else(|| tonic::Status::not_found("component not found"))?;
+    let (org, name): (String, String) =
+        sqlx::query_as("SELECT organisation, name FROM components WHERE id = $1")
+            .bind(component_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
+            .ok_or_else(|| tonic::Status::not_found("component not found"))?;
 
-    authorize::require_org_access(&state.db, actor, &org, OrgRole::Member).await?;
-    Ok(())
+    authorize::require_component_read(&state.db, actor, &org, &name).await
 }
 
 impl From<ComponentVersion> for Component {
@@ -937,7 +880,6 @@ mod component_publish_scope_tests {
         );
     }
 
-    /// Legacy app tokens predate scopes and keep what they could always do.
     #[test]
     fn a_legacy_app_token_keeps_its_access() {
         assert!(require_component_publish_scope(&app(None)).is_ok());
@@ -948,8 +890,6 @@ mod component_publish_scope_tests {
 mod download_chunking_tests {
     use super::*;
 
-    /// Build a `ByteStream` from pre-baked parts, standing in for whatever
-    /// chunk boundaries S3 happens to hand us.
     fn stream_of(parts: Vec<Vec<u8>>) -> crate::object_store::ByteStream {
         Box::pin(futures::stream::iter(
             parts.into_iter().map(|p| Ok(bytes::Bytes::from(p))),
@@ -968,6 +908,20 @@ mod download_chunking_tests {
         )
     }
 
+    fn artifact() -> BinaryArtifact {
+        BinaryArtifact {
+            sha256: "ab".repeat(32),
+            size_bytes: 4242,
+        }
+    }
+
+    fn chunked(
+        bytes: crate::object_store::ByteStream,
+        chunk_size: usize,
+    ) -> impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>> {
+        chunked_download(bytes, chunk_size, 0, artifact())
+    }
+
     async fn collect(
         stream: impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>>,
     ) -> std::result::Result<Vec<Vec<u8>>, tonic::Status> {
@@ -980,20 +934,17 @@ mod download_chunking_tests {
     }
 
     #[tokio::test]
-    async fn coalesces_small_parts_into_full_chunks() {
-        // 10 parts of 100 bytes, cut at 256 → 256 + 256 + 256 + 232.
+    async fn coalesces_small_parts_into_full_chunks_after_the_first() {
         let parts = (0..10).map(|i| vec![i as u8; 100]).collect();
-        let chunks = collect(chunked_download(stream_of(parts), 256))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(parts), 256)).await.unwrap();
         let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
-        assert_eq!(sizes, vec![256, 256, 256, 232]);
+        assert_eq!(sizes, vec![100, 256, 256, 256, 132]);
         assert_eq!(sizes.iter().sum::<usize>(), 1000);
     }
 
     #[tokio::test]
     async fn splits_parts_larger_than_the_chunk_size() {
-        let chunks = collect(chunked_download(stream_of(vec![vec![7u8; 1000]]), 256))
+        let chunks = collect(chunked(stream_of(vec![vec![7u8; 1000]]), 256))
             .await
             .unwrap();
         let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
@@ -1002,7 +953,6 @@ mod download_chunking_tests {
 
     #[tokio::test]
     async fn reassembles_to_exactly_the_original_bytes() {
-        // Awkward part boundaries, none aligned to the chunk size.
         let parts = vec![
             (0u8..37).collect::<Vec<u8>>(),
             (37u8..40).collect(),
@@ -1010,16 +960,14 @@ mod download_chunking_tests {
             (200u8..255).collect(),
         ];
         let expected: Vec<u8> = parts.iter().flatten().copied().collect();
-        let chunks = collect(chunked_download(stream_of(parts), 64))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(parts), 64)).await.unwrap();
         let joined: Vec<u8> = chunks.into_iter().flatten().collect();
         assert_eq!(joined, expected, "download must be byte-identical");
     }
 
     #[tokio::test]
     async fn exact_multiple_of_the_chunk_size_emits_no_empty_trailer() {
-        let chunks = collect(chunked_download(stream_of(vec![vec![1u8; 512]]), 256))
+        let chunks = collect(chunked(stream_of(vec![vec![1u8; 512]]), 256))
             .await
             .unwrap();
         assert_eq!(chunks.len(), 2);
@@ -1028,26 +976,18 @@ mod download_chunking_tests {
 
     #[tokio::test]
     async fn an_empty_object_yields_no_messages() {
-        // Matches the pre-DATA-505 behaviour: `[].chunks(n)` produced nothing.
-        let chunks = collect(chunked_download(stream_of(vec![]), 256))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(vec![]), 256)).await.unwrap();
         assert!(chunks.is_empty());
 
-        // Empty parts in the middle of a stream must not produce empty
-        // messages either.
-        let chunks = collect(chunked_download(
-            stream_of(vec![vec![], vec![], vec![]]),
-            256,
-        ))
-        .await
-        .unwrap();
+        let chunks = collect(chunked(stream_of(vec![vec![], vec![], vec![]]), 256))
+            .await
+            .unwrap();
         assert!(chunks.is_empty());
     }
 
     #[tokio::test]
     async fn a_storage_error_surfaces_as_a_stream_error() {
-        let result = collect(chunked_download(
+        let result = collect(chunked(
             failing_stream(vec![vec![1u8; 300]], "s3 connection reset"),
             256,
         ))
@@ -1059,10 +999,7 @@ mod download_chunking_tests {
 
     #[tokio::test]
     async fn chunks_already_sent_before_a_failure_are_delivered() {
-        // A mid-transfer S3 failure must not retroactively hide the bytes the
-        // client already received — it has to arrive as a stream error after
-        // them, so the client's sha check is what rejects the partial file.
-        let mut stream = Box::pin(chunked_download(
+        let mut stream = Box::pin(chunked(
             failing_stream(vec![vec![9u8; 600]], "truncated"),
             256,
         ));
@@ -1075,9 +1012,8 @@ mod download_chunking_tests {
 
     #[tokio::test]
     async fn the_production_chunk_size_is_the_legacy_wire_size() {
-        // Old clients were written against 1 MiB messages; keep it that way.
         assert_eq!(DOWNLOAD_CHUNK_SIZE, 1024 * 1024);
-        let chunks = collect(chunked_download(
+        let chunks = collect(chunked(
             stream_of(vec![vec![0u8; DOWNLOAD_CHUNK_SIZE + 7]]),
             DOWNLOAD_CHUNK_SIZE,
         ))
@@ -1086,6 +1022,44 @@ mod download_chunking_tests {
         assert_eq!(
             chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
             vec![DOWNLOAD_CHUNK_SIZE, 7]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_first_message_is_not_held_back_for_a_full_chunk() {
+        let parts = futures::stream::iter(vec![Ok(bytes::Bytes::from(vec![1u8; 10]))])
+            .chain(futures::stream::pending());
+        let mut stream = Box::pin(chunked(Box::pin(parts), 1024 * 1024));
+        let first = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("the first message must not wait for more bytes")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.chunk.len(), 10);
+        assert_eq!(first.total_size, 4242);
+    }
+
+    #[tokio::test]
+    async fn messages_carry_their_offset_and_only_the_first_names_the_artifact() {
+        let mut stream = Box::pin(chunked_download(
+            stream_of(vec![vec![5u8; 300], vec![6u8; 300]]),
+            256,
+            8 * 1024 * 1024,
+            artifact(),
+        ));
+        let mut messages = Vec::new();
+        while let Some(m) = stream.next().await {
+            messages.push(m.unwrap());
+        }
+        let offsets: Vec<u64> = messages.iter().map(|m| m.offset).collect();
+        let base = 8 * 1024 * 1024;
+        assert_eq!(offsets, vec![base, base + 256, base + 512]);
+        assert_eq!(messages[0].total_size, 4242);
+        assert_eq!(messages[0].sha256, "ab".repeat(32));
+        assert!(
+            messages[1..]
+                .iter()
+                .all(|m| m.total_size == 0 && m.sha256.is_empty())
         );
     }
 }

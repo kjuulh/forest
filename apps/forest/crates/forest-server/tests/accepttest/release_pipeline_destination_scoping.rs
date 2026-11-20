@@ -1,22 +1,3 @@
-//! A pipeline deploy stage releases to the destinations the project declared.
-//!
-//! `release_destination_scoping.rs` covers this property on the *request* path,
-//! where the declaration arrives as an argument (`--destination`). The pipeline
-//! path has no caller to pass it one: the stage is defined server-side and
-//! activated by the coordinator, possibly long after the request and possibly
-//! for a release nobody typed a command for. It resolved `deploy(<environment>)`
-//! to every destination in the environment and stopped there.
-//!
-//! Found the hard way: `canopy-data-gateway` declared `^data-prod/.*$` for an
-//! environment holding an ECS place *and* a shiitake slice registry. Both got
-//! scheduled. The slice registry failed, which is the only reason anyone
-//! noticed — against a destination type that tolerates whatever it is handed,
-//! the same wrong decision is silent.
-//!
-//! The declaration reaches the coordinator via `annotations.deployment_items`,
-//! parsed at annotate time from the deployment files the artifact carries. So
-//! these tests go through the real annotate path rather than seeding the column.
-
 use forest_grpc_interface::{
     DeployStageConfig, PipelineStage, PlanStageConfig, Project, ReleaseRequest, pipeline_stage,
 };
@@ -24,8 +5,6 @@ use forest_grpc_interface::{
 use crate::accepttest::fixtures::{GivenReleaseFlow, testcase};
 use crate::accepttest::release_flow::ReleaseFlowData;
 
-/// Local copy: the identical helper is module-private in each flow module, and
-/// they each keep their own rather than widening it.
 fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     let mut req = tonic::Request::new(inner);
     let val: tonic::metadata::MetadataValue<_> =
@@ -66,22 +45,13 @@ fn plan_stage(id: &str, environment: &str) -> PipelineStage {
     }
 }
 
-/// Two destinations in one environment, an artifact declaring `selectors` for
-/// it, a single-stage pipeline, and one coordinator evaluation. Returns the
-/// destination names the stage scheduled, sorted.
-///
-/// `declare_for` is the environment the artifact's declaration names, which is
-/// not always the environment the stage deploys — that difference is a case in
-/// its own right (`canopy-hubspot-ingest` is in exactly that state today).
 struct Outcome {
     scheduled: Vec<String>,
     stage_status: String,
     stage_error: Option<String>,
 }
 
-/// The type both destinations get unless a test is about the type.
 const FLUX: &str = "forest/flux@1";
-/// A second, unrelated kind, for the tests that are.
 const TERRAFORM: &str = "forest/terraform@1";
 
 #[allow(clippy::too_many_arguments)]
@@ -113,8 +83,6 @@ async fn run_stage(
     .await
 }
 
-/// As `run_stage`, but the two destinations' types and the declared types are
-/// the test's to choose. `types` is `(target, neighbour)`.
 #[allow(clippy::too_many_arguments)]
 async fn run_typed_stage(
     stage: PipelineStage,
@@ -130,9 +98,6 @@ async fn run_typed_stage(
     let target = format!("target-{suffix}");
     let neighbour = format!("neighbour-{suffix}");
 
-    // Two destinations, one environment — the shape that exposed the bug. An
-    // environment holding one destination cannot tell the two behaviours apart,
-    // which is why production stopped reproducing this after the workaround.
     let given = given
         .a_registered_user()
         .await
@@ -151,9 +116,6 @@ async fn run_typed_stage(
                 .an_uploaded_artifact_declaring_types(env, declarations)
                 .await
         }
-        // No item records at all — the project prepared nothing, so it declared
-        // nothing. Distinct from NULL, which means "annotated before the column
-        // existed"; both fan out, but only one of them is a statement.
         None => given.an_uploaded_artifact().await,
     };
     let given = given.an_annotated_release().await;
@@ -204,10 +166,6 @@ async fn run_typed_stage(
         .await?
         .into_inner();
 
-    // A pipeline release has no per-destination releases yet, so the handler
-    // surfaces the intent itself as a single entry with destination and
-    // environment left blank (they are genuinely not known until a stage
-    // activates).
     let intent_id: uuid::Uuid = resp
         .intents
         .first()
@@ -215,19 +173,7 @@ async fn run_typed_stage(
         .release_intent_id
         .parse()?;
 
-    // The fixture does not run IntentCoordinator (see `evaluate`'s doc comment),
-    // so drive the evaluation rather than sleeping on a 5s sweep.
-    //
-    // Retried rather than called once because the acceptance suite shares the dev
-    // database: a `forest-server` running locally has its own coordinator
-    // sweeping the same table, and its `FOR UPDATE SKIP LOCKED` makes our
-    // `evaluate` a no-op while it holds the row. The stage still gets activated —
-    // by the same code under test — so waiting for it to leave PENDING is correct
-    // either way, and in the normal case the first call does it.
     let stage_id_ref = stage_id.as_str();
-    // Budget deliberately generous (~15s): the suite is contended, and a run
-    // that takes 35s rather than 6s should not turn into an assertion failure
-    // about destination selection.
     for attempt in 0..60 {
         forest_server::intent_coordinator::evaluate(&when.fixture().state, intent_id).await?;
 
@@ -277,8 +223,6 @@ async fn run_typed_stage(
     })
 }
 
-/// Names the target so it can be compared against what was scheduled — the
-/// suffix is generated inside `run_stage`, so tests match on shape instead.
 fn only(scheduled: &[String], prefix: &str) -> bool {
     scheduled.len() == 1 && scheduled[0].starts_with(prefix)
 }
@@ -306,10 +250,6 @@ async fn a_deploy_stage_schedules_only_the_destinations_the_project_declared() -
     Ok(())
 }
 
-/// The other half of the contract, and the reason this change is safe to ship:
-/// a project that declares no destinations for the stage's environment keeps
-/// releasing to all of it. `infrastructure-hetzner` and the other pipeline
-/// projects depend on this.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_environment_the_project_declares_nothing_for_still_fans_out() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -327,9 +267,6 @@ async fn an_environment_the_project_declares_nothing_for_still_fans_out() -> any
     Ok(())
 }
 
-/// Declaring for a *different* environment is the same thing as declaring
-/// nothing for this one. Not hypothetical: `canopy-hubspot-ingest`'s forest.cue
-/// declares `data` while its pipeline deploys `data-prod`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_declaration_for_another_environment_does_not_narrow_this_one() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -353,10 +290,6 @@ async fn a_declaration_for_another_environment_does_not_narrow_this_one() -> any
     Ok(())
 }
 
-/// forest#288. A project that declares nothing for this environment still fans
-/// out across it — but only onto the kinds of destination its artifact renders.
-/// A terraform destination added beside the flux one it has always released to
-/// must not be scheduled: there is no terraform in the artifact to run there.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_undeclared_environment_does_not_widen_onto_a_kind_the_artifact_never_renders()
 -> anyhow::Result<()> {
@@ -381,9 +314,6 @@ async fn an_undeclared_environment_does_not_widen_onto_a_kind_the_artifact_never
     Ok(())
 }
 
-/// The migration's read-side default. Distinct from the `[]` case above: that
-/// one is "prepared and declared nothing", this one is "annotated before the
-/// column existed", and they are different code paths.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_artifact_annotated_before_this_change_still_fans_out() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -407,9 +337,6 @@ async fn an_artifact_annotated_before_this_change_still_fans_out() -> anyhow::Re
     Ok(())
 }
 
-/// Silent success having deployed nothing is the failure mode this destination
-/// type was built to avoid, so both halves are asserted: the stage failed, *and*
-/// nothing was scheduled.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_selector_matching_nothing_fails_the_stage_and_deploys_nothing() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -429,9 +356,6 @@ async fn a_selector_matching_nothing_fails_the_stage_and_deploys_nothing() -> an
     );
     assert_eq!(outcome.stage_status, "FAILED");
 
-    // The message has to send the reader somewhere. Naming the environment and
-    // the selector is the difference between "which of my selectors, in which
-    // environment" and reading the release log twice.
     let error = outcome.stage_error.unwrap_or_default();
     assert!(
         error.contains(&env) && error.contains("^nowhere/.*$"),
@@ -441,10 +365,6 @@ async fn a_selector_matching_nothing_fails_the_stage_and_deploys_nothing() -> an
     Ok(())
 }
 
-/// A selector that matches nothing while a sibling matches something is a
-/// warning, not a failure: a regex is allowed not to match, and a project
-/// declaring several regions should not break because one does not exist here
-/// yet.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_selector_that_matches_some_does_not_fail_on_the_rest() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -463,12 +383,6 @@ async fn a_selector_that_matches_some_does_not_fail_on_the_rest() -> anyhow::Res
         outcome.scheduled,
     );
 
-    // Deliberately not asserting the stage is non-FAILED: a stage's terminal
-    // status follows its releases, and a release in this environment fails on
-    // arrival (the fixture's destinations are `forest/flux@1` pointed at a temp
-    // dir). What matters is that it was not failed *for selection reasons* —
-    // that message is the one `resolve_stage_destinations` produces when a
-    // declaration matches nothing.
     let error = outcome.stage_error.unwrap_or_default();
     assert!(
         !error.contains("match none of them"),
@@ -479,9 +393,6 @@ async fn a_selector_that_matches_some_does_not_fail_on_the_rest() -> anyhow::Res
     Ok(())
 }
 
-/// The second call site. The Plan arm carried a byte-identical copy of the
-/// environment query, so it inherited the bug silently; it now shares the
-/// resolver, and this test is what keeps it sharing it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plan_stage_honours_the_declaration_too() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -503,9 +414,6 @@ async fn a_plan_stage_honours_the_declaration_too() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The write side: annotate records what the project declared, untruncated.
-/// `artifact_files.destination` records the same selector cut at its first `/`,
-/// which is why scheduling reads this column and not that one.
 #[tokio::test(flavor = "multi_thread")]
 async fn annotate_records_the_declaration_with_the_selector_whole() -> anyhow::Result<()> {
     let (given, _when, _then) = testcase::<ReleaseFlowData>().await?;
@@ -548,17 +456,6 @@ async fn annotate_records_the_declaration_with_the_selector_whole() -> anyhow::R
     Ok(())
 }
 
-/// The server decides which item a deployment file belongs to, overriding
-/// whatever the client claimed.
-///
-/// This is what lets a CLI nobody will upgrade be correct. Before 0.3.10 the
-/// client worked it out itself by splitting the upload path on `/` — and both the
-/// selector (`^data-prod/.*$`) and the destination type (`forest/generic@1`)
-/// routinely contain one, so every such client recorded the selector truncated at
-/// its first slash. `commit_staging` re-derives both from the item's own record.
-///
-/// Asserted with a deliberately wrong label rather than a blank one: blank could
-/// pass by being *filled in*, which would not prove the client is overridden.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_server_overrides_what_the_client_claimed_a_file_was_for() -> anyhow::Result<()> {
     let (given, _when, _then) = testcase::<ReleaseFlowData>().await?;
@@ -576,7 +473,6 @@ async fn the_server_overrides_what_the_client_claimed_a_file_was_for() -> anyhow
         .await
         .a_destination(&format!("dest-{suffix}"), &env)
         .await
-        // Exactly what forest 0.3.8 sends: the selector cut at its first slash.
         .an_uploaded_artifact_declaring_mislabelled(&env, "^data-prod/.*$", (&env, "^data-prod"))
         .await;
 
@@ -602,16 +498,6 @@ async fn the_server_overrides_what_the_client_claimed_a_file_was_for() -> anyhow
     Ok(())
 }
 
-/// The `fungus` case, on the path that scheduled it.
-///
-/// `fungus` declared `forest/terraform@1` for a selector that reached both
-/// destinations in `platform-dev` — one terraform, one ECS. Nothing consulted
-/// the type, so a terraform plan was scheduled at the ECS place, where the
-/// artifact carries no terraform to run; it failed on arrival and the release
-/// showed a red row for a destination the project never annotated.
-///
-/// Here the selector deliberately matches both names. Only the type tells them
-/// apart.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stage_does_not_schedule_a_destination_whose_type_the_project_never_declared()
 -> anyhow::Result<()> {
@@ -637,9 +523,6 @@ async fn a_stage_does_not_schedule_a_destination_whose_type_the_project_never_de
     Ok(())
 }
 
-/// Skipped is not failed. The destination the project declares nothing for
-/// leaves no release row at all, so it cannot render red and cannot be counted
-/// against the stage — the release is in scope for exactly what was declared.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_destination_of_an_undeclared_type_leaves_no_release_row() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -669,10 +552,6 @@ async fn a_destination_of_an_undeclared_type_leaves_no_release_row() -> anyhow::
     Ok(())
 }
 
-/// The no-regression half, and the reason this is an intersection rather than a
-/// veto: a project declaring both kinds still reaches both destinations. This is
-/// `fungus` as its forest.cue stands today — an ECS item and a terraform item in
-/// one environment, one destination each.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_declaring_both_types_still_reaches_both_destinations() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());
@@ -699,11 +578,6 @@ async fn a_project_declaring_both_types_still_reaches_both_destinations() -> any
     Ok(())
 }
 
-/// A declaration that matches every name and no type is a stage that would
-/// deploy nothing, and that still fails loudly — silent success having deployed
-/// nothing is the failure mode this whole mechanism exists to prevent. The
-/// message has to say the types are what disagreed, or it sends the reader off
-/// to rewrite a regex that was already right.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_declaration_matching_only_by_name_fails_and_says_why() -> anyhow::Result<()> {
     let env = format!("accept-env-{}", uuid::Uuid::now_v7());

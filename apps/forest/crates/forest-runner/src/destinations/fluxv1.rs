@@ -10,21 +10,12 @@ use tokio::io::AsyncWriteExt;
 
 use crate::backend::{DestinationBackend, DestinationConfig, ReleaseAnnotation};
 
-// ====== DATA STRUCTURES ======
-
-/// Metadata files written to `.forest/` inside the releases directory.
-/// Stored as YAML for readability. Kustomize does not recurse into
-/// subdirectories, so `.forest/*.yaml` won't be applied by Flux.
 struct ForestMetadataFiles {
-    /// The deployment config from the prepare step.
     config_yaml: Option<String>,
-    /// Annotation context: slug, source, context, reference, destination info.
     release_yaml: String,
-    /// Original spec files as a YAML map {path: content}.
     spec_yaml: String,
 }
 
-/// Parsed and validated metadata for a flux destination.
 #[derive(Debug)]
 struct FluxMetadata {
     cluster_name: String,
@@ -37,16 +28,9 @@ struct FluxMetadata {
     git_author_name: String,
     git_author_email: String,
     local_path: Option<PathBuf>,
-    /// Optional webhook URL to trigger Flux reconciliation after push.
-    /// Typically points at a Flux Receiver endpoint.
     reconcile_url: Option<String>,
-    /// Shared HMAC secret for Flux notification webhooks back to forest.
-    /// When set, Flux Provider/Alert/Secret CRs are generated in the clusters dir.
     webhook_secret: Option<String>,
-    /// Externally-reachable forest webhook URL for Flux notifications.
-    /// Required when `webhook_secret` is set.
     forest_webhook_url: Option<String>,
-    /// Name of the Flux GitRepository CR to watch in Alert eventSources.
     flux_git_repository_name: String,
 }
 
@@ -126,7 +110,6 @@ impl FluxMetadata {
         self.local_path.is_some()
     }
 
-    /// Build the effective git URL with credentials embedded for HTTPS.
     fn effective_git_url(&self) -> anyhow::Result<String> {
         let url = self
             .git_url
@@ -142,7 +125,6 @@ impl FluxMetadata {
         Ok(url.clone())
     }
 
-    /// Build environment variables for git SSH authentication.
     fn git_env(&self) -> HashMap<String, String> {
         let mut env = HashMap::new();
         if let Some(ssh_key) = &self.git_ssh_key_path {
@@ -154,8 +136,6 @@ impl FluxMetadata {
         env
     }
 
-    /// Path within the gitops repo for release manifests.
-    /// `releases/<env>/<destination>/<cluster_name>/<namespace>/<project>`
     fn releases_path(&self, env: &str, destination_name: &str, project: &str) -> PathBuf {
         PathBuf::from("releases")
             .join(env)
@@ -165,12 +145,6 @@ impl FluxMetadata {
             .join(project)
     }
 
-    /// Directory within the gitops repo for Flux Kustomization CRs.
-    /// `clusters/<env>/<destination>/<cluster_name>/<namespace>`
-    ///
-    /// Individual project CRs are written as `<project>.yaml` inside this
-    /// directory, alongside a plain kustomize `kustomization.yaml` that
-    /// lists them as resources.
     fn clusters_dir(&self, env: &str, destination_name: &str) -> PathBuf {
         PathBuf::from("clusters")
             .join(env)
@@ -180,38 +154,20 @@ impl FluxMetadata {
     }
 }
 
-/// Execution mode: dry-run diff vs. full commit+push.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Dry-run: show what would change without writing.
     Prepare,
-    /// Full release: write, commit, and push.
     Apply,
 }
 
-/// What became of the reconcile request forest sends Flux after a push.
-///
-/// Returned from [`FluxV1Handler::run`] rather than only logged, so the caller
-/// can record it where a person looks at a release (forest-server stores it
-/// as the `reconcile` release signal). A failed reconcile never fails the
-/// release: the commit is already in the gitops repo, and Flux applies it on
-/// its next poll. But "SUCCEEDED" must not be read as "running" when nothing
-/// told Flux to sync (understory-io/forest#298).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileOutcome {
-    /// Nothing asked Flux to sync: no `reconcile_url` is configured, nothing
-    /// was pushed, this was a prepare, or the destination is in local mode.
     NotRequested,
-    /// The receiver accepted the request.
     Triggered { attempts: u32 },
-    /// Every attempt failed or the receiver refused the request. `reason`
-    /// never contains the receiver's token.
     Failed { attempts: u32, reason: String },
 }
 
 impl ReconcileOutcome {
-    /// Combine the outcomes of several matched destination directories: the
-    /// worst one is what a person needs to see.
     fn worst(self, other: ReconcileOutcome) -> ReconcileOutcome {
         fn rank(o: &ReconcileOutcome) -> u8 {
             match o {
@@ -228,45 +184,15 @@ impl ReconcileOutcome {
     }
 }
 
-// ====== HANDLER ======
-
-/// Flux v1 GitOps destination handler.
-///
-/// Takes rendered deployment files from the backend and pushes them
-/// to a git repository following the multi-cluster Flux v1 directory layout:
-///
-/// ```text
-/// clusters/<env>/<destination>/<cluster>/<namespace>/<project>/kustomization.yaml
-/// releases/<env>/<destination>/<cluster>/<namespace>/<project>/<manifest files>
-/// ```
-///
-/// The kustomization.yaml is a Flux Kustomization CR that points at the
-/// corresponding releases path. Flux running on the target cluster reconciles
-/// the manifests automatically.
-///
-/// Supports two modes via destination metadata:
-/// - **Git mode** (`git_url`): clone -> place files -> commit -> push
-/// - **Local mode** (`local_path`): write files directly (for development)
 pub struct FluxV1Handler;
 
 impl FluxV1Handler {
-    /// Validate that the destination metadata contains all required flux fields.
-    ///
-    /// Returns `Ok(())` if all required fields are present and consistent,
-    /// otherwise returns an error describing the first validation failure.
     pub fn validate_metadata(metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         FluxMetadata::from_metadata(metadata)?;
         Ok(())
     }
 
-    /// Run the flux destination handler.
-    ///
-    /// Fetches deployment files from the backend, resolves the project name,
-    /// and either writes files directly (local mode) or clones a git repo,
-    /// writes files, commits, and pushes (git mode).
-    ///
-    /// Returns what became of the post-push reconcile request. A failed
-    /// reconcile is an `Ok`: the release itself has landed in git.
+    /// A failed reconcile is still `Ok`: the release has already landed in git.
     pub async fn run(
         backend: &dyn DestinationBackend,
         config: &DestinationConfig,
@@ -275,16 +201,13 @@ impl FluxV1Handler {
         let flux_meta = FluxMetadata::from_metadata(&config.metadata)
             .context("invalid flux destination metadata")?;
 
-        // Get release identity for kubernetes annotations (if available)
         let identity = backend.get_release_identity().await;
 
-        // 1. Get artifact files from backend
         let files = backend
             .get_deployment_files()
             .await
             .context("get deployment files")?;
 
-        // 2. Write artifact files to a scratch temp dir
         let temp_dir = backend.create_temp_dir().await?;
         for (path, content) in &files {
             let full_path = temp_dir.join(path);
@@ -296,7 +219,6 @@ impl FluxV1Handler {
             file.flush().await?;
         }
 
-        // 3. Match destination name against directory entries
         let env_dir = temp_dir.join(&config.environment);
         let mut env_dir_entries = tokio::fs::read_dir(&env_dir)
             .await
@@ -327,20 +249,17 @@ impl FluxV1Handler {
 
             matched = true;
 
-            // Build path to the rendered manifests
             let manifests_dir = env_dir
                 .join(&entry_name)
                 .join(&config.organisation)
                 .join(format!("{}@{}", config.type_name, config.type_version));
 
-            // 4. Collect manifest files (skips config.json — it goes to .forest/)
             let manifest_files = collect_manifest_files(&manifests_dir).await?;
 
             if manifest_files.is_empty() {
                 anyhow::bail!("no manifest files found in: {}", manifests_dir.display());
             }
 
-            // 5. Collect metadata files for .forest/ directory
             let config_yaml = read_config_as_yaml(&manifests_dir).await?;
 
             let spec_files = backend.get_spec_files().await.context("get spec files")?;
@@ -358,14 +277,12 @@ impl FluxV1Handler {
                 spec_yaml,
             };
 
-            // 6. Resolve project name for directory structure
             let project_info = backend
                 .get_project_info()
                 .await
                 .context("get project info")?;
             let project_name = format!("{}-{}", project_info.organisation, project_info.project);
 
-            // 7. Execute git or local mode
             if flux_meta.is_local() {
                 run_local(
                     backend,
@@ -403,7 +320,6 @@ impl FluxV1Handler {
         Ok(reconcile)
     }
 
-    /// Generate a Flux Kustomization CR YAML.
     pub fn generate_kustomization_cr(
         _namespace: &str,
         project: &str,
@@ -473,7 +389,6 @@ spec:
         )
     }
 
-    /// Generate a Kubernetes Secret CR for the Flux notification webhook token.
     pub fn generate_notification_secret_cr(name: &str, namespace: &str, token: &str) -> String {
         format!(
             r#"apiVersion: v1
@@ -487,7 +402,6 @@ stringData:
         )
     }
 
-    /// Generate a Flux Provider CR for generic-hmac webhook notifications.
     pub fn generate_provider_cr(
         name: &str,
         namespace: &str,
@@ -509,11 +423,7 @@ spec:
         )
     }
 
-    /// Generate a Flux Alert CR that watches a Kustomization and GitRepository.
-    ///
-    /// `event_severity` should be `"info"` (success notifications) or
-    /// `"error"` (failure notifications). Flux treats these as exact filters,
-    /// so two separate Alerts are needed to capture both outcomes.
+    /// Flux filters severity exactly, so `info` and `error` each need their own Alert.
     pub fn generate_alert_cr(
         name: &str,
         namespace: &str,
@@ -543,8 +453,6 @@ spec:
         )
     }
 
-    /// Write Flux notification CRs (Secret, Provider, Alert) to the clusters
-    /// directory when `webhook_secret` and `forest_webhook_url` are configured.
     async fn write_notification_crs(
         clusters_dir: &Path,
         meta: &FluxMetadata,
@@ -575,8 +483,6 @@ spec:
         )
         .await?;
 
-        // Flux treats eventSeverity as an exact filter, so we need separate
-        // Alerts for info (success) and error (failure) notifications.
         for (suffix, severity) in [("info", "info"), ("error", "error")] {
             let alert_name = format!("forest-notify-{project}-{suffix}");
             let alert_cr = Self::generate_alert_cr(
@@ -597,8 +503,6 @@ spec:
         Ok(())
     }
 
-    /// Write a plain kustomize `kustomization.yaml` in a releases directory,
-    /// listing only the manifest files as resources (excludes `.forest/` metadata).
     pub async fn write_releases_kustomize_yaml(
         releases_dir: &Path,
         manifest_files: &[(String, String)],
@@ -613,8 +517,6 @@ spec:
         Ok(())
     }
 
-    /// Write a plain kustomize `kustomization.yaml` in a clusters directory,
-    /// listing all `*.yaml` files (except itself) as resources.
     pub async fn write_kustomize_yaml(clusters_dir: &Path) -> anyhow::Result<()> {
         let mut resources = Vec::new();
         let mut entries = tokio::fs::read_dir(clusters_dir).await?;
@@ -638,9 +540,6 @@ spec:
     }
 }
 
-// ====== PURE HELPER FUNCTIONS ======
-
-/// Build release.yaml content from a `ReleaseAnnotation` and `DestinationConfig`.
 fn build_release_yaml(
     annotation: &ReleaseAnnotation,
     config: &DestinationConfig,
@@ -675,11 +574,7 @@ fn build_release_yaml(
     serde_yaml::to_string(&release_info).context("serialize release metadata as yaml")
 }
 
-/// Build spec.yaml content from pre-fetched spec files.
-///
-/// Multiline file contents use block scalar style (`|`) for readability.
 fn build_spec_yaml(spec_files: &[(PathBuf, String)]) -> anyhow::Result<String> {
-    // Build YAML manually so multiline file contents use block scalar style (|)
     let mut out = String::new();
     for (path, content) in spec_files {
         let key = path.to_string_lossy();
@@ -689,7 +584,6 @@ fn build_spec_yaml(spec_files: &[(PathBuf, String)]) -> anyhow::Result<String> {
                 out.push_str(&format!("  {line}\n"));
             }
         } else {
-            // Single-line value: use serde_yaml for proper escaping
             let val = serde_yaml::to_string(&content)
                 .context("serialize spec value")?
                 .trim_end()
@@ -700,8 +594,6 @@ fn build_spec_yaml(spec_files: &[(PathBuf, String)]) -> anyhow::Result<String> {
 
     Ok(out)
 }
-
-// ====== LOCAL MODE ======
 
 async fn run_local(
     backend: &dyn DestinationBackend,
@@ -739,7 +631,6 @@ async fn run_local(
                 releases_abs.display()
             ));
 
-            // Clear and recreate releases directory
             if releases_abs.exists() {
                 tokio::fs::remove_dir_all(&releases_abs).await?;
             }
@@ -748,7 +639,6 @@ async fn run_local(
             write_forest_metadata(&releases_abs, forest_metadata).await?;
             FluxV1Handler::write_releases_kustomize_yaml(&releases_abs, manifest_files).await?;
 
-            // Write Flux CR as <project>.yaml and regenerate kustomization.yaml
             tokio::fs::create_dir_all(&clusters_dir_abs).await?;
             let kustomization_cr = FluxV1Handler::generate_kustomization_cr(
                 &meta.namespace,
@@ -772,8 +662,6 @@ async fn run_local(
 
     Ok(())
 }
-
-// ====== GIT MODE ======
 
 const MAX_PUSH_ATTEMPTS: usize = 3;
 
@@ -1058,24 +946,11 @@ fn is_concurrent_push_rejection(stderr: &[u8]) -> bool {
         || stderr.contains("incorrect old value provided")
 }
 
-// ====== RECONCILIATION ======
-
-/// How hard to try the reconcile webhook before leaving the release to Flux's
-/// own poll.
-///
-/// A time budget, not an attempt count: what matters is how long the release
-/// step waits. Past about half a minute a retry buys little over Flux's own
-/// poll (1m for the GitRepository in the setups we run), so the default gives
-/// up at 30 s.
 #[derive(Debug, Clone)]
 struct ReconcileRetry {
-    /// Total time from the first attempt after which no new attempt starts.
     budget: Duration,
-    /// Deadline for one request, connect included.
     attempt_timeout: Duration,
-    /// Backoff before the second attempt; doubles per attempt, full jitter.
     base_delay: Duration,
-    /// Cap on a single backoff.
     max_delay: Duration,
 }
 
@@ -1091,7 +966,6 @@ impl Default for ReconcileRetry {
 }
 
 impl ReconcileRetry {
-    /// Full-jitter exponential backoff before attempt `attempt + 1`.
     fn backoff(&self, attempt: u32) -> Duration {
         use rand::RngExt;
         let exp = self
@@ -1102,27 +976,17 @@ impl ReconcileRetry {
     }
 }
 
-/// One attempt's verdict.
 enum AttemptResult {
     Accepted,
-    /// Worth another attempt: a transport error, a 5xx, or a 429 (whose
-    /// `Retry-After`, when given, is honoured instead of the backoff).
     Transient {
         reason: String,
         retry_after: Option<Duration>,
     },
-    /// Another attempt would get the same answer: any other 4xx, most likely a
-    /// hook path that matches no Receiver.
     Permanent {
         reason: String,
     },
 }
 
-/// POSTs to the Flux Receiver, retrying transient failures within `retry`'s
-/// budget. Never fails the release, and never logs the receiver's token.
-///
-/// The request is safe to repeat: a Receiver only asks Flux to reconcile its
-/// resources, and asking twice costs one extra sync from git.
 async fn trigger_reconciliation(
     backend: &dyn DestinationBackend,
     url: &str,
@@ -1236,10 +1100,6 @@ fn classify_response(resp: &reqwest::Response) -> AttemptResult {
     AttemptResult::Permanent { reason }
 }
 
-/// `reconcile_url` with everything that can carry the Receiver's token
-/// removed: the path (`/hook/<sha256>` *is* the token), userinfo, query and
-/// fragment. Scheme, host and port stay, because that is what someone
-/// debugging a failed webhook needs to see.
 fn redact_reconcile_url(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(parsed) => {
@@ -1251,12 +1111,6 @@ fn redact_reconcile_url(url: &str) -> String {
     }
 }
 
-/// A request error as a person can act on it, without the URL.
-///
-/// reqwest's `Display` is "error sending request for url (<full url>)", which
-/// is both the leak and the least useful part; the cause (DNS, refused, TLS)
-/// is further down the source chain. As a last line of defence, anything that
-/// still contains the URL's path is scrubbed.
 fn describe_request_error(err: &reqwest::Error, url: &str) -> String {
     let mut reason = if err.is_timeout() {
         "request timed out".to_string()
@@ -1291,20 +1145,12 @@ fn scrub_reconcile_path(text: &str, url: &str) -> String {
     out
 }
 
-// ====== COMMAND EXECUTION ======
-
-/// Strips the userinfo out of any `scheme://user:secret@host` in `text`.
-///
-/// `effective_git_url` embeds `git_username`/`git_token` in the clone URL, so
-/// the argv we log — and the message we bail with — would otherwise carry a
-/// live token into logs and release output.
 fn scrub_url_credentials(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
 
     while let Some(scheme_end) = rest.find("://") {
         let after_scheme = scheme_end + 3;
-        // Userinfo ends at the first '@' before the authority's end.
         let authority_end = rest[after_scheme..]
             .find(['/', ' '])
             .map(|i| after_scheme + i)
@@ -1316,15 +1162,10 @@ fn scrub_url_credentials(text: &str) -> String {
                 let userinfo = &rest[after_scheme..at];
                 out.push_str(&rest[..after_scheme]);
                 match userinfo.split_once(':') {
-                    // `user:secret@` — the username is safe to keep, and keeping
-                    // it makes the log useful.
                     Some((user, _)) if !user.is_empty() => {
                         out.push_str(user);
                         out.push_str(":***");
                     }
-                    // No colon: the whole userinfo may itself be the token
-                    // (`https://ghp_xxx@host` is a valid way to authenticate),
-                    // and there is no way to tell it from a username. Redact it.
                     _ => out.push_str("***"),
                 }
                 out.push_str(&rest[at..authority_end]);
@@ -1346,7 +1187,6 @@ async fn execute_command(
     env: &HashMap<String, String>,
 ) -> anyhow::Result<std::process::Output> {
     let exe = std::env::var("GIT_EXE").unwrap_or_else(|_| "git".to_string());
-    // Never log raw argv: the clone URL may carry git credentials.
     let safe_args = scrub_url_credentials(&args.join(" "));
     tracing::debug!(cwd =% cwd.display(), "running {} {}", exe, safe_args);
 
@@ -1399,10 +1239,6 @@ async fn run_command(
     ensure_command_success(&output, args)
 }
 
-// ====== FILE I/O HELPERS ======
-
-/// Collect all files from a directory, returning (filename, content) pairs sorted by name.
-/// Skips config.json which is handled separately via `.forest/config.json`.
 async fn collect_manifest_files(dir: &Path) -> anyhow::Result<Vec<(String, String)>> {
     let mut result = Vec::new();
     let mut entries = tokio::fs::read_dir(dir)
@@ -1412,7 +1248,6 @@ async fn collect_manifest_files(dir: &Path) -> anyhow::Result<Vec<(String, Strin
     while let Some(entry) = entries.next_entry().await? {
         if entry.file_type().await?.is_file() {
             let name = entry.file_name().to_string_lossy().to_string();
-            // Skip the forest config.json — it goes to .forest/config.json instead
             if name == "config.json" {
                 continue;
             }
@@ -1425,15 +1260,11 @@ async fn collect_manifest_files(dir: &Path) -> anyhow::Result<Vec<(String, Strin
     Ok(result)
 }
 
-/// Read config.json from the manifest directory and convert to YAML.
-/// The config is generated at `forest/config.json` inside the template directory.
 async fn read_config_as_yaml(dir: &Path) -> anyhow::Result<Option<String>> {
-    // config.json lives in the forest/ subdirectory
     let config_path = dir.join("forest").join("config.json");
     let content = if config_path.exists() {
         Some(tokio::fs::read_to_string(&config_path).await?)
     } else {
-        // Fallback: check at the root level too
         let config_path = dir.join("config.json");
         if config_path.exists() {
             Some(tokio::fs::read_to_string(&config_path).await?)
@@ -1453,7 +1284,6 @@ async fn read_config_as_yaml(dir: &Path) -> anyhow::Result<Option<String>> {
     }
 }
 
-/// Write manifest files to a directory.
 async fn write_manifest_files(dir: &Path, files: &[(String, String)]) -> anyhow::Result<()> {
     for (name, content) in files {
         let path = dir.join(name);
@@ -1464,9 +1294,6 @@ async fn write_manifest_files(dir: &Path, files: &[(String, String)]) -> anyhow:
     Ok(())
 }
 
-/// Write `.forest/` metadata directory inside the releases path.
-/// Contains config.yaml, release.yaml, and spec.yaml. Kustomize does not
-/// recurse into subdirectories, so these won't be applied by Flux.
 async fn write_forest_metadata(
     releases_dir: &Path,
     metadata: &ForestMetadataFiles,
@@ -1474,31 +1301,25 @@ async fn write_forest_metadata(
     let forest_dir = releases_dir.join(".forest");
     tokio::fs::create_dir_all(&forest_dir).await?;
 
-    // Write config.yaml (deployment config from prepare step)
     if let Some(config) = &metadata.config_yaml {
         tokio::fs::write(forest_dir.join("config.yaml"), config.as_bytes()).await?;
     }
 
-    // Write release.yaml (annotation context + destination info)
     tokio::fs::write(
         forest_dir.join("release.yaml"),
         metadata.release_yaml.as_bytes(),
     )
     .await?;
 
-    // Write spec.yaml (original spec files)
     tokio::fs::write(forest_dir.join("spec.yaml"), metadata.spec_yaml.as_bytes()).await?;
 
     Ok(())
 }
 
-// ====== RUNNER DESTINATION ======
-
 use forest_grpc_interface::DestinationCapability;
 
 use super::{RunnerContext, RunnerDestination};
 
-/// FluxV1 as a `RunnerDestination` for the runner binary.
 pub struct FluxV1RunnerDestination;
 
 #[async_trait::async_trait]
@@ -1516,16 +1337,11 @@ impl RunnerDestination for FluxV1RunnerDestination {
         Ok(())
     }
 
-    // The runner binary has no channel for release signals yet, so a failed
-    // reconcile is reported only through the log lines trigger_reconciliation
-    // writes. forest-server's in-process flux destination records it.
     async fn release(&self, ctx: &RunnerContext) -> anyhow::Result<()> {
         FluxV1Handler::run(ctx.backend.as_ref(), &ctx.destination, Mode::Apply).await?;
         Ok(())
     }
 }
-
-// ====== TESTS ======
 
 #[cfg(test)]
 mod tests {
@@ -1599,8 +1415,6 @@ mod tests {
         ])
     }
 
-    // ====== METADATA VALIDATION ======
-
     #[test]
     fn test_metadata_requires_cluster_name() {
         let meta = make_metadata(&[("namespace", "ns"), ("git_url", "git@host:repo.git")]);
@@ -1670,8 +1484,6 @@ mod tests {
         assert_eq!(meta.git_author_email, "ci@example.com");
     }
 
-    // ====== PATH GENERATION ======
-
     #[test]
     fn test_releases_path() {
         let meta = FluxMetadata::from_metadata(&valid_git_metadata()).unwrap();
@@ -1691,8 +1503,6 @@ mod tests {
             PathBuf::from("clusters/dev/k8s-dev-01/prod-eu-west-1/rust-podinfo")
         );
     }
-
-    // ====== GIT URL CONSTRUCTION ======
 
     #[test]
     fn test_effective_git_url_ssh_passthrough() {
@@ -1733,8 +1543,6 @@ mod tests {
         );
     }
 
-    // ====== GIT ENV ======
-
     #[test]
     fn test_git_env_with_ssh_key() {
         let mut m = valid_git_metadata();
@@ -1752,8 +1560,6 @@ mod tests {
         let env = meta.git_env();
         assert!(env.is_empty());
     }
-
-    // ====== KUSTOMIZATION CR ======
 
     #[test]
     fn test_generate_kustomization_cr() {
@@ -1775,8 +1581,6 @@ mod tests {
         assert!(cr.contains("kind: GitRepository"));
         assert!(cr.contains("name: flux-system"));
     }
-
-    // ====== INTEGRATION: LOCAL MODE FILE PLACEMENT ======
 
     #[tokio::test]
     async fn test_local_mode_file_placement() {
@@ -1818,7 +1622,6 @@ mod tests {
         let destination_name = "k8s-dev-01";
         let project = "rawpotion-rust-podinfo";
 
-        // Write releases
         let releases_abs =
             local_root
                 .path()
@@ -1828,7 +1631,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Write kustomization CR as <project>.yaml + plain kustomization.yaml
         let clusters_dir_abs = local_root
             .path()
             .join(meta.clusters_dir(env, destination_name));
@@ -1847,7 +1649,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify releases directory structure
         assert!(releases_abs.join("10-namespace.yaml").exists());
         assert!(releases_abs.join("20-deployment.yaml").exists());
         assert!(releases_abs.join("30-service.yaml").exists());
@@ -1857,14 +1658,12 @@ mod tests {
             .unwrap();
         assert!(ns_content.contains("kind: Namespace"));
 
-        // Verify clusters directory structure — plain kustomize file
         let kust_path = clusters_dir_abs.join("kustomization.yaml");
         assert!(kust_path.exists());
         let kust_content = tokio::fs::read_to_string(&kust_path).await.unwrap();
         assert!(kust_content.contains("kind: Kustomization"));
         assert!(kust_content.contains(&cr_filename));
 
-        // Verify Flux CR file
         let cr_path = clusters_dir_abs.join(&cr_filename);
         assert!(cr_path.exists());
         let cr_content = tokio::fs::read_to_string(&cr_path).await.unwrap();
@@ -1872,7 +1671,6 @@ mod tests {
         assert!(!cr_content.contains("targetNamespace"));
         assert!(cr_content.contains(&format!("path: ./{}", releases_rel.display())));
 
-        // Verify full path structure
         let expected_releases = local_root
             .path()
             .join("releases/dev/k8s-dev-01/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo");
@@ -1888,13 +1686,10 @@ mod tests {
         );
     }
 
-    // ====== INTEGRATION: COLLECT MANIFEST FILES ======
-
     #[tokio::test]
     async fn test_collect_manifest_files() {
         let dir = tempfile::tempdir().unwrap();
 
-        // Create some manifest files
         tokio::fs::write(dir.path().join("10-namespace.yaml"), "ns content")
             .await
             .unwrap();
@@ -1904,7 +1699,6 @@ mod tests {
         tokio::fs::write(dir.path().join("30-service.yaml"), "svc content")
             .await
             .unwrap();
-        // config.json should be skipped
         tokio::fs::write(dir.path().join("config.json"), "{}")
             .await
             .unwrap();
@@ -1917,8 +1711,6 @@ mod tests {
         assert_eq!(files[1].0, "20-deployment.yaml");
         assert_eq!(files[2].0, "30-service.yaml");
     }
-
-    // ====== INTEGRATION: READ CONFIG AS YAML ======
 
     #[tokio::test]
     async fn test_read_config_as_yaml_in_forest_subdir() {
@@ -1956,8 +1748,6 @@ mod tests {
         let result = read_config_as_yaml(dir.path()).await.unwrap();
         assert_eq!(result, None);
     }
-
-    // ====== INTEGRATION: WRITE FOREST METADATA ======
 
     #[tokio::test]
     async fn test_write_forest_metadata_full() {
@@ -2009,8 +1799,6 @@ mod tests {
         assert!(forest_dir.join("spec.yaml").exists());
     }
 
-    // ====== INTEGRATION: DIRECTORY CLEARING ======
-
     #[tokio::test]
     async fn test_directory_clearing_removes_stale_files() {
         let local_root = tempfile::tempdir().unwrap();
@@ -2020,7 +1808,6 @@ mod tests {
             .join("releases/dev/dest/cluster/ns/project");
         let clusters_dir = local_root.path().join("clusters/dev/dest/cluster/ns");
 
-        // Pre-populate with stale files that should be removed
         tokio::fs::create_dir_all(&releases_dir).await.unwrap();
         tokio::fs::write(releases_dir.join("stale-old-manifest.yaml"), "old")
             .await
@@ -2034,7 +1821,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Simulate what run_git/run_local does: clear releases, update clusters
         tokio::fs::remove_dir_all(&releases_dir).await.unwrap();
         tokio::fs::create_dir_all(&releases_dir).await.unwrap();
         write_manifest_files(
@@ -2044,7 +1830,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Clusters dir: write new CR + regenerate kustomization.yaml
         tokio::fs::write(clusters_dir.join("project.yaml"), "new cr")
             .await
             .unwrap();
@@ -2052,33 +1837,20 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify stale release files are gone
         assert!(!releases_dir.join("stale-old-manifest.yaml").exists());
         assert!(!releases_dir.join("another-stale.yaml").exists());
 
-        // Verify new files are present
         assert!(releases_dir.join("10-namespace.yaml").exists());
         assert!(clusters_dir.join("project.yaml").exists());
         assert!(clusters_dir.join("kustomization.yaml").exists());
-        // Old CR is still there (shared directory, not cleared)
         assert!(clusters_dir.join("old-project.yaml").exists());
     }
 
-    // ====== INTEGRATION: GIT CLONE/COMMIT/PUSH CYCLE ======
-
     #[tokio::test]
     async fn test_git_mode_with_bare_repo() {
-        // 1. Create a bare git repo
         let bare_dir = tempfile::tempdir().unwrap();
         let bare_path = bare_dir.path().join("gitops.git");
 
-        // `-b main` explicitly: everything below pushes and clones `main`, but
-        // `git init --bare` alone names the branch from `init.defaultBranch`,
-        // which is `master` unless the developer has changed it. The bare
-        // repo's HEAD then points at a branch nothing ever creates, and the
-        // final verify clone — the only one that does not pass `--branch` —
-        // checks out nothing, failing on a missing manifest rather than on
-        // anything this test is about.
         let status = tokio::process::Command::new("git")
             .args(["init", "--bare", "-b", "main"])
             .arg(&bare_path)
@@ -2089,7 +1861,6 @@ mod tests {
             .unwrap();
         assert!(status.success(), "git init --bare failed");
 
-        // 2. Bootstrap: clone, add initial commit, push
         let bootstrap_dir = tempfile::tempdir().unwrap();
         let bootstrap_path = bootstrap_dir.path().join("repo");
 
@@ -2103,7 +1874,6 @@ mod tests {
             .unwrap();
         assert!(status.success(), "git clone (bootstrap) failed");
 
-        // Create initial commit on main branch
         tokio::fs::write(bootstrap_path.join("README.md"), "# GitOps Repo\n")
             .await
             .unwrap();
@@ -2135,8 +1905,6 @@ mod tests {
             assert!(status.success(), "{desc} failed");
         }
 
-        // 3. Now simulate what FluxV1Handler.run_git does:
-        // Clone, place files, commit, push
         let work_dir = tempfile::tempdir().unwrap();
 
         let status = tokio::process::Command::new("git")
@@ -2160,7 +1928,6 @@ mod tests {
 
         let repo_dir = work_dir.path().join("repo");
 
-        // Place release manifests
         let releases_dir =
             repo_dir.join("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo");
         tokio::fs::create_dir_all(&releases_dir).await.unwrap();
@@ -2180,7 +1947,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Place .forest/ metadata
         let forest_metadata = ForestMetadataFiles {
             config_yaml: Some("env: dev\ndestination: k8s-dev-01\n".to_string()),
             release_yaml: "slug: test-release\nsource: {}\ncontext:\n  title: Test\n".to_string(),
@@ -2190,7 +1956,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Place kustomization CR as <project>.yaml + plain kustomization.yaml
         let clusters_dir = repo_dir.join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo");
         tokio::fs::create_dir_all(&clusters_dir).await.unwrap();
         let cr = FluxV1Handler::generate_kustomization_cr(
@@ -2209,7 +1974,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Stage and commit
         for (args, desc) in [
             (vec!["add", "-A"], "git add"),
             (
@@ -2237,7 +2001,6 @@ mod tests {
             assert!(status.success(), "{desc} failed");
         }
 
-        // 4. Verify: clone the bare repo fresh and check contents
         let verify_dir = tempfile::tempdir().unwrap();
         let status = tokio::process::Command::new("git")
             .args([
@@ -2255,7 +2018,6 @@ mod tests {
 
         let verify_repo = verify_dir.path().join("verify");
 
-        // Check releases files exist
         let ns_file = verify_repo.join(
             "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo/10-namespace.yaml",
         );
@@ -2271,7 +2033,6 @@ mod tests {
         );
         assert!(deploy_file.exists(), "deployment manifest not found");
 
-        // Check clusters — plain kustomize file lists the Flux CR
         let kust_file =
             verify_repo.join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo/kustomization.yaml");
         assert!(kust_file.exists(), "kustomization.yaml not found");
@@ -2279,7 +2040,6 @@ mod tests {
         assert!(kust_content.contains("kustomize.config.k8s.io"));
         assert!(kust_content.contains("rawpotion-rust-podinfo.yaml"));
 
-        // Check Flux CR file
         let cr_file = verify_repo
             .join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo.yaml");
         assert!(cr_file.exists(), "Flux CR file not found");
@@ -2290,7 +2050,6 @@ mod tests {
             "path: ./releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo"
         ));
 
-        // Check .forest/ metadata was pushed
         let forest_dir = verify_repo
             .join("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo/.forest");
         assert!(forest_dir.exists(), ".forest/ directory not found");
@@ -2312,7 +2071,6 @@ mod tests {
             .unwrap();
         assert!(release_yaml.contains("test-release"));
 
-        // Check README still exists (not clobbered)
         assert!(verify_repo.join("README.md").exists());
     }
 
@@ -2477,8 +2235,6 @@ mod tests {
         assert!(verify_repo.join("README.md").exists());
     }
 
-    // ====== NOTIFICATION CR GENERATION ======
-
     #[test]
     fn test_generate_notification_secret_cr() {
         let cr = FluxV1Handler::generate_notification_secret_cr(
@@ -2576,7 +2332,6 @@ mod tests {
     fn test_metadata_webhook_secret_requires_url() {
         let mut m = valid_git_metadata();
         m.insert("webhook_secret".into(), "my-secret".into());
-        // Missing forest_webhook_url — should fail
         let err = FluxMetadata::from_metadata(&m).unwrap_err();
         assert!(
             err.to_string().contains("forest_webhook_url"),
@@ -2615,8 +2370,6 @@ mod credential_scrubbing_tests {
 
     #[test]
     fn token_only_userinfo_is_redacted_whole() {
-        // `https://<token>@host` authenticates with no username, so the whole
-        // userinfo has to go — it is indistinguishable from a bare username.
         let scrubbed = scrub_url_credentials("clone https://ghp_abc123@github.com/o/r.git");
 
         assert!(!scrubbed.contains("ghp_abc123"));
@@ -2675,8 +2428,6 @@ mod reconcile_tests {
 
     use super::*;
 
-    /// A Receiver path is `/hook/<sha256 of token+name+namespace>`; this stands
-    /// in for one.
     const TOKEN_PATH: &str =
         "/hook/5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2";
 
@@ -2729,8 +2480,6 @@ mod reconcile_tests {
         }
     }
 
-    /// Serves one canned response per connection, in order, repeating the
-    /// last. Returns the base URL and a counter of requests served.
     async fn receiver(responses: Vec<&'static str>) -> (String, Arc<AtomicU32>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2813,8 +2562,6 @@ mod reconcile_tests {
         assert_no_token(&backend.lines(), &outcome);
     }
 
-    /// A 404 means the hook path matches no Receiver. Asking again gets the
-    /// same answer, so it is not retried.
     #[tokio::test]
     async fn a_404_is_not_retried_and_points_at_the_hook_path() {
         let (base, served) = receiver(vec![NOT_FOUND, OK]).await;
@@ -2832,12 +2579,8 @@ mod reconcile_tests {
         assert_no_token(&backend.lines(), &outcome);
     }
 
-    /// #298's case: nothing answers. The attempts stop at the budget, the
-    /// release is not failed, and neither the log nor the reason carries the
-    /// token (reqwest's own error text prints the full URL).
     #[tokio::test]
     async fn an_unreachable_receiver_is_retried_within_the_budget_then_reported() {
-        // Bind and drop, so the port is closed and connecting is refused.
         let addr = TcpListener::bind("127.0.0.1:0")
             .await
             .unwrap()
@@ -2865,8 +2608,6 @@ mod reconcile_tests {
         assert_no_token(&lines, &outcome);
     }
 
-    /// A Retry-After beyond the budget is honoured by not waiting for it:
-    /// the release step gives up and leaves the change to Flux's poll.
     #[tokio::test]
     async fn a_429_whose_retry_after_exceeds_the_budget_is_not_waited_for() {
         let (base, served) = receiver(vec![TOO_MANY_LONG, OK]).await;
@@ -2895,9 +2636,6 @@ mod reconcile_tests {
         assert!(status.success(), "git {args:?} failed");
     }
 
-    /// The whole git path, not just the webhook: a push reports what the
-    /// Receiver said, and a release that changes nothing pushes nothing and
-    /// asks Flux for nothing.
     #[tokio::test]
     async fn a_pushed_release_reports_the_reconcile_and_an_unchanged_one_asks_for_none() {
         let bare_dir = tempfile::tempdir().unwrap();

@@ -82,13 +82,6 @@ impl CreateCommand {
     }
 }
 
-/// The projects a new destination was just added to without asking for it.
-///
-/// A project that declares no destinations for an environment is released to
-/// every destination there of a kind it renders, so these projects' next
-/// release into `environment` will also target the new one (forest#288). That
-/// is sometimes exactly what is wanted and sometimes a surprise; either way it
-/// should not be silent. On stderr, so it never mixes into piped output.
 fn widened_warning(environment: &str, destination: &str, widened: &[String]) -> Option<String> {
     if widened.is_empty() {
         return None;

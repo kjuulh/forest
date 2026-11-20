@@ -7,8 +7,6 @@ use crate::{
     state::State,
 };
 
-/// Prompt user to select an organisation from their memberships.
-/// If they belong to exactly one, it is returned without prompting.
 pub async fn select_organisation(state: &State) -> anyhow::Result<String> {
     let resp = state
         .grpc_client()
@@ -34,8 +32,6 @@ pub async fn select_organisation(state: &State) -> anyhow::Result<String> {
     Ok(selected.name)
 }
 
-/// Prompt user to select a project within an organisation.
-/// If there's exactly one, it is returned without prompting.
 pub async fn select_project(state: &State, organisation: &str) -> anyhow::Result<String> {
     let projects = state
         .grpc_client()

@@ -3,9 +3,7 @@ use crate::{
     state::State,
 };
 
-pub struct RequirementsService {
-    // components: ComponentsService,
-}
+pub struct RequirementsService {}
 
 impl RequirementsService {
     pub async fn gather_requirements(&self, _project: Project) -> anyhow::Result<Requirements> {

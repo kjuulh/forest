@@ -47,9 +47,6 @@ impl PipelineCommand {
     }
 }
 
-// ── JSON -> proto stage conversion ───────────────────────────────────
-
-/// Intermediate JSON format for stages (matches the DB/domain model).
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum JsonStageConfig {
@@ -63,18 +60,9 @@ enum JsonStageConfig {
         environment: String,
         #[serde(default)]
         auto_approve: bool,
-        /// `terraform plan -destroy`; the server refuses it with auto_approve.
         #[serde(default)]
         destroy: bool,
     },
-    /// Wait for evidence rather than a duration — see forest#252.
-    ///
-    ///     "await-demo": {
-    ///       "type": "gate",
-    ///       "requires": [{"signal": "rollout", "in": ["HEALTHY"]}],
-    ///       "timeout_seconds": 600,
-    ///       "depends_on": ["deploy-demo"]
-    ///     }
     Gate {
         requires: Vec<JsonSignalRequirement>,
         timeout_seconds: i64,
@@ -86,8 +74,6 @@ enum JsonStageConfig {
 #[derive(Deserialize)]
 pub struct JsonSignalRequirement {
     signal: String,
-    /// Any one of these satisfies it. Omitted means `["HEALTHY"]` — treating
-    /// an empty list as "any status" would open the gate on UNHEALTHY.
     #[serde(default, rename = "in")]
     accept: Vec<String>,
 }
@@ -108,11 +94,6 @@ struct JsonStageDefinition {
     config: JsonStageConfig,
 }
 
-/// The status names a gate requirement may use, as the CLI accepts them.
-///
-/// An unrecognised name becomes UNSPECIFIED, which the server rejects with a
-/// message naming the valid ones — better than the CLI guessing at a default
-/// and building a gate that waits for something nobody can report.
 fn health_status_from_str(s: &str) -> i32 {
     match s.to_ascii_uppercase().as_str() {
         "HEALTHY" => HealthStatus::Healthy as i32,
@@ -135,7 +116,6 @@ fn health_status_str(v: i32) -> &'static str {
     }
 }
 
-/// Parse a JSON string (map of stage-id -> stage definition) into proto PipelineStage messages.
 pub fn parse_stages_from_json(json: &str) -> anyhow::Result<Vec<PipelineStage>> {
     let stages: HashMap<String, JsonStageDefinition> =
         serde_json::from_str(json).context("invalid stages JSON")?;
@@ -190,7 +170,6 @@ pub fn parse_stages_from_json(json: &str) -> anyhow::Result<Vec<PipelineStage>> 
     Ok(proto_stages)
 }
 
-/// Format proto PipelineStage messages for display.
 pub fn format_stages(stages: &[PipelineStage]) -> String {
     if stages.is_empty() {
         return "(no stages)".to_string();

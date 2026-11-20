@@ -1,16 +1,3 @@
-//! Effectful reader/writer for the shell-rc PATH install step (DATA-420).
-//!
-//! The *content* comes from the pure [`crate::global::shellenv`] generator; this
-//! module is the only part allowed to touch the filesystem. It inserts,
-//! replaces, or excises a marker-delimited managed block in the user's shell
-//! env files (`~/.zshenv`, `~/.bashrc`) so spawned non-interactive shells find
-//! the shim dir. Writes are atomic ([`crate::global::fs::atomic_write`]); block
-//! edits are string-level and never disturb the rest of the file.
-//!
-//! Idempotent: re-running when the block already matches is a no-op; a stale
-//! block is replaced in place. Reversible: uninstall removes exactly the block
-//! (matched by its markers) and nothing else.
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -18,14 +5,10 @@ use anyhow::{Context, Result};
 use crate::global::fs::{atomic_write, read_optional};
 use crate::global::shellenv::{BLOCK_BEGIN, BLOCK_END, Shell, managed_block};
 
-/// Outcome of installing the block into one rc file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Applied {
-    /// The block was newly inserted (file created or block appended).
     Added(PathBuf),
-    /// A stale block was replaced in place.
     Updated(PathBuf),
-    /// The block was already present and current — no write.
     Unchanged(PathBuf),
 }
 
@@ -37,18 +20,12 @@ impl Applied {
     }
 }
 
-/// Outcome of uninstalling from one rc file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Removed {
-    /// The block was found and excised.
     Removed(PathBuf),
-    /// No managed block present (or file absent) — nothing to do.
     Absent(PathBuf),
 }
 
-/// Resolve `$HOME` and the shells to target for the live environment. Targets
-/// the subset of {zsh, bash, fish} whose binary is on PATH; falls back to zsh
-/// if none resolve (zsh is the primary fix and always present on macOS).
 pub fn resolve_targets() -> Result<(PathBuf, Vec<Shell>)> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home dir is unset"))?;
     let mut shells: Vec<Shell> = all_shells()
@@ -61,8 +38,6 @@ pub fn resolve_targets() -> Result<(PathBuf, Vec<Shell>)> {
     Ok((home, shells))
 }
 
-/// Every shell we know how to manage — used by uninstall so it cleans up files
-/// even for a shell whose binary has since been removed.
 pub fn all_shells() -> Vec<Shell> {
     vec![Shell::Zsh, Shell::Bash, Shell::Fish]
 }
@@ -74,7 +49,6 @@ fn on_path(bin: &str) -> bool {
     std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file())
 }
 
-/// Insert-or-replace `shell`'s managed block in `rc_file`. Idempotent.
 pub async fn apply(shell: Shell, rc_file: &Path) -> Result<Applied> {
     let block = managed_block(shell);
     let existing = read_optional(rc_file).await?;
@@ -88,7 +62,6 @@ pub async fn apply(shell: Shell, rc_file: &Path) -> Result<Applied> {
     Ok(action)
 }
 
-/// Remove the managed block from `rc_file`, leaving everything else intact.
 pub async fn uninstall(rc_file: &Path) -> Result<Removed> {
     let Some(existing) = read_optional(rc_file).await? else {
         return Ok(Removed::Absent(rc_file.to_path_buf()));
@@ -104,8 +77,6 @@ pub async fn uninstall(rc_file: &Path) -> Result<Removed> {
     }
 }
 
-/// Render the dry-run plan: for each target file, what the resulting managed
-/// block would be. No I/O.
 pub fn render_dry_run(home: &Path, shells: &[Shell]) -> String {
     let mut s = String::new();
     for shell in shells {
@@ -116,10 +87,6 @@ pub fn render_dry_run(home: &Path, shells: &[Shell]) -> String {
     s
 }
 
-// --- pure block-editing core ------------------------------------------------
-
-/// Locate the managed block's byte range `[begin, end)` in `content`, where
-/// `end` is just past the newline following the end marker (or EOF).
 fn block_range(content: &str) -> Option<(usize, usize)> {
     let begin = content.find(BLOCK_BEGIN)?;
     let end_marker = content[begin..].find(BLOCK_END)? + begin;
@@ -131,7 +98,6 @@ fn block_range(content: &str) -> Option<(usize, usize)> {
     Some((begin, end))
 }
 
-/// Insert or replace the block. Returns the new file contents and what changed.
 fn upsert_block(content: &str, block: &str, path: &Path) -> (String, Applied) {
     if let Some((begin, end)) = block_range(content) {
         if &content[begin..end] == block {
@@ -143,7 +109,6 @@ fn upsert_block(content: &str, block: &str, path: &Path) -> (String, Applied) {
         out.push_str(&content[end..]);
         return (out, Applied::Updated(path.to_path_buf()));
     }
-    // Append with a single blank-line separator from any existing content.
     if content.is_empty() {
         (block.to_string(), Applied::Added(path.to_path_buf()))
     } else {
@@ -155,12 +120,8 @@ fn upsert_block(content: &str, block: &str, path: &Path) -> (String, Applied) {
     }
 }
 
-/// Remove the block (and the blank-line separator we inserted before it, if
-/// present). Returns `None` if there is no block to remove.
 fn strip_block(content: &str) -> Option<String> {
     let (begin, end) = block_range(content)?;
-    // Absorb a single preceding blank line ("\n\n") so removal doesn't leave a
-    // widening gap across install/uninstall cycles.
     let cut_begin = if content[..begin].ends_with("\n\n") {
         begin - 1
     } else {
@@ -169,7 +130,6 @@ fn strip_block(content: &str) -> Option<String> {
     let mut out = String::with_capacity(content.len());
     out.push_str(&content[..cut_begin]);
     out.push_str(&content[end..]);
-    // Collapse to at most one trailing newline.
     let trimmed = out.trim_end_matches('\n');
     if trimmed.is_empty() {
         Some(String::new())
@@ -184,12 +144,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn block() -> String {
-        // The pure upsert/strip core is shell-agnostic (marker-delimited); any
-        // shell's block exercises it.
         managed_block(Shell::Zsh)
     }
-
-    // --- pure upsert/strip ---
 
     #[test]
     fn upsert_into_empty_yields_just_the_block() {
@@ -205,7 +161,6 @@ mod tests {
         assert!(matches!(act, Applied::Added(_)));
         assert!(out.starts_with("export EDITOR=vim\n\n"), "{out}");
         assert!(out.contains(BLOCK_BEGIN) && out.contains(BLOCK_END));
-        // User content untouched.
         assert!(out.contains("export EDITOR=vim"));
     }
 
@@ -230,7 +185,6 @@ mod tests {
             "stale content must be gone: {out}"
         );
         assert!(out.contains("forest/global/shims"), "{out}");
-        // Exactly one managed block.
         assert_eq!(out.matches(BLOCK_BEGIN).count(), 1);
     }
 
@@ -248,8 +202,6 @@ mod tests {
 
     #[test]
     fn install_then_uninstall_round_trips_to_original() {
-        // Property: for arbitrary surrounding content, install+uninstall is
-        // identity (modulo trailing-newline normalisation).
         for original in ["", "x\n", "a\nb\nc\n", "no-trailing-newline"] {
             let (installed, _) = upsert_block(original, &block(), Path::new("/x"));
             let restored = strip_block(&installed).unwrap_or_default();
@@ -264,8 +216,6 @@ mod tests {
             assert_eq!(norm(&restored), norm(original), "original was {original:?}");
         }
     }
-
-    // --- effectful apply/uninstall ---
 
     #[tokio::test]
     async fn apply_creates_then_unchanged_then_uninstall() {
@@ -318,14 +268,12 @@ mod tests {
     #[tokio::test]
     async fn apply_fish_writes_confd_file_with_fish_syntax() {
         let dir = TempDir::new().unwrap();
-        // conf.d does not exist yet — atomic_write must create the parent chain.
         let rc = Shell::Fish.rc_file(dir.path());
 
         let a = apply(Shell::Fish, &rc).await.unwrap();
         assert!(matches!(a, Applied::Added(_)));
         let body = tokio::fs::read_to_string(&rc).await.unwrap();
         assert!(body.contains(BLOCK_BEGIN));
-        // Fish guard, not POSIX case — the latter would be a syntax error.
         assert!(
             body.contains("if not contains -- $forest_shim_dir $PATH"),
             "{body}"

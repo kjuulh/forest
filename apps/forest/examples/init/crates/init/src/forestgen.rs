@@ -1,4 +1,3 @@
-// Hand-mirrored from forest.component.cue; replaced by codegen output once wired.
 #![allow(clippy::upper_case_acronyms)]
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -29,7 +28,6 @@ pub struct InitOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Render a project skeleton into the workspace.
     fn init(
         &self,
         spec: &Spec,

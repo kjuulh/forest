@@ -33,12 +33,14 @@ labels:
 
 steps:
   build:
-    image: rust:1.98-trixie
+    image: rust:1.100-trixie
     environment:
       # forest CLI doesn't use sqlx but other workspace members do.
       # Set defensively so a workspace-level build.rs can't fail on
       # the lack of a database during the release build.
       SQLX_OFFLINE: "true"
+      # `forest --version` names the commit a release was built from.
+      FOREST_BUILD_COMMIT: ${CI_COMMIT_SHA}
     commands:
       # The release commit updates Cargo.toml and syncs Cargo.lock with
       # `cargo update -p forest`. Re-resolve only the forest entry here as a

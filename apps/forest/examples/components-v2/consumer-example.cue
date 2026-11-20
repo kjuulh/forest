@@ -1,11 +1,3 @@
-// consumer-example.cue
-//
-// This file is NOT part of the component itself. It shows how a consuming
-// project would reference the kubernetes-service component in its own
-// forest.cue to deploy a real application.
-//
-// In a real project this would live at: my-api/forest.cue
-
 package consumer_example
 
 project: {
@@ -22,7 +14,6 @@ dependencies: {
 }
 
 "forest-contrib": "kubernetes-service": {
-	// --- Per-environment overrides ---
 	env: {
 		dev: {
 			destinations: [
@@ -101,7 +92,6 @@ dependencies: {
 		}
 	}
 
-	// --- Base config (shared across all environments) ---
 	config: {
 		name:      "my-api"
 		namespace: "services"

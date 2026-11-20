@@ -8,10 +8,6 @@ use uuid::Uuid;
 
 use crate::domains::destination::{self, CreateDestinationParams, DestinationAggregate};
 
-// ============================================================
-// Read-model types
-// ============================================================
-
 pub struct DestinationRecord {
     pub id: Uuid,
     pub organisation: String,
@@ -25,10 +21,6 @@ pub struct DestinationRecord {
     pub type_version: i32,
 }
 
-// ============================================================
-// Service — orchestrates aggregate + projections
-// ============================================================
-
 #[derive(Clone)]
 pub struct DestinationAggregateService {
     event_store: EventStore,
@@ -39,10 +31,6 @@ impl DestinationAggregateService {
     pub fn new(event_store: EventStore, db: PgPool) -> Self {
         Self { event_store, db }
     }
-
-    // ----------------------------------------------------------
-    // Commands
-    // ----------------------------------------------------------
 
     pub async fn create_destination(
         &self,
@@ -55,7 +43,6 @@ impl DestinationAggregateService {
         type_name: &str,
         type_version: u32,
     ) -> anyhow::Result<Uuid> {
-        // Resolve environment name to environment_id from existing projection
         let env_row =
             sqlx::query("SELECT id FROM environments WHERE organisation = $1 AND name = $2")
                 .bind(organisation)
@@ -87,7 +74,6 @@ impl DestinationAggregateService {
             },
         )?;
 
-        // Persist events + update destinations projection atomically
         let org = organisation.to_string();
         let name_owned = name.to_string();
         let env_name = environment.to_string();
@@ -126,20 +112,6 @@ impl DestinationAggregateService {
         Ok(destination_id)
     }
 
-    /// Gives a pre-aggregate destination its stream back, so writes stop bailing.
-    ///
-    /// The `destinations` table is older than the event store, so destinations
-    /// created before it have a row and no stream. `load_or_default` then reports
-    /// `NonExistent` and every write fails with "destination does not exist" —
-    /// the destination is plainly there, and nothing can touch it.
-    ///
-    /// Rather than a one-off backfill, the stream is seeded the first time such a
-    /// destination is written to. The row is the source of truth for what the
-    /// events should say, and it is left untouched here because it is already
-    /// correct.
-    ///
-    /// A missing row is not this function's error to raise: the caller's own
-    /// write bails with the right message. This only fills a gap it can see.
     async fn ensure_stream(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
         let key = destination::stream_key(organisation, name);
         let mut root = self
@@ -188,7 +160,6 @@ impl DestinationAggregateService {
             rec.id,
         )?;
 
-        // Events only: the projection already holds exactly this.
         self.event_store
             .save_with(&mut root, move |_tx| Box::pin(async move { Ok(()) }))
             .await?;
@@ -202,10 +173,6 @@ impl DestinationAggregateService {
         Ok(())
     }
 
-    /// `merge` overlays `metadata` onto what is stored instead of replacing it,
-    /// so a caller that names two keys does not delete the rest. The overlay is
-    /// computed here rather than in the client because the client cannot see
-    /// withheld values and would drop them from the map it sent back.
     pub async fn update_metadata(
         &self,
         organisation: &str,
@@ -275,8 +242,6 @@ impl DestinationAggregateService {
 
         DestinationAggregate::update_sensitive_keys(&mut root, sensitive_keys)?;
 
-        // Read back the normalised set the aggregate settled on, so the
-        // projection and the event stream cannot drift.
         let normalised = root.state.sensitive_keys.clone();
         let org_owned = organisation.to_string();
         let name_owned = name.to_string();
@@ -344,10 +309,6 @@ impl DestinationAggregateService {
         Ok(())
     }
 
-    // ----------------------------------------------------------
-    // Queries (read from projections)
-    // ----------------------------------------------------------
-
     pub async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<DestinationRecord>> {
         let row = sqlx::query(
             "SELECT id, organisation, name, metadata, sensitive_keys, environment,
@@ -407,10 +368,6 @@ fn row_to_record(row: sqlx::postgres::PgRow) -> anyhow::Result<DestinationRecord
         type_version: row.get("type_version"),
     })
 }
-
-// ============================================================
-// State integration
-// ============================================================
 
 pub trait DestinationAggregateServiceState {
     fn destination_aggregate_service(&self) -> DestinationAggregateService;

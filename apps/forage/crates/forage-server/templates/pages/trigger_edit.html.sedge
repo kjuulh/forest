@@ -1,0 +1,48 @@
+use forage_ui::ButtonVariant;
+use forage_ui::components::{Button, Card, Checkbox, ChoiceChip, CsrfField, FieldLabel, TextField};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::project_settings::Section;
+use crate::views::models::{pattern, trigger_href, triggers_href};
+props crate::views::models::TriggerEditPage { chrome, org, project, csrf_token, trigger, environments, has_pipelines };
+
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Triggers} description="Update filter patterns and targets for this trigger." crumb={Some(trigger.name.as_str())}>
+    <Card class="p-6">
+      <form method="post" action={trigger_href(org, project, &trigger.id)} class="space-y-4">
+        <CsrfField token={csrf_token} />
+        <p class="text-sm text-gray-500 mb-2">Update filter patterns. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
+        <div class="space-y-3">
+          <TextField label="Branch pattern" name="branch_pattern" value={pattern(&trigger.branch_pattern)} placeholder="e.g. main" mono={true} />
+          <TextField label="Title pattern" name="title_pattern" value={pattern(&trigger.title_pattern)} placeholder="e.g. ^Release.*" mono={true} />
+          <TextField label="Author pattern" name="author_pattern" value={pattern(&trigger.author_pattern)} placeholder="e.g. ci-bot" mono={true} />
+          <TextField label="Commit message pattern" name="commit_message_pattern" value={pattern(&trigger.commit_message_pattern)} placeholder="e.g. ^Merge pull request.*" mono={true} />
+          <TextField label="Source type pattern" name="source_type_pattern" value={pattern(&trigger.source_type_pattern)} placeholder="e.g. github-actions" mono={true} />
+        </div>
+        <hr class="border-gray-200">
+        <div>
+          <FieldLabel>Target environments</FieldLabel>
+          {if !environments.is_empty() {
+            <div class="flex flex-wrap gap-2">
+              {for env in environments.iter() {
+                <ChoiceChip name="target_environments" value={env} checked={trigger.target_environments.contains(env)}>{env}</ChoiceChip>
+              }}
+            </div>
+          } else {
+            <p class="text-sm text-gray-400">No environments configured.</p>
+          }}
+        </div>
+        {if *has_pipelines {
+          <div>
+            <input type="hidden" name="use_pipeline_offered" value="true">
+            <Checkbox id="use-pipeline" name="use_pipeline" label="Use release pipeline" checked={trigger.use_pipeline} strong={true} />
+          </div>
+        }}
+        <Checkbox id="force-release" name="force_release" label="Force release (skip queue)" checked={trigger.force_release} />
+        <div class="flex items-center gap-3 pt-2">
+          <Button label="Save Changes" />
+          <Button label="Cancel" variant={ButtonVariant::Secondary} href={Some(triggers_href(org, project).as_str())} />
+        </div>
+      </form>
+    </Card>
+  </ProjectSettings>
+</Shell>

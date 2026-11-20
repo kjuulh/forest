@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_nats::jetstream;
 use forage_core::integrations::nats::{
@@ -11,8 +11,6 @@ use tokio_util::sync::CancellationToken;
 use crate::forest_client::GrpcForestClient;
 use crate::notification_worker::proto_to_event;
 
-/// Background component that listens to Forest's notification stream
-/// and publishes events to NATS JetStream for durable processing.
 pub struct NotificationIngester {
     pub grpc: Arc<GrpcForestClient>,
     pub jetstream: jetstream::Context,
@@ -25,7 +23,6 @@ impl Component for NotificationIngester {
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
-        // Ensure the JetStream stream exists
         self.ensure_stream().await.map_err(|e| {
             MadError::Inner(anyhow::anyhow!("failed to create JetStream stream: {e}"))
         })?;
@@ -33,6 +30,7 @@ impl Component for NotificationIngester {
         let mut backoff = 1u64;
 
         loop {
+            let connected_at = Instant::now();
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
                     tracing::info!("notification ingester shutting down");
@@ -45,7 +43,12 @@ impl Component for NotificationIngester {
                             backoff = 1;
                         }
                         Err(e) => {
-                            tracing::error!(error = %e, backoff_secs = backoff, "notification stream error, reconnecting");
+                            backoff = reconnect_delay_secs(backoff, connected_at.elapsed());
+                            if backoff >= MAX_BACKOFF_SECS {
+                                tracing::error!(error = %e, backoff_secs = backoff, "notification stream still failing, reconnecting");
+                            } else {
+                                tracing::warn!(error = %e, backoff_secs = backoff, "notification stream error, reconnecting");
+                            }
                         }
                     }
 
@@ -53,7 +56,7 @@ impl Component for NotificationIngester {
                         _ = cancellation_token.cancelled() => break,
                         _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
                     }
-                    backoff = (backoff * 2).min(60);
+                    backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
                 }
             }
         }
@@ -61,6 +64,26 @@ impl Component for NotificationIngester {
         Ok(())
     }
 }
+
+/// Reaching the cap means forest has been unreachable for minutes, not a redeploy.
+const MAX_BACKOFF_SECS: u64 = 60;
+
+const STABLE_STREAM: Duration = Duration::from_secs(60);
+
+/// Backoff is for a failure still in progress. A stream that ran for a while and
+/// then dropped (every forest-server redeploy does this) reconnects at once, or
+/// notifications wait in forest for up to the full backoff.
+fn reconnect_delay_secs(backoff_secs: u64, connected_for: Duration) -> u64 {
+    if connected_for >= STABLE_STREAM {
+        1
+    } else {
+        backoff_secs
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/notification_ingester_tests.rs"]
+mod tests;
 
 impl NotificationIngester {
     async fn ensure_stream(&self) -> Result<(), String> {
@@ -71,8 +94,8 @@ impl NotificationIngester {
                 name: STREAM_NAME.to_string(),
                 subjects: vec![STREAM_SUBJECTS.to_string()],
                 retention: stream::RetentionPolicy::WorkQueue,
-                max_age: Duration::from_secs(7 * 24 * 3600), // 7 days
-                max_bytes: 1_073_741_824,                     // 1 GB
+                max_age: Duration::from_secs(7 * 24 * 3600),
+                max_bytes: 1_073_741_824,
                 discard: stream::DiscardPolicy::Old,
                 ..Default::default()
             })
@@ -125,15 +148,12 @@ impl NotificationIngester {
                     let payload = serde_json::to_vec(&envelope)
                         .map_err(|e| format!("serialize envelope: {e}"))?;
 
-                    // Publish with ack — JetStream confirms persistence
                     if let Err(e) = self
                         .jetstream
                         .publish(subject, payload.into())
                         .await
                         .map_err(|e| format!("publish: {e}"))
                         .and_then(|ack_future| {
-                            // We don't block on the ack to keep the stream flowing,
-                            // but we log failures. In practice, JetStream will buffer.
                             tokio::spawn(async move {
                                 if let Err(e) = ack_future.await {
                                     tracing::warn!(error = %e, "JetStream publish ack failed");

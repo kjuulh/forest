@@ -1,0 +1,61 @@
+use forage_ui::components::{Alert, AuthProviders};
+use forage_ui::layouts::Shell;
+props crate::views::auth::SignupPage { chrome, username, email, error, return_to, providers };
+
+<Shell chrome={chrome}>
+  <section class="max-w-md mx-auto px-4 pt-24">
+    <h1 class="text-2xl font-bold text-center mb-8">Create your account</h1>
+
+    {if let Some(error) = error {
+      <Alert>{error}</Alert>
+    }}
+
+    <form method="POST" action="/signup" class="space-y-4">
+      {if let Some(return_to) = return_to {
+        <input type="hidden" name="return_to" value={return_to}>
+      }}
+      <div>
+        <label for="username" class="block text-sm font-medium mb-1">Username</label>
+        <input type="text" id="username" name="username" value={username} required minlength="3" maxlength="64"
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="alice">
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium mb-1">Email</label>
+        <input type="email" id="email" name="email" value={email} required
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="alice@example.com">
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium mb-1">Password</label>
+        <input type="password" id="password" name="password" required minlength="12"
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="At least 12 characters">
+        <p class="mt-1.5 text-xs text-gray-400">Min 12 characters, with uppercase, lowercase, and a digit.</p>
+      </div>
+
+      <div>
+        <label for="password_confirm" class="block text-sm font-medium mb-1">Confirm password</label>
+        <input type="password" id="password_confirm" name="password_confirm" required minlength="12"
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="Repeat your password">
+      </div>
+
+      <button type="submit" class="w-full py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+        Create account
+      </button>
+    </form>
+
+    <AuthProviders
+      google_href={providers.google.then(|| providers.href("/auth/google")).as_deref()}
+      github_href={providers.github.then(|| providers.href("/auth/github")).as_deref()}
+      magic_link_href={providers.magic_link.then(|| providers.href("/auth/magic-link")).as_deref()}
+      magic_link_label="Sign up with email link" />
+
+    <p class="mt-6 text-center text-sm text-gray-600">
+      Already have an account? <a href={providers.href("/login")} class="font-medium text-gray-900 hover:underline">Sign in</a>
+    </p>
+  </section>
+</Shell>

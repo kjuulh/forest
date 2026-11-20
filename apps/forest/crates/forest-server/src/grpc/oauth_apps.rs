@@ -5,7 +5,10 @@ use super::error;
 use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
-    services::oauth_apps::{OAuthApp, OAuthAppServiceState},
+    services::{
+        device_login_aggregate::{DeviceLoginAggregateService, DeviceLoginAggregateServiceState},
+        oauth_apps::{DeviceTokenOutcome, OAuthApp, OAuthAppServiceState},
+    },
     state::State,
 };
 
@@ -18,13 +21,14 @@ impl OAuthAppsServer {
         self.state.oauth_app_service()
     }
 
-    /// The OIDC issuer — the public web-app URL (where discovery is served).
+    fn devices(&self) -> DeviceLoginAggregateService {
+        self.state.device_login_aggregate_service()
+    }
+
     fn issuer(&self) -> &str {
         self.state.config.web_app_url.as_deref().unwrap_or_default()
     }
 
-    /// Authorize the caller as an admin of `organisation_id` and return the
-    /// resolved org id. All OAuth-app management is admin-only.
     async fn authorize_admin(
         &self,
         request_actor: &Actor,
@@ -61,6 +65,7 @@ impl OAuthAppsService for OAuthAppsServer {
                 &req.redirect_uris,
                 &req.scopes,
                 &req.grant_types,
+                req.public,
             )
             .await
             .map_err(error::to_status)?;
@@ -194,8 +199,6 @@ impl OAuthAppsService for OAuthAppsServer {
         Ok(tonic::Response::new(DeleteOAuthAppResponse {}))
     }
 
-    // ── Authorization server (service-account only; called by Forage) ──
-
     async fn lookup_o_auth_client(
         &self,
         request: tonic::Request<LookupOAuthClientRequest>,
@@ -220,6 +223,7 @@ impl OAuthAppsService for OAuthAppsServer {
             homepage_url: app.homepage_url,
             redirect_uris: app.redirect_uris,
             scopes: app.scopes,
+            public: app.public,
         }))
     }
 
@@ -253,9 +257,6 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    /// The client_credentials grant. Same service-account gate as the
-    /// rest of the authorization-server surface: Forage fronts it, and
-    /// the client's own credentials are checked inside the service.
     async fn issue_client_credentials_token(
         &self,
         request: tonic::Request<IssueClientCredentialsTokenRequest>,
@@ -279,11 +280,6 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    /// Resolve a machine token for a resource server.
-    ///
-    /// An unknown, expired or revoked token all return `active: false`
-    /// with empty fields — the caller learns only that it can't be used,
-    /// which keeps this from doubling as a token-probing oracle.
     async fn introspect_client_token(
         &self,
         request: tonic::Request<IntrospectClientTokenRequest>,
@@ -295,17 +291,33 @@ impl OAuthAppsService for OAuthAppsServer {
 
         let found = self
             .service()
-            .introspect_client_token(&req.access_token)
+            .introspect_token(&req.access_token)
             .await
             .map_err(oauth_flow_status)?;
 
         Ok(tonic::Response::new(match found {
-            Some(p) => IntrospectClientTokenResponse {
-                active: true,
-                app_id: p.app_id.to_string(),
-                organisation_id: p.organisation_id.to_string(),
-                scopes: p.scopes,
-            },
+            Some(p) => {
+                let mut resp = IntrospectClientTokenResponse {
+                    active: true,
+                    app_id: p.app_id.to_string(),
+                    organisation_id: p.organisation_id.to_string(),
+                    scopes: p.scopes,
+                    ..Default::default()
+                };
+                if let Some(user) = p.user {
+                    resp.user_id = user.user_id.to_string();
+                    resp.username = user.username;
+                    resp.organisations = user
+                        .organisations
+                        .into_iter()
+                        .map(|o| IntrospectedOrganisation {
+                            organisation_id: o.organisation_id.to_string(),
+                            name: o.name,
+                        })
+                        .collect();
+                }
+                resp
+            }
             None => IntrospectClientTokenResponse {
                 active: false,
                 ..Default::default()
@@ -461,12 +473,150 @@ impl OAuthAppsService for OAuthAppsServer {
             }),
         }))
     }
+
+    async fn initiate_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<InitiateOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<InitiateOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let grant = self
+            .service()
+            .initiate_device_authorization(
+                &self.devices(),
+                &req.client_id,
+                &req.client_secret,
+                &req.scopes,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            InitiateOAuthDeviceAuthorizationResponse {
+                device_code: grant.device_code,
+                user_code: grant.user_code,
+                verification_uri: grant.verification_uri,
+                verification_uri_complete: grant.verification_uri_complete,
+                expires_in_seconds: grant.expires_in_seconds,
+                interval_seconds: grant.interval_seconds,
+            },
+        ))
+    }
+
+    async fn lookup_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<LookupOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<LookupOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let pending = self
+            .service()
+            .pending_device_authorization(&self.devices(), &req.user_code)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("no pending app device authorization"))?;
+
+        Ok(tonic::Response::new(
+            LookupOAuthDeviceAuthorizationResponse {
+                client_id: pending.app.client_id,
+                name: pending.app.name,
+                homepage_url: pending.app.homepage_url,
+                scopes: pending.scopes,
+            },
+        ))
+    }
+
+    async fn approve_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<ApproveOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<ApproveOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+        let user_id = parse_uuid(&req.user_id, "user_id")?;
+
+        self.service()
+            .approve_device_authorization(
+                &self.devices(),
+                &req.user_code,
+                user_id,
+                &req.approving_ip,
+                &req.approving_user_agent,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            ApproveOAuthDeviceAuthorizationResponse {},
+        ))
+    }
+
+    async fn deny_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<DenyOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<DenyOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+        let user_id = parse_uuid(&req.user_id, "user_id")?;
+
+        self.service()
+            .deny_device_authorization(&self.devices(), &req.user_code, user_id)
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            DenyOAuthDeviceAuthorizationResponse {},
+        ))
+    }
+
+    async fn exchange_o_auth_device_code(
+        &self,
+        request: tonic::Request<ExchangeOAuthDeviceCodeRequest>,
+    ) -> Result<tonic::Response<ExchangeOAuthDeviceCodeResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let outcome = self
+            .service()
+            .exchange_device_code(
+                &self.devices(),
+                &req.client_id,
+                &req.client_secret,
+                &req.device_code,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        let (status, tokens) = match outcome {
+            DeviceTokenOutcome::Issued(tokens) => (
+                OAuthDeviceTokenStatus::Issued,
+                Some(to_proto_tokens(tokens)),
+            ),
+            DeviceTokenOutcome::AuthorizationPending => {
+                (OAuthDeviceTokenStatus::AuthorizationPending, None)
+            }
+            DeviceTokenOutcome::SlowDown => (OAuthDeviceTokenStatus::SlowDown, None),
+            DeviceTokenOutcome::AccessDenied => (OAuthDeviceTokenStatus::AccessDenied, None),
+            DeviceTokenOutcome::ExpiredToken => (OAuthDeviceTokenStatus::ExpiredToken, None),
+        };
+        Ok(tonic::Response::new(ExchangeOAuthDeviceCodeResponse {
+            status: status as i32,
+            tokens,
+        }))
+    }
 }
 
-/// Map authorization-server flow errors to gRPC statuses whose *message* is the
-/// RFC 6749 error code, so Forage can translate them into OAuth error responses
-/// (`invalid_client` → 401, `invalid_grant`/`invalid_scope` → 400). Falls back
-/// to the shared mapper for non-flow errors.
 fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
     use crate::services::oauth_apps::OAuthAppError;
     if let Some(e) = err.downcast_ref::<OAuthAppError>() {
@@ -486,16 +636,19 @@ fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
             OAuthAppError::InvalidCodeChallengeMethod => {
                 tonic::Status::invalid_argument("invalid_request")
             }
-            // RFC 6749 names these exactly.
             OAuthAppError::UnsupportedGrant(_) => {
                 tonic::Status::invalid_argument("unsupported_grant_type")
             }
             OAuthAppError::ScopeNotGranted(_) => tonic::Status::invalid_argument("invalid_scope"),
+            OAuthAppError::PkceRequired => {
+                tonic::Status::invalid_argument(format!("invalid_request: {e}"))
+            }
             OAuthAppError::InvalidName
             | OAuthAppError::NoRedirectUris
-            | OAuthAppError::InvalidRedirectUri(_) => {
-                tonic::Status::invalid_argument(e.to_string())
-            }
+            | OAuthAppError::InvalidRedirectUri(_)
+            | OAuthAppError::PublicClientGrant
+            | OAuthAppError::PublicClientOpenid
+            | OAuthAppError::PublicClientNoSecret => tonic::Status::invalid_argument(e.to_string()),
         };
     }
     error::to_status(err)
@@ -507,9 +660,6 @@ fn parse_uuid(value: &str, field: &str) -> Result<Uuid, tonic::Status> {
         .map_err(|_| tonic::Status::invalid_argument(format!("invalid {field}")))
 }
 
-/// OAuth-app management is performed by a logged-in org admin (a user). The
-/// service-account bypass in `require_org_access_by_id` has no `created_by`,
-/// so creation specifically requires a user actor.
 fn acting_user_id(actor: &Actor) -> Result<Uuid, tonic::Status> {
     match actor {
         Actor::User { user_id } => Ok(*user_id),
@@ -530,6 +680,7 @@ fn to_proto(app: OAuthApp) -> forest_grpc_interface::OAuthApp {
         redirect_uris: app.redirect_uris,
         grant_types: app.grant_types,
         scopes: app.scopes,
+        public: app.public,
         created_by: app.created_by.to_string(),
         created_at: Some(datetime_to_timestamp(app.created_at)),
         updated_at: Some(datetime_to_timestamp(app.updated_at)),

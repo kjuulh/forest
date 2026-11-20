@@ -1,8 +1,3 @@
-//! `forest-contrib/init@v0.1` — renders a small project skeleton into
-//! work_dir based on `with:` inputs. v0 ships a single `rust-cli`
-//! template inline; future versions can layer template-pack support
-//! once we have a story for shipping templates separately.
-
 #[allow(dead_code)]
 mod forestgen;
 

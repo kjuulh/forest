@@ -1,15 +1,3 @@
-//! `forest admin unpublish <name>@<version>` — remove a previously
-//! published version from the registry (TASKS/025).
-//!
-//! Org members may unpublish any version they could have published. The
-//! command requires `--yes` on non-TTY stdin so it cannot be accidentally
-//! invoked from a pipe; on a TTY without `--yes`, the user is prompted.
-//!
-//! After unpublish, the version is unreachable for `forest global add`
-//! and `forest components show`. The aggregate event log retains the
-//! full lifecycle (publish → unpublish) for audit. Re-publishing at the
-//! same version is allowed and behaves like a first publish.
-
 use std::io::IsTerminal;
 
 use anyhow::Context;
@@ -34,7 +22,6 @@ pub struct UnpublishCommand {
     reason: Option<String>,
 }
 
-/// Parsed `<org>/<name>@<version>` reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct VersionRef {
     organisation: String,
@@ -65,13 +52,10 @@ impl UnpublishCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let r = parse_reference(&self.reference)?;
 
-        // Safety gate: a non-interactive stdin (CI / pipe) MUST pass --yes
-        // so destructive ops can't be triggered by accident.
         if !self.yes && !std::io::stdin().is_terminal() {
             anyhow::bail!("refusing to unpublish without --yes (stdin is not a TTY)");
         }
 
-        // TTY confirmation flow.
         if !self.yes {
             eprintln!(
                 "About to unpublish {}/{}@{}.",
@@ -140,8 +124,6 @@ mod tests {
 
     #[test]
     fn handles_at_in_version_correctly() {
-        // rsplit_once splits on the LAST @, so a pre-release containing
-        // @ (not common, but possible) doesn't trip us up.
         let r = parse_reference("acme/widget@1.0.0").unwrap();
         assert_eq!(r.version, "1.0.0");
     }

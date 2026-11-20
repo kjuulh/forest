@@ -9,8 +9,6 @@ use uuid::Uuid;
 
 use crate::domains::component::{self, ComponentAggregate};
 
-/// Render a [`forest_manifest::ComponentShape`] as the lowercase string we
-/// persist in `components.shape` (see migration `20260514000000_component_shape.sql`).
 fn shape_to_str(s: forest_manifest::ComponentShape) -> &'static str {
     match s {
         forest_manifest::ComponentShape::Component => "component",
@@ -20,7 +18,6 @@ fn shape_to_str(s: forest_manifest::ComponentShape) -> &'static str {
     }
 }
 
-/// Convert the lowercase `components.shape` string back to the proto enum.
 fn shape_str_to_proto(s: &str) -> forest_grpc_interface::ComponentShape {
     match s {
         "component" => forest_grpc_interface::ComponentShape::Component,
@@ -31,19 +28,6 @@ fn shape_str_to_proto(s: &str) -> forest_grpc_interface::ComponentShape {
     }
 }
 
-/// Order two component versions by semver precedence, ascending (DATA-583).
-///
-/// Replaces a SQL `ORDER BY split_part(version, '.', N)::int`, which was not
-/// just imprecise but *fatal*: the third dot-part of `0.1.7-ci.1` is `7-ci`,
-/// and casting that to `int` raises `invalid input syntax for type integer`.
-/// A single prerelease anywhere in a component's history therefore broke every
-/// query using that ordering, taking `forest components show` down for the
-/// whole component.
-///
-/// Non-semver versions can exist in old rows, so parse failures must not panic
-/// or reorder anything violently: anything unparseable sorts below everything
-/// parseable, and ties fall back to a plain string comparison so the order
-/// stays total and stable.
 fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     match (semver::Version::parse(a), semver::Version::parse(b)) {
         (Ok(a), Ok(b)) => a.cmp(&b),
@@ -53,20 +37,6 @@ fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-/// The version a component should report as its latest: the highest **stable**
-/// one, falling back to the highest of any kind when no stable release exists.
-///
-/// Ordering alone is not enough. A prerelease sorts below *its own* release but
-/// still above the previous one, so `0.2.0-rc.1` outranks a shipped `0.1.8` and
-/// would present itself as the component's latest version — a release candidate
-/// promoting itself on the detail page.
-///
-/// The fallback keeps a component that has only ever published release
-/// candidates from reporting no version at all.
-///
-/// Same rule fungus applies to ports (DATA-499), the same one `list_org_tools`
-/// already used, and the same one the CLI's `VersionSpec::resolve` uses so an
-/// install and the page describing it agree.
 fn pick_latest_version(versions: &[String]) -> Option<&String> {
     versions
         .iter()
@@ -75,10 +45,6 @@ fn pick_latest_version(versions: &[String]) -> Option<&String> {
         .or_else(|| versions.iter().max_by(|a, b| compare_versions(a, b)))
 }
 
-// ============================================================
-// Read-model types
-// ============================================================
-
 pub struct ComponentVersion {
     pub id: String,
     pub name: String,
@@ -86,13 +52,67 @@ pub struct ComponentVersion {
     pub version: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BinaryId<'a> {
+    pub organisation: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub os: &'a str,
+    pub arch: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryRange {
+    Whole,
+    Bytes { offset: u64, length: u64 },
+}
+
+impl BinaryRange {
+    pub fn clamp_to(self, size: u64) -> Option<Self> {
+        match self {
+            Self::Whole => Some(Self::Whole),
+            Self::Bytes { offset: 0, .. } if size == 0 => Some(Self::Whole),
+            Self::Bytes { offset, length } if length > 0 && offset < size => Some(Self::Bytes {
+                offset,
+                length: length.min(size - offset),
+            }),
+            Self::Bytes { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryArtifact {
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DownloadBinaryError {
+    #[error("binary not found: {0}")]
+    NotFound(String),
+    #[error("binary {binary} changed: expected sha256 {expected}, registry has {actual}")]
+    DigestChanged {
+        binary: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("range {offset}+{length} is outside {binary} ({size} bytes)")]
+    OutOfRange {
+        binary: String,
+        offset: u64,
+        length: u64,
+        size: u64,
+    },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 pub struct ComponentVersionInfo {
     pub version: String,
     pub protocol_version: String,
     pub kind: String,
     pub platforms: Vec<String>,
-    /// RFC 3339 timestamp of when this version was published (the `created`
-    /// column, set at commit time).
     pub created_at: String,
 }
 
@@ -113,13 +133,11 @@ pub struct ToolFacetRow {
     pub description: Option<String>,
 }
 
-/// Best-effort prerelease detector — matches `<digits>.<digits>.<digits>-<anything>`.
 fn is_prerelease(v: &str) -> bool {
     let core = v.split('+').next().unwrap_or(v);
     core.contains('-')
 }
 
-/// Compare two semver-shaped versions lexically on `(major, minor, patch)`.
 fn version_gt(a: &str, b: &str) -> bool {
     fn parts(v: &str) -> [u64; 3] {
         let core = v.split(['-', '+']).next().unwrap_or(v);
@@ -132,7 +150,6 @@ fn version_gt(a: &str, b: &str) -> bool {
     parts(a) > parts(b)
 }
 
-/// Extract the host component from an https:// URL.
 fn extract_host(url: &str) -> Option<String> {
     let rest = url
         .strip_prefix("https://")
@@ -145,13 +162,6 @@ fn extract_host(url: &str) -> Option<String> {
     }
 }
 
-/// Load the README markdown for a component at a specific version.
-///
-/// Looks up the `component_files` projection for `README.md` (or
-/// case-insensitive variant) belonging to that version, then fetches the
-/// bytes from S3 and returns them as a UTF-8 string. Returns
-/// `Ok(String::new())` when no README is found — the caller decides
-/// whether that's an error or just an empty response.
 async fn load_component_readme(
     db: &sqlx::PgPool,
     object_store: &crate::object_store::ObjectStore,
@@ -160,9 +170,6 @@ async fn load_component_readme(
     version: &str,
 ) -> anyhow::Result<String> {
     use sqlx::Row;
-    // Look up the component_id matching this org/name/version, then find a
-    // README.md file path under it. The path is the in-archive name; the
-    // S3 key is derived from (org, name, version, path).
     let row = sqlx::query(
         "SELECT cf.file_path
          FROM component_files cf
@@ -187,19 +194,12 @@ async fn load_component_readme(
     };
 
     let s3_key = crate::object_store::keys::component_file(organisation, name, version, &file_path);
-    // 5s timeout — README is on the detail page hot path; a stalled S3
-    // request must not block the whole page render. 1 MiB cap on the
-    // decoded text — the gRPC write boundary caps writes at 64 KiB, but
-    // older objects predating that cap could still be larger.
     const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     const MAX_README_BYTES: usize = 1024 * 1024;
     let fetch = object_store.get(&s3_key);
     let bytes = match tokio::time::timeout(READ_TIMEOUT, fetch).await {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => {
-            // Don't fail the whole detail response if the README blob is
-            // missing — log + return empty. The detail page degrades to
-            // no README, which is the same as "never uploaded one".
             tracing::warn!("README S3 fetch failed for {organisation}/{name}@{version}: {e:#}");
             return Ok(String::new());
         }
@@ -221,16 +221,9 @@ async fn load_component_readme(
         &bytes
     };
 
-    // README is markdown text; surface as UTF-8 string. Lossy decode
-    // handles malformed bytes without panicking.
     Ok(String::from_utf8_lossy(truncated).into_owned())
 }
 
-// ============================================================
-// Service — orchestrates aggregate + projections
-// ============================================================
-
-/// In-flight upload metadata resolved from the staging projection.
 struct UploadInfo {
     organisation: String,
     name: String,
@@ -256,14 +249,6 @@ impl ComponentService {
         }
     }
 
-    // ----------------------------------------------------------
-    // Commands
-    // ----------------------------------------------------------
-
-    /// Begin a component version upload. Returns the upload_id (UUID).
-    ///
-    /// Projections updated atomically:
-    /// - `component_staging` row inserted (status='staged')
     pub async fn begin_upload(
         &self,
         organisation: &str,
@@ -306,9 +291,6 @@ impl ComponentService {
         Ok(upload_id)
     }
 
-    /// Upload a file for an in-flight upload.
-    ///
-    /// Stores file content in S3, records metadata in DB via event store.
     pub async fn upload_file(
         &self,
         upload_id: Uuid,
@@ -325,7 +307,6 @@ impl ComponentService {
 
         ComponentAggregate::upload_file(&mut root, upload_id, file_path)?;
 
-        // Resolve version from staging
         let version: String =
             sqlx::query_scalar("SELECT version FROM component_staging WHERE id = $1")
                 .bind(upload_id)
@@ -333,7 +314,6 @@ impl ComponentService {
                 .await
                 .context("resolve version from staging")?;
 
-        // Store file content in S3
         let s3_key = crate::object_store::keys::component_file(
             &info.organisation,
             &info.name,
@@ -347,7 +327,6 @@ impl ComponentService {
 
         let file_path_owned = file_path.to_string();
 
-        // Record metadata in DB (file_content is empty — content is in S3)
         let db_result = self
             .event_store
             .save_with(&mut root, move |tx| {
@@ -366,7 +345,6 @@ impl ComponentService {
             })
             .await;
 
-        // Cleanup S3 if DB write failed
         if let Err(e) = &db_result {
             tracing::warn!("DB write failed after S3 upload, cleaning up S3 object: {e:#}");
             let _ = self.object_store.delete(&s3_key).await;
@@ -376,20 +354,6 @@ impl ComponentService {
         Ok(())
     }
 
-    /// Unpublish a previously-published version (TASKS/025).
-    ///
-    /// Atomically:
-    /// - emits `VersionUnpublished` on the aggregate (audit trail);
-    /// - deletes the version's row from the `components` projection so
-    ///   subsequent `forest components show` / `forest global add` etc.
-    ///   behave as if the version had never been published.
-    ///
-    /// The manifest blob and uploaded artifacts remain in object storage
-    /// for now — a future GC sweep can reclaim them; the resolver no
-    /// longer points at them after this method returns.
-    ///
-    /// Returns `Ok(true)` when a new event was recorded, `Ok(false)` on
-    /// idempotent no-op (version was already Unpublished).
     pub async fn unpublish_version(
         &self,
         organisation: &str,
@@ -404,7 +368,6 @@ impl ComponentService {
             .load_or_default::<ComponentAggregate>(&key)
             .await?;
 
-        // Truncate reason at 1024 chars per the proto contract.
         let reason = reason.map(|r| {
             if r.len() > 1024 {
                 r[..1024].to_string()
@@ -417,7 +380,6 @@ impl ComponentService {
             ComponentAggregate::unpublish_version(&mut root, version, actor, reason.as_deref())?;
 
         if !recorded {
-            // No-op: nothing changed on the aggregate, nothing to persist.
             return Ok(false);
         }
 
@@ -428,8 +390,6 @@ impl ComponentService {
         self.event_store
             .save_with(&mut root, move |tx| {
                 Box::pin(async move {
-                    // Delete the projection row so read paths skip it.
-                    // The aggregate retains the events for audit / replay.
                     sqlx::query(
                         "DELETE FROM components
                          WHERE organisation = $1 AND name = $2 AND version = $3",
@@ -448,19 +408,9 @@ impl ComponentService {
         Ok(true)
     }
 
-    /// Explicitly abort an in-flight upload (TASKS/023).
-    ///
-    /// The CLI's `AbortOnDrop` guard calls this on early return / panic, so
-    /// the next `begin_upload` for the same version doesn't have to rely on
-    /// the supersede path. Idempotent — aborting an unknown / committed /
-    /// already-aborted upload is a no-op success.
-    ///
-    /// Projections updated atomically:
-    /// - `component_staging` status set to 'aborted' (best-effort row touch)
     pub async fn abort_upload(&self, upload_id: Uuid, reason: &str) -> anyhow::Result<()> {
         let info = match self.resolve_upload(upload_id).await {
             Ok(i) => i,
-            // Unknown upload — already cleaned up or never existed. Idempotent.
             Err(_) => return Ok(()),
         };
 
@@ -470,8 +420,6 @@ impl ComponentService {
             .load_or_default::<ComponentAggregate>(&key)
             .await?;
 
-        // Cap reason at 256 chars; longer strings are truncated silently
-        // (the proto comment promises this; tests cover the boundary).
         let reason = if reason.len() > 256 {
             &reason[..256]
         } else {
@@ -480,8 +428,6 @@ impl ComponentService {
 
         ComponentAggregate::abort_upload(&mut root, upload_id, reason)?;
 
-        // If the aggregate command was a no-op (no event recorded), skip the
-        // save_with path entirely — there's nothing to persist.
         if root.pending_count() == 0 {
             return Ok(());
         }
@@ -505,27 +451,10 @@ impl ComponentService {
         Ok(())
     }
 
-    /// Commit (publish) an upload.
-    ///
-    /// Projections updated atomically:
-    /// - `components` row upserted
-    /// - `component_staging` status set to 'committed'
-    ///
-    /// TASKS/023: refuses to commit a binary-shaped upload when no manifest
-    /// has been recorded against this upload's aggregate. This closes the
-    /// ghost-version path where `_meta/describe` (or any other manifest
-    /// build step) fails after `begin_upload` + binary upload but before
-    /// `publish_manifest`. CUE-only / Deno publishes have no manifest
-    /// validator today and are exempt.
     pub async fn commit_upload(&self, upload_id: Uuid) -> anyhow::Result<()> {
         let info = self.resolve_upload(upload_id).await?;
         let key = component::stream_key(&info.organisation, &info.name);
 
-        // Pre-flight: did any binary artifact land for this upload? If so,
-        // a manifest is mandatory before commit. Reading from the projection
-        // outside the save_with closure is fine — artifacts are append-only
-        // and the worst race (someone uploads an artifact between this read
-        // and the commit) only relaxes the check in our favour.
         let has_binary_artifacts: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM component_artifacts WHERE component_id = $1)",
         )
@@ -545,7 +474,6 @@ impl ComponentService {
         let org = info.organisation;
         let name = info.name;
 
-        // Keep copies for the OCI publish step (after the closure moves org/name)
         let org_for_oci = org.clone();
         let name_for_oci = name.clone();
         let version_for_oci = version.clone();
@@ -553,10 +481,6 @@ impl ComponentService {
         self.event_store
             .save_with(&mut root, move |tx| {
                 Box::pin(async move {
-                    // Detect kind:
-                    //   - "binary": at least one binary artifact uploaded
-                    //   - "external": manifest declared kind=external (no upload)
-                    //   - "files": neither (v1 cue-only)
                     let has_artifacts: bool = sqlx::query_scalar(
                         "SELECT EXISTS(SELECT 1 FROM component_artifacts WHERE component_id = $1)",
                     )
@@ -565,8 +489,6 @@ impl ComponentService {
                     .await
                     .unwrap_or(false);
 
-                    // The shape was computed and stashed by publish_manifest.
-                    // Read it (may be NULL for legacy pre-spec manifests).
                     let staged_shape: Option<String> =
                         sqlx::query_scalar("SELECT shape FROM component_staging WHERE id = $1")
                             .bind(upload_id)
@@ -611,8 +533,6 @@ impl ComponentService {
             })
             .await?;
 
-        // Auto-publish CUE files as an OCI artifact for CUE module resolution.
-        // This runs after commit so the component is in a consistent state.
         let cue_files = self.get_cue_files(upload_id).await?;
         if !cue_files.is_empty() {
             if let Err(e) = crate::oci_registry::publish_cue_module(
@@ -625,14 +545,12 @@ impl ComponentService {
             .await
             {
                 tracing::warn!("failed to publish CUE module as OCI artifact: {e:#}");
-                // Non-fatal — the component is committed, just the OCI artifact failed
             }
         }
 
         Ok(())
     }
 
-    /// Get CUE files uploaded for a component (for OCI packaging).
     async fn get_cue_files(&self, component_id: Uuid) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         let rows = sqlx::query(
             "SELECT file_path FROM component_files
@@ -648,7 +566,6 @@ impl ComponentService {
             use sqlx::Row;
             let path: String = row.get("file_path");
 
-            // Read from S3
             let comp = sqlx::query(
                 "SELECT name, organisation, version FROM components WHERE id = $1
                  UNION ALL
@@ -674,27 +591,11 @@ impl ComponentService {
         Ok(files)
     }
 
-    // ----------------------------------------------------------
-    // Queries (read from projections)
-    // ----------------------------------------------------------
-
-    /// Get the latest version of a component.
     pub async fn get_component(
         &self,
         name: &str,
         organisation: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
-        // Ordering happens in Rust, not SQL. The previous
-        // `split_part(version, '.', N)::int DESC` could not merely mis-sort a
-        // semver prerelease — it made the whole query *fail*: for `0.1.7-ci.1`
-        // the third dot-separated part is `7-ci`, and `'7-ci'::int` raises
-        // `invalid input syntax for type integer`. One prerelease anywhere in a
-        // component's history took out `forest components show` for that
-        // component entirely (DATA-583).
-        //
-        // `semver::Version` also gets the precedence rules right, which the
-        // numeric split never could: a prerelease sorts *below* its release, so
-        // `0.1.8-rc.1 < 0.1.8`.
         let rows = sqlx::query(
             "SELECT id, name, organisation, version
              FROM components
@@ -706,17 +607,6 @@ impl ComponentService {
         .await
         .context("get component")?;
 
-        // Latest *stable*, falling back to the highest of any kind when no
-        // stable release exists. Same rule fungus applies to ports (DATA-499)
-        // and the same one `list_org_tools` below already used — this brings
-        // the component detail view in line with both, and with the CLI, where
-        // a range spec no longer resolves to a prerelease.
-        //
-        // Ordering alone was not enough: a prerelease sorts below *its own*
-        // release but still above the previous one, so `0.2.0-rc.1` outranked a
-        // shipped `0.1.8` and presented itself as the component's latest
-        // version. The fallback keeps a component that has only ever published
-        // release candidates from reporting no version at all.
         let versions: Vec<String> = rows.iter().map(|r| r.get("version")).collect();
         let chosen = pick_latest_version(&versions);
         let latest =
@@ -730,7 +620,6 @@ impl ComponentService {
         }))
     }
 
-    /// Get a specific component version.
     pub async fn get_component_version(
         &self,
         name: &str,
@@ -757,14 +646,11 @@ impl ComponentService {
         }))
     }
 
-    /// Stream files for a published component.
-    /// Fetches file paths from DB metadata, content from S3.
     pub async fn get_files(
         &self,
         component_id: Uuid,
         file_stream: FileStream,
     ) -> anyhow::Result<()> {
-        // Get component identity for S3 key construction
         let comp = sqlx::query("SELECT name, organisation, version FROM components WHERE id = $1")
             .bind(component_id)
             .fetch_optional(&self.db)
@@ -780,7 +666,6 @@ impl ComponentService {
         let name: String = comp.get("name");
         let version: String = comp.get("version");
 
-        // Get file paths from metadata
         let rows = sqlx::query(
             "SELECT file_path FROM component_files
              WHERE component_id = $1
@@ -814,12 +699,6 @@ impl ComponentService {
         Ok(())
     }
 
-    // ----------------------------------------------------------
-    // v2: Binary component methods
-    // ----------------------------------------------------------
-
-    /// Store a binary artifact for an in-flight upload.
-    /// Binary content goes to S3; metadata recorded in `component_artifacts`.
     pub async fn upload_binary(
         &self,
         upload_id: Uuid,
@@ -831,7 +710,6 @@ impl ComponentService {
         let info = self.resolve_upload(upload_id).await?;
         let size_bytes = binary_content.len() as i64;
 
-        // Resolve version from staging
         let version: String =
             sqlx::query_scalar("SELECT version FROM component_staging WHERE id = $1")
                 .bind(upload_id)
@@ -839,7 +717,6 @@ impl ComponentService {
                 .await
                 .context("resolve version from staging")?;
 
-        // Store binary in S3
         let s3_key = crate::object_store::keys::component_binary(
             &info.organisation,
             &info.name,
@@ -858,7 +735,6 @@ impl ComponentService {
             "stored component binary in S3"
         );
 
-        // Record artifact metadata with storage_path pointing to S3
         let db_result = sqlx::query(
             "INSERT INTO component_artifacts (component_id, version, os, arch, sha256, size_bytes, storage_path)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -876,7 +752,6 @@ impl ComponentService {
         .await
         .context("record artifact metadata");
 
-        // Cleanup S3 if DB write failed
         if let Err(e) = &db_result {
             tracing::warn!("DB write failed after S3 upload, cleaning up S3 object: {e:#}");
             let _ = self.object_store.delete(&s3_key).await;
@@ -886,19 +761,6 @@ impl ComponentService {
         Ok(size_bytes as u64)
     }
 
-    /// Publish a manifest for an in-flight upload.
-    ///
-    /// Validates the manifest against TASKS/018-global-tools.md §1a.2 rules
-    /// 1–7 via the shared `forest-manifest` parser. Derives the manifest's
-    /// shape (§1a.2e) and forwards it to the caller for persistence on the
-    /// upgrade path (the `components` row gets `shape` updated by
-    /// `commit_upload`, which we leave alone here — `publish_manifest` only
-    /// touches `component_manifests`).
-    ///
-    /// TASKS/023: also records a `ManifestRecorded` aggregate event so that
-    /// `publish_version` can require manifest presence as a precondition.
-    /// The event lands atomically with the projection writes via
-    /// `EventStore::save_with`.
     pub async fn publish_manifest(
         &self,
         upload_id: Uuid,
@@ -906,9 +768,6 @@ impl ComponentService {
     ) -> anyhow::Result<()> {
         let info = self.resolve_upload(upload_id).await?;
 
-        // §1a.2 rule 5: payload size cap (64 KiB) — defence against
-        // malicious manifests; the parser is fast but the JSON could
-        // still be pathologically nested.
         const MAX_MANIFEST_SIZE: usize = 64 * 1024;
         if manifest_json.len() > MAX_MANIFEST_SIZE {
             anyhow::bail!(
@@ -917,7 +776,6 @@ impl ComponentService {
             );
         }
 
-        // §1a.2 rules 1–4, 7: structural validation + shape derivation.
         let parsed = forest_manifest::parse(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e:?}"))?;
         let shape = shape_to_str(parsed.shape).to_string();
@@ -931,9 +789,6 @@ impl ComponentService {
         ComponentAggregate::record_manifest(&mut root, upload_id)?;
 
         let manifest_json = manifest_json.to_string();
-        // Content identity for immutability (TASKS/024). Canonical hash of the
-        // manifest; the manifest embeds binary shas, so this pins binaries too.
-        // Stored alongside the manifest now; enforcement is wired separately.
         let manifest_hash = forest_manifest::hash::manifest_hash(&manifest_json)
             .map_err(|e| anyhow::anyhow!("hashing manifest: {e:?}"))?;
 
@@ -954,9 +809,6 @@ impl ComponentService {
                     .await
                     .context("publish manifest")?;
 
-                    // Stash the shape on `component_staging` so `commit_upload` can
-                    // promote it onto the `components` row in the same transaction
-                    // as the upload finalization.
                     sqlx::query(
                         "UPDATE component_staging SET shape = $1 WHERE id = $2",
                     )
@@ -974,7 +826,6 @@ impl ComponentService {
         Ok(())
     }
 
-    /// Get the manifest for a specific component version.
     pub async fn get_manifest(
         &self,
         organisation: &str,
@@ -997,7 +848,6 @@ impl ComponentService {
         Ok(row.map(|r| r.get("manifest_json")))
     }
 
-    /// List all versions of a component with platform info.
     pub async fn list_versions(
         &self,
         organisation: &str,
@@ -1026,9 +876,6 @@ impl ComponentService {
         .await
         .context("list versions")?;
 
-        // Sorted in Rust for the same reason as `get_component` above: the
-        // `::int` cast on a dot-part raised a Postgres error on any semver
-        // prerelease rather than just ordering it oddly. Newest first.
         let mut rows = rows;
         rows.sort_by(|a, b| {
             let (av, bv): (String, String) = (a.get("version"), b.get("version"));
@@ -1054,12 +901,6 @@ impl ComponentService {
         Ok(versions)
     }
 
-    /// List the tool-y components published under `organisation`.
-    ///
-    /// Filters to `shape IN ('hybrid_component', 'tool_binary', 'tool_external')`
-    /// per §1a.2c, picks the highest non-prerelease semver per (org, name),
-    /// reads the tool facet from the latest manifest, and (for externals)
-    /// the upstream host from `platforms[*].url`.
     pub async fn list_org_tools(&self, organisation: &str) -> anyhow::Result<Vec<OrgToolRow>> {
         let rows = sqlx::query(
             "SELECT c.organisation, c.name, c.version, c.shape,
@@ -1075,7 +916,6 @@ impl ComponentService {
         .await
         .context("list org tools query")?;
 
-        // Group by name, pick highest non-prerelease semver.
         let mut by_name: std::collections::BTreeMap<String, (String, String, Option<String>)> =
             std::collections::BTreeMap::new();
         for r in rows {
@@ -1107,7 +947,6 @@ impl ComponentService {
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok());
 
-            // Tool facet
             let tool = manifest_value
                 .as_ref()
                 .and_then(|v| v.get("tool"))
@@ -1127,7 +966,6 @@ impl ComponentService {
                         .map(str::to_string),
                 });
 
-            // Upstream host: only meaningful for tool_external.
             let upstream_host = if shape == "tool_external" {
                 manifest_value
                     .as_ref()
@@ -1150,68 +988,25 @@ impl ComponentService {
                 upstream_host,
             });
         }
-        // Stable order: by name.
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
 
-    /// Download a binary artifact from S3 (returns raw bytes).
-    pub async fn download_binary(
-        &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<Vec<u8>> {
-        let s3_key = self
-            .binary_storage_path(organisation, name, version, os, arch)
-            .await?;
-
-        self.object_store.get(&s3_key).await.with_context(|| {
-            format!("download binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
-        })
-    }
-
-    /// Stream a binary artifact from S3 without buffering it (DATA-505).
-    ///
-    /// Preferred over [`Self::download_binary`] for the download RPC: that one
-    /// waits for the entire object before the handler can send anything, so
-    /// time-to-first-byte is the whole S3 GET and peak memory is the artifact
-    /// size (twice over, once the handler chunks it). This lets the handler
-    /// forward chunks as they arrive.
     pub async fn download_binary_stream(
         &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<crate::object_store::ByteStream> {
-        let s3_key = self
-            .binary_storage_path(organisation, name, version, os, arch)
-            .await?;
-
-        self.object_store
-            .get_stream(&s3_key)
-            .await
-            .with_context(|| {
-                format!("stream binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
-            })
-    }
-
-    /// Resolve the S3 key for a published platform binary.
-    async fn binary_storage_path(
-        &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<String> {
-        // Look up storage_path from component_artifacts
-        let storage_path: Option<String> = sqlx::query_scalar(
-            "SELECT ca.storage_path
+        id: &BinaryId<'_>,
+        range: BinaryRange,
+        expected_sha256: Option<&str>,
+    ) -> Result<(BinaryArtifact, crate::object_store::ByteStream), DownloadBinaryError> {
+        let BinaryId {
+            organisation,
+            name,
+            version,
+            os,
+            arch,
+        } = *id;
+        let row: Option<(Option<String>, String, i64)> = sqlx::query_as(
+            "SELECT ca.storage_path, ca.sha256, ca.size_bytes
              FROM component_artifacts ca
              JOIN components c ON c.id = ca.component_id
              WHERE c.organisation = $1 AND c.name = $2 AND ca.version = $3
@@ -1224,22 +1019,52 @@ impl ComponentService {
         .bind(arch)
         .fetch_optional(&self.db)
         .await
-        .context("look up binary artifact")?
-        .flatten();
+        .context("look up binary artifact")?;
 
-        storage_path.with_context(|| {
-            format!("binary not found: {organisation}/{name}@{version} ({os}/{arch})")
-        })
+        let what = || format!("{organisation}/{name}@{version} ({os}/{arch})");
+        let Some((Some(s3_key), sha256, size_bytes)) = row else {
+            return Err(DownloadBinaryError::NotFound(what()));
+        };
+        let bare = |s: &str| s.strip_prefix("sha256:").unwrap_or(s).to_ascii_lowercase();
+        let artifact = BinaryArtifact {
+            sha256: bare(&sha256),
+            size_bytes: u64::try_from(size_bytes).context("negative artifact size")?,
+        };
+
+        if let Some(want) = expected_sha256
+            && bare(want) != artifact.sha256
+        {
+            return Err(DownloadBinaryError::DigestChanged {
+                binary: what(),
+                expected: want.to_string(),
+                actual: artifact.sha256,
+            });
+        }
+
+        let stream = match range.clamp_to(artifact.size_bytes) {
+            Some(BinaryRange::Whole) => self.object_store.get_stream(&s3_key).await,
+            Some(BinaryRange::Bytes { offset, length }) => {
+                self.object_store
+                    .get_range_stream(&s3_key, offset, length)
+                    .await
+            }
+            None => {
+                let BinaryRange::Bytes { offset, length } = range else {
+                    unreachable!("a whole-binary request always clamps");
+                };
+                return Err(DownloadBinaryError::OutOfRange {
+                    binary: what(),
+                    offset,
+                    length,
+                    size: artifact.size_bytes,
+                });
+            }
+        }
+        .with_context(|| format!("stream binary from S3: {}", what()))?;
+
+        Ok((artifact, stream))
     }
 
-    // ----------------------------------------------------------
-    // Registry UI / search
-    // ----------------------------------------------------------
-
-    /// Search components with visibility filtering.
-    /// - `see_all`: service accounts bypass visibility (true = no filtering)
-    /// - `member_orgs`: org names the caller belongs to (empty for anonymous)
-    /// Results include: public project components + private components from member_orgs.
     pub async fn search_components(
         &self,
         query: &str,
@@ -1253,13 +1078,12 @@ impl ComponentService {
         let is_org_filter = !organisation_filter.is_empty();
         let search_pattern = format!("%{query}%");
 
-        // Visibility filter: when not see_all, show public projects + member org components.
-        // $7 = see_all (skip filter), $8 = member_orgs array
         let rows = sqlx::query(
             "SELECT c.organisation, c.name, c.version, c.kind, c.shape, c.created, c.updated,
                     COALESCE((SELECT cm.manifest_json::text FROM component_manifests cm WHERE cm.component_id = c.id LIMIT 1), '') as manifest_json,
                     (SELECT count(*) FROM components c2 WHERE c2.organisation = c.organisation AND c2.name = c.name) as version_count,
-                    COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = c.organisation AND p.project = c.name LIMIT 1), 'private') as visibility
+                    CASE WHEN EXISTS (SELECT 1 FROM organisations o WHERE o.name = c.organisation AND o.visibility = 'public') THEN 'public'
+                         ELSE COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = c.organisation AND p.project = c.name LIMIT 1), 'private') END as visibility
              FROM components c
              WHERE ($1 = false OR c.name ILIKE $2 OR c.organisation ILIKE $2)
                AND ($3 = false OR c.organisation = $4)
@@ -1267,6 +1091,9 @@ impl ComponentService {
                    SELECT 1 FROM projects p
                    WHERE p.organisation = c.organisation AND p.project = c.name
                      AND p.visibility = 'public'
+               ) OR EXISTS (
+                   SELECT 1 FROM organisations o
+                   WHERE o.name = c.organisation AND o.visibility = 'public'
                ))
              ORDER BY c.updated DESC
              LIMIT $5 OFFSET $6",
@@ -1291,6 +1118,9 @@ impl ComponentService {
                    SELECT 1 FROM projects p
                    WHERE p.organisation = c.organisation AND p.project = c.name
                      AND p.visibility = 'public'
+               ) OR EXISTS (
+                   SELECT 1 FROM organisations o
+                   WHERE o.name = c.organisation AND o.visibility = 'public'
                ))",
         )
         .bind(is_search)
@@ -1385,7 +1215,6 @@ impl ComponentService {
         Ok((summaries, total as i32))
     }
 
-    /// Get full component detail for the registry UI.
     pub async fn get_component_detail(
         &self,
         organisation: &str,
@@ -1402,7 +1231,8 @@ impl ComponentService {
             .await?;
 
         let visibility: String = sqlx::query_scalar::<_, String>(
-            "SELECT COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private')",
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM organisations o WHERE o.name = $1 AND o.visibility = 'public') THEN 'public'
+                    ELSE COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private') END",
         )
         .bind(organisation)
         .bind(name)
@@ -1413,10 +1243,6 @@ impl ComponentService {
         let manifest_value: Option<serde_json::Value> = manifest
             .as_ref()
             .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok());
-        // Shape and kind are per-version (a component can be republished
-        // with a different shape — e.g. tool_external → tool_binary). The
-        // summary header must reflect the *latest* version, not whichever
-        // row Postgres returns first.
         let shape_str: String = sqlx::query_scalar::<_, String>(
             "SELECT shape FROM components
              WHERE organisation = $1 AND name = $2 AND version = $3",
@@ -1513,10 +1339,6 @@ impl ComponentService {
             })
             .collect();
 
-        // Load README.md (if uploaded) from S3 at the latest version. The
-        // file is stored alongside the binary via `upload_file` —
-        // component_files records the path, S3 holds the bytes. Common
-        // README filenames (`README.md`, `readme.md`) both work.
         let readme = load_component_readme(
             &self.db,
             &self.object_store,
@@ -1536,11 +1358,6 @@ impl ComponentService {
         }))
     }
 
-    // ----------------------------------------------------------
-    // Internal helpers
-    // ----------------------------------------------------------
-
-    /// Resolve upload_id → (organisation, name) from staging projection.
     async fn resolve_upload(&self, upload_id: Uuid) -> anyhow::Result<UploadInfo> {
         let row = sqlx::query(
             "SELECT organisation, name FROM component_staging
@@ -1558,10 +1375,6 @@ impl ComponentService {
         })
     }
 }
-
-// ============================================================
-// FileStream — gRPC streaming helper
-// ============================================================
 
 pub struct FileStream {
     rx: Option<
@@ -1641,10 +1454,6 @@ impl FileStream {
     }
 }
 
-// ============================================================
-// State integration
-// ============================================================
-
 pub trait ComponentServiceState {
     fn component_service(&self) -> ComponentService;
 }
@@ -1659,19 +1468,11 @@ impl ComponentServiceState for crate::state::State {
     }
 }
 
-/// DATA-583 — semver ordering for the registry's "latest version" and the
-/// version list.
-///
-/// These are pure ordering tests against `compare_versions`; the behaviour they
-/// protect used to live in SQL, where it could not be tested at all without a
-/// live database — which is part of why a prerelease took `components show`
-/// down unnoticed.
 #[cfg(test)]
 mod version_ordering_tests {
     use super::compare_versions;
     use std::cmp::Ordering;
 
-    /// Newest-first sort, matching what `list_versions` does.
     fn sorted_desc(versions: &[&str]) -> Vec<String> {
         let mut v: Vec<String> = versions.iter().map(|s| s.to_string()).collect();
         v.sort_by(|a, b| compare_versions(b, a));
@@ -1680,9 +1481,6 @@ mod version_ordering_tests {
 
     #[test]
     fn a_prerelease_does_not_break_ordering() {
-        // The regression. `0.1.7-ci.1` has `7-ci` as its third dot-part, which
-        // the old `::int` cast could not parse — the query errored outright
-        // rather than returning a wrong order.
         assert_eq!(
             sorted_desc(&["0.1.7", "0.1.8", "0.1.7-ci.1", "0.1.6"]),
             vec!["0.1.8", "0.1.7", "0.1.7-ci.1", "0.1.6"],
@@ -1691,8 +1489,6 @@ mod version_ordering_tests {
 
     #[test]
     fn a_prerelease_sorts_below_its_release() {
-        // Semver precedence, and the property that keeps a release candidate
-        // from advertising itself as the latest version.
         assert_eq!(compare_versions("0.1.8-rc.1", "0.1.8"), Ordering::Less);
         assert_eq!(
             compare_versions("1.0.0-alpha", "1.0.0-beta"),
@@ -1702,25 +1498,15 @@ mod version_ordering_tests {
 
     #[test]
     fn a_prerelease_still_outranks_the_previous_release() {
-        // 0.1.8-rc.1 is newer than 0.1.7 — which is exactly why a *high*
-        // prerelease would become "latest" and why test tags are numbered
-        // below the current release.
         assert_eq!(compare_versions("0.1.8-rc.1", "0.1.7"), Ordering::Greater);
     }
 
     #[test]
     fn double_digit_segments_compare_numerically_not_lexically() {
-        // The one thing the old integer cast did get right, kept: a string
-        // sort would put 0.1.9 above 0.1.10.
         assert_eq!(sorted_desc(&["0.1.9", "0.1.10"]), vec!["0.1.10", "0.1.9"]);
         assert_eq!(sorted_desc(&["0.9.0", "0.10.0"]), vec!["0.10.0", "0.9.0"]);
     }
 
-    /// DATA-583 — the detail view reports the latest *stable* version.
-    ///
-    /// Ordering alone never fixed this: a prerelease sorts below its own
-    /// release but still above the previous one, so an rc outranked a shipped
-    /// release and advertised itself as latest.
     #[test]
     fn latest_version_prefers_a_stable_release_over_a_higher_prerelease() {
         let versions = vec![
@@ -1733,8 +1519,6 @@ mod version_ordering_tests {
 
     #[test]
     fn latest_version_falls_back_when_only_prereleases_exist() {
-        // A component that has never cut a stable release must still report
-        // something rather than nothing.
         let versions = vec!["0.1.0-rc.1".to_string(), "0.1.0-rc.2".to_string()];
         assert_eq!(super::pick_latest_version(&versions).unwrap(), "0.1.0-rc.2");
     }
@@ -1756,16 +1540,6 @@ mod version_ordering_tests {
 
     #[test]
     fn build_metadata_breaks_ties_deterministically() {
-        // The semver *spec* says build metadata does not affect precedence,
-        // which makes precedence only a partial order. The `semver` crate's
-        // `Ord` deliberately deviates to give a total order, ranking build
-        // metadata above its absence.
-        //
-        // A total order is what sorting a version list actually requires — a
-        // partial one would let equal-precedence rows come back in arbitrary,
-        // run-to-run-varying positions. Asserted here so the deviation is a
-        // recorded decision rather than a surprise; no component in the
-        // registry publishes build metadata today.
         assert_eq!(
             compare_versions("1.0.0+build.1", "1.0.0"),
             Ordering::Greater
@@ -1775,14 +1549,11 @@ mod version_ordering_tests {
 
     #[test]
     fn unparseable_versions_sort_below_and_never_panic() {
-        // Old rows may hold values semver cannot parse. They must not take the
-        // query out a second time, and must not outrank a real version.
         assert_eq!(compare_versions("not-a-version", "0.1.0"), Ordering::Less);
         assert_eq!(
             compare_versions("0.1.0", "not-a-version"),
             Ordering::Greater
         );
-        // Total and stable among themselves.
         assert_eq!(compare_versions("latest", "latest"), Ordering::Equal);
         assert_eq!(
             sorted_desc(&["0.1.0", "latest", "0.2.0"]),
@@ -1792,7 +1563,6 @@ mod version_ordering_tests {
 
     #[test]
     fn the_latest_of_a_realistic_history_is_the_highest_release() {
-        // pgjump's actual version history at the time of the bug.
         let history = ["0.1.5", "0.1.6", "0.1.7", "0.1.7-ci.1", "0.1.8"];
         let latest = history
             .iter()

@@ -83,12 +83,6 @@ impl PublishCommand {
             .await
             .context("begin artifact upload")?;
 
-        // Shared with `forest release annotate`, which uploads the same tree the
-        // same way — including treating a missing directory as "nothing to
-        // upload" rather than as a failure (DATA-637), and leaving env and
-        // destination for the server to derive at commit. This used to be a
-        // verbatim copy of that loop, which is how fixing the path-splitting
-        // truncation in one place left it in the other.
         for file in deployment_files()? {
             let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
 
@@ -110,7 +104,6 @@ impl PublishCommand {
             .context("upload file")?;
         }
 
-        // Upload spec file
         if !self.no_spec {
             let spec_path = if let Some(ref spec) = self.spec_file {
                 let p = std::path::PathBuf::from(spec);
@@ -151,7 +144,6 @@ impl PublishCommand {
             }
         }
 
-        // Upload additional include files
         for include_path_str in &self.include_files {
             let include_path = std::path::PathBuf::from(include_path_str);
             if !include_path.exists() {
@@ -200,7 +192,7 @@ impl PublishCommand {
         let source = Source {
             username: self.source_username.clone(),
             email: self.source_email.clone(),
-            user_id: None, // set server-side from auth token
+            user_id: None,
             source_type: self.source_type.clone(),
             run_url: self.run_url.clone(),
         };
@@ -239,8 +231,6 @@ impl PublishCommand {
             .await
             .context("annotate artifact")?;
 
-        // Slug to stdout so `slug=$(forest project publish)` works; the
-        // next-step hint goes to stderr so it doesn't pollute the variable.
         eprintln!("published artifact: {slug}");
         eprintln!();
         eprintln!("Next step:");

@@ -49,7 +49,6 @@ impl ReleasesCommand {
 
             eprintln!("Release {id_short} ({})", intent.created_at);
 
-            // ── Pipeline stages ────────────────────────────────
             if !intent.stages.is_empty() {
                 for stage in &intent.stages {
                     let status = PipelineRunStageStatus::try_from(stage.status)
@@ -79,7 +78,6 @@ impl ReleasesCommand {
 
                     println!("  {icon} {}: {type_str} [{status:?}]{deps}", stage.stage_id);
 
-                    // Timestamps
                     let mut times = Vec::new();
                     if let Some(t) = &stage.queued_at {
                         times.push(format!("queued: {t}"));
@@ -98,10 +96,14 @@ impl ReleasesCommand {
                     }
 
                     if let Some(err) = &stage.error_message {
-                        println!("      error: {err}");
+                        let label = if status == PipelineRunStageStatus::Pending {
+                            "blocked"
+                        } else {
+                            "error"
+                        };
+                        println!("      {label}: {err}");
                     }
 
-                    // Show release steps belonging to this stage
                     for step in &intent.steps {
                         if step.stage_id.as_deref() == Some(stage.stage_id.as_str()) {
                             let step_icon = match step.status.as_str() {
@@ -117,12 +119,19 @@ impl ReleasesCommand {
                                 "      {step_icon} {}: {} [{}]",
                                 step.destination_name, step.environment, step.status
                             );
+                            if let Some(err) = &step.error_message {
+                                let label = if step.status == "QUEUED" {
+                                    "blocked"
+                                } else {
+                                    "error"
+                                };
+                                println!("        {label}: {err}");
+                            }
                         }
                     }
                 }
             }
 
-            // ── Non-pipeline release steps ─────────────────────
             let orphan_steps: Vec<_> = intent
                 .steps
                 .iter()
@@ -164,7 +173,12 @@ impl ReleasesCommand {
                     }
 
                     if let Some(err) = &step.error_message {
-                        println!("    error: {err}");
+                        let label = if step.status == "QUEUED" {
+                            "blocked"
+                        } else {
+                            "error"
+                        };
+                        println!("    {label}: {err}");
                     }
                 }
             }

@@ -156,8 +156,6 @@ impl OrganisationService for OrganisationsServer {
         }))
     }
 
-    // -- Member management --------------------------------------------------------
-
     async fn add_member(
         &self,
         request: tonic::Request<AddMemberRequest>,
@@ -269,6 +267,97 @@ impl OrganisationService for OrganisationsServer {
         }))
     }
 
+    async fn set_organisation_visibility(
+        &self,
+        request: tonic::Request<SetOrganisationVisibilityRequest>,
+    ) -> std::result::Result<tonic::Response<SetOrganisationVisibilityResponse>, tonic::Status>
+    {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        let visibility =
+            crate::services::release_registry::ProjectVisibility::parse(&req.visibility)?;
+
+        crate::grpc::authorize::require_visibility_admin(&self.state.db, &actor, &req.organisation)
+            .await?;
+
+        sqlx::query("UPDATE organisations SET visibility = $2, updated_at = now() WHERE name = $1")
+            .bind(&req.organisation)
+            .bind(visibility.as_str())
+            .execute(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("set organisation visibility: {e}");
+                tonic::Status::internal("failed to set organisation visibility")
+            })?;
+
+        crate::grpc::authorize::audit_visibility_change(
+            &actor,
+            &req.organisation,
+            "organisation",
+            visibility.as_str(),
+        );
+
+        Ok(tonic::Response::new(SetOrganisationVisibilityResponse {}))
+    }
+
+    async fn get_visibility(
+        &self,
+        request: tonic::Request<GetVisibilityRequest>,
+    ) -> std::result::Result<tonic::Response<GetVisibilityResponse>, tonic::Status> {
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        crate::grpc::authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            crate::grpc::authorize::OrgRole::Member,
+        )
+        .await?;
+
+        let organisation_visibility: String =
+            sqlx::query_scalar("SELECT visibility FROM organisations WHERE name = $1")
+                .bind(&req.organisation)
+                .fetch_one(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get organisation visibility: {e}");
+                    tonic::Status::internal("failed to read organisation visibility")
+                })?;
+
+        let project_visibility = match &req.project {
+            Some(project) => Some(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT visibility FROM projects WHERE organisation = $1 AND project = $2",
+                )
+                .bind(&req.organisation)
+                .bind(project)
+                .fetch_optional(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get project visibility: {e}");
+                    tonic::Status::internal("failed to read project visibility")
+                })?
+                .ok_or_else(|| tonic::Status::not_found("project not found"))?,
+            ),
+            None => None,
+        };
+
+        let can_change = crate::grpc::authorize::can_change_visibility(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+        )
+        .await?;
+
+        Ok(tonic::Response::new(GetVisibilityResponse {
+            organisation_visibility,
+            project_visibility,
+            can_change,
+        }))
+    }
+
     async fn list_members(
         &self,
         request: tonic::Request<ListMembersRequest>,
@@ -316,8 +405,6 @@ impl OrganisationService for OrganisationsServer {
             total_count: result.total_count as i32,
         }))
     }
-
-    // -- Allowed-domain auto-invite (DATA-252) --------------------------------
 
     async fn add_allowed_domain(
         &self,
@@ -371,8 +458,6 @@ impl OrganisationService for OrganisationsServer {
         let req = request.into_inner();
         let organisation_id = parse_org_id(&req.organisation_id)?;
 
-        // Members can see the list (handy for the org settings page in
-        // forage); only admins can mutate.
         crate::grpc::authorize::require_org_access_by_id(
             &self.state.db,
             &actor,
@@ -580,9 +665,6 @@ fn verify_domain_err_to_status(e: VerifyAllowedDomainError) -> tonic::Status {
         Invalid(inner) => tonic::Status::invalid_argument(inner.to_string()),
         NotMember | NotAdmin => tonic::Status::permission_denied(e.to_string()),
         NotFound => tonic::Status::not_found(e.to_string()),
-        // Treat DNS lookup failures as Unavailable — the operation isn't
-        // a user error, it's a transient infrastructure problem the
-        // caller can retry.
         DnsLookup(_) => tonic::Status::unavailable(e.to_string()),
         Other(inner) => error::to_status(inner),
     }

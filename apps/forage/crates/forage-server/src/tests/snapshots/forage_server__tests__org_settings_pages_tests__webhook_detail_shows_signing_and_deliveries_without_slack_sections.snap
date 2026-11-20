@@ -1,0 +1,149 @@
+---
+source: crates/forage-server/src/tests/org_settings_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container py-12">
+<div class="mb-8">
+<a href="/orgs/testorg/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">← All integrations</a>
+</div>
+<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
+<svg class="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"></path></svg>
+</div>
+<div>
+<h1 class="text-2xl font-bold">delivery-test</h1>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-sm text-gray-500">Webhook</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Active</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/toggle" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Pause</button>
+</form>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/delete" class="inline" data-confirm="Uninstall this integration? This cannot be undone.">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">Uninstall</button>
+</form>
+</div>
+</div>
+
+
+
+
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Configuration</h2>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="px-4 py-3 flex items-center justify-between">
+<span class="text-sm text-gray-500">Payload URL</span>
+<span class="text-sm text-gray-900 font-mono">https://example.com/hook</span>
+</div>
+<div class="px-4 py-3 flex items-center justify-between">
+<span class="text-sm text-gray-500">Signing</span>
+<span class="text-sm text-gray-900">HMAC-SHA256 enabled</span>
+</div>
+</div>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Events</h2>
+<p class="text-sm text-gray-500 mb-3">Choose which deployment events trigger this integration.</p>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release annotated</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_annotated">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release annotated">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release started</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_started">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release started">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release succeeded</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_succeeded">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release succeeded">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release failed</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_failed">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release failed">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div>
+</div>
+</div>
+
+
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent deliveries</h2>
+<div class="border border-gray-200 rounded-lg overflow-hidden">
+<table class="min-w-full divide-y divide-gray-200">
+<thead class="bg-gray-50">
+<tr>
+<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notification</th>
+<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+</tr>
+</thead>
+<tbody class="bg-white divide-y divide-gray-100">
+<tr>
+<td class="px-4 py-2 align-top whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Skipped</span></td>
+<td class="px-4 py-2 align-top text-sm text-gray-700 font-mono truncate max-w-[200px]" title="notif-b">notif-b</td>
+<td class="px-4 py-2 align-top text-sm text-gray-500 whitespace-nowrap">TIME UTC</td>
+<td class="px-4 py-2 align-top"><span class="text-sm text-gray-400">—</span></td>
+</tr><tr>
+<td class="px-4 py-2 align-top whitespace-nowrap"><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700">Failed</span></td>
+<td class="px-4 py-2 align-top text-sm text-gray-700 font-mono truncate max-w-[200px]" title="notif-aaaaaaaaaaaaaaaa">notif-aaaaaa…</td>
+<td class="px-4 py-2 align-top text-sm text-gray-500 whitespace-nowrap">TIME UTC</td>
+<td class="px-4 py-2 align-top"><p class="text-xs text-red-600 break-words ">HTTP 500: Internal Server Error</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h2>
+<div class="border border-gray-200 rounded-lg p-4">
+<p class="text-sm text-gray-500 mb-3">Send a test <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">release_succeeded</code> event to verify your endpoint is receiving payloads correctly.</p>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/test">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Send test event</button>
+</form>
+</div>
+</div>
+</section>
+</main>

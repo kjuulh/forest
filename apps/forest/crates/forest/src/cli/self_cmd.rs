@@ -103,6 +103,14 @@ impl SelfCommand {
 
 // ─── Version probing ────────────────────────────────────────────────
 
+pub fn long_version() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    match option_env!("FOREST_BUILD_COMMIT") {
+        Some(commit) if !commit.is_empty() => format!("{version} (commit {commit})"),
+        _ => format!("{version} (local build)"),
+    }
+}
+
 fn current_version() -> Version {
     // CARGO_PKG_VERSION is set at compile time from the forest crate's
     // Cargo.toml. release-please owns that field on every release PR.

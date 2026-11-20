@@ -1,15 +1,3 @@
-# =============================================================================
-# ECS service + supporting resources for `${local.name}` on the shared
-# platform ALB. This deliberately mirrors infrastructure-platform's
-# `modules/ecs-task` shape so a forest-managed service is the same surface
-# as a TF-managed one — just owned by a different state file.
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Per-service IAM role (the task role; distinct from the shared task
-# execution role). Empty by default — apps that need AWS permissions add
-# inline policies at the consumer level.
-# -----------------------------------------------------------------------------
 resource "aws_iam_role" "task" {
   name = "${local.name}-${local.env}-task"
 
@@ -27,9 +15,6 @@ resource "aws_iam_role" "task" {
   tags = local.common_tags
 }
 
-# -----------------------------------------------------------------------------
-# CloudWatch logs.
-# -----------------------------------------------------------------------------
 resource "aws_cloudwatch_log_group" "this" {
   name              = "/ecs/${local.name}-${local.env}"
   retention_in_days = 14
@@ -37,9 +22,6 @@ resource "aws_cloudwatch_log_group" "this" {
   tags = local.common_tags
 }
 
-# -----------------------------------------------------------------------------
-# Task definition.
-# -----------------------------------------------------------------------------
 locals {
   container_environment = [
     for k, v in local.env_vars : {
@@ -99,11 +81,7 @@ resource "aws_ecs_task_definition" "this" {
   tags = local.common_tags
 }
 
-# -----------------------------------------------------------------------------
-# ALB target group + listener rule on the shared HTTPS listener.
-# -----------------------------------------------------------------------------
 resource "aws_lb_target_group" "this" {
-  # ALB target-group names are capped at 32 chars.
   name        = substr("fr-${local.name}-${local.env}", 0, 32)
   port        = local.port
   protocol    = "HTTP"
@@ -131,8 +109,6 @@ resource "aws_lb_listener_rule" "this" {
     target_group_arn = aws_lb_target_group.this.arn
   }
 
-  # If host_headers is empty, fall through to a path match on `/*` so the
-  # rule still has a valid condition (ALB requires at least one).
   dynamic "condition" {
     for_each = length(local.host_headers) > 0 ? [1] : []
     content {
@@ -154,9 +130,6 @@ resource "aws_lb_listener_rule" "this" {
   tags = local.common_tags
 }
 
-# -----------------------------------------------------------------------------
-# ECS service.
-# -----------------------------------------------------------------------------
 resource "aws_ecs_service" "this" {
   name            = "${local.name}-${local.env}"
   cluster         = data.aws_ecs_cluster.platform.id
@@ -179,7 +152,6 @@ resource "aws_ecs_service" "this" {
     container_port   = local.port
   }
 
-  # Don't fight an out-of-band scale change while we figure out HPA.
   lifecycle {
     ignore_changes = [desired_count]
   }
@@ -189,9 +161,6 @@ resource "aws_ecs_service" "this" {
   tags = local.common_tags
 }
 
-# -----------------------------------------------------------------------------
-# Outputs (useful for `forest release` log readout).
-# -----------------------------------------------------------------------------
 output "service_arn" {
   value = aws_ecs_service.this.id
 }

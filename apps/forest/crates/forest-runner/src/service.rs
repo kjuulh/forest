@@ -8,8 +8,6 @@ use tokio_util::sync::CancellationToken;
 use crate::client::ForestRunnerClient;
 use crate::executor::Executor;
 
-/// notmad Component that manages the runner lifecycle:
-/// connect → register → process work → reconnect on failure.
 pub struct RunnerService {
     client: ForestRunnerClient,
     runner_id: String,
@@ -49,7 +47,6 @@ impl RunnerService {
 
         tracing::info!("connected and registered");
 
-        // Spawn a background task that sends heartbeats every 30 seconds
         let heartbeat_session = session.clone_heartbeat_sender();
         let heartbeat_executor = self.executor.clone();
         let heartbeat_token = CancellationToken::new();
@@ -112,7 +109,6 @@ impl Component for RunnerService {
                         Ok(()) => tracing::info!("session ended cleanly"),
                         Err(e) => tracing::error!(error = %e, "session error"),
                     }
-                    // Reconnect after delay
                     tokio::select! {
                         _ = cancellation_token.cancelled() => break,
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {}

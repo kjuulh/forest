@@ -1,4 +1,3 @@
-// Hand-mirrored from forest.component.cue; replaced by codegen output once wired.
 #![allow(clippy::upper_case_acronyms)]
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -37,7 +36,6 @@ pub struct GitInitOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Initialise a fresh git repository at work_dir.
     fn git_init(
         &self,
         spec: &Spec,

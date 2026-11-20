@@ -1,4 +1,4 @@
-FROM rust:1.98-trixie AS chef
+FROM rust:1.100-trixie AS chef
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
@@ -48,9 +48,6 @@ RUN --mount=type=ssh cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
-# Dependencies compile against the recipe alone. This layer is keyed on
-# recipe.json, so it survives every commit that does not touch a manifest --
-# which is most of them.
 COPY --from=planner /mnt/src/recipe.json recipe.json
 
 RUN --mount=type=ssh cargo chef cook --release -p forage-server --recipe-path recipe.json
@@ -87,7 +84,6 @@ RUN set -e; \
 FROM gcr.io/distroless/cc-debian13:latest
 
 COPY --from=builder /mnt/src/target/release/forage-server /usr/local/bin/forage-server
-COPY --from=builder /mnt/src/templates /templates
 COPY --from=builder /mnt/src/static /static
 
 # Build provenance, baked into the final stage only (DATA-505 follow-up).
@@ -105,7 +101,6 @@ ENV FOREST_GIT_SHA=$GIT_SHA
 ENV FOREST_BUILD_TIME=$BUILD_TIME
 
 WORKDIR /
-ENV FORAGE_TEMPLATES_PATH=/templates
 
 EXPOSE 3000
 

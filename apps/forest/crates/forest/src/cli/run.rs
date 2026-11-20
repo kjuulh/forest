@@ -54,8 +54,6 @@ impl RunCommand {
         let ctx = state.context();
         let project = state.project_parser().get_project().await?;
 
-        // Handle --help and help before clap parsing (since we disabled help flag
-        // to allow pass-through of raw args)
         if self.args.is_empty() {
             let (_, mut run_cmd) = build_dynamic_command(&project);
             let help = run_cmd.render_long_help();
@@ -67,7 +65,6 @@ impl RunCommand {
             || self.args.first().map(|a| a.as_str()) == Some("help")
         {
             let (cli_names, run_cmd) = build_dynamic_command(&project);
-            // Find the first non-help arg to see if user is asking for help on a specific subcommand
             let subcmd_name = self
                 .args
                 .iter()
@@ -104,38 +101,32 @@ impl RunCommand {
                     .execute(&ctx, &project, matches, &cli_names, state.config.format)
                     .await
             }
-            Err(e) => {
-                match e.kind() {
-                    clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion => {
-                        print!("{e}");
-                        Ok(())
-                    }
-                    clap::error::ErrorKind::MissingSubcommand => {
-                        // No command given — show help
-                        let (_, mut run_cmd) = build_dynamic_command(&project);
-                        let help = run_cmd.render_long_help();
-                        println!("{help}");
-                        anyhow::bail!("no command specified")
-                    }
-                    _ => {
-                        eprintln!("{e}");
-                        std::process::exit(1);
-                    }
+            Err(e) => match e.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => {
+                    print!("{e}");
+                    Ok(())
                 }
-            }
+                clap::error::ErrorKind::MissingSubcommand => {
+                    let (_, mut run_cmd) = build_dynamic_command(&project);
+                    let help = run_cmd.render_long_help();
+                    println!("{help}");
+                    anyhow::bail!("no command specified")
+                }
+                _ => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            },
         }
     }
 }
 
-/// Build the dynamic clap command with discovered project/component commands.
 fn build_dynamic_command(
     project: &Project,
 ) -> (
     std::collections::BTreeMap<String, crate::models::CommandName>,
     clap::Command,
 ) {
-    // Detect short name collisions
     let mut short_name_count: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     for command_name in project.commands.keys() {
@@ -144,7 +135,6 @@ fn build_dynamic_command(
             .or_default() += 1;
     }
 
-    // Build the name→key mapping
     let mut cli_names: std::collections::BTreeMap<String, crate::models::CommandName> =
         std::collections::BTreeMap::new();
     for command_name in project.commands.keys() {
@@ -158,14 +148,12 @@ fn build_dynamic_command(
             cli_names.insert(short, command_name.clone());
         }
 
-        // Always register the fully qualified name as an alias
         let fqn = command_name.to_qualified_cli_name();
         if !cli_names.contains_key(&fqn) {
             cli_names.insert(fqn, command_name.clone());
         }
     }
 
-    // Collect component names for the help footer
     let mut component_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for cmd_name in cli_names.values() {
         if let crate::models::CommandName::Component { name, .. } = cmd_name {
@@ -218,11 +206,6 @@ fn build_dynamic_command(
     (cli_names, run_cmd)
 }
 
-/// Build an enriched clap subcommand for help display.
-///
-/// Fetches the component's OpenAPI spec from `forest.component.cue` to discover
-/// input fields, then adds them as proper `--arg` definitions so that `--help`
-/// shows meaningful argument documentation.
 async fn build_enriched_subcommand(
     cli_name: &str,
     cli_names: &std::collections::BTreeMap<String, crate::models::CommandName>,
@@ -231,7 +214,6 @@ async fn build_enriched_subcommand(
     let cmd_name = &cli_names[cli_name];
     let mut sub = clap::Command::new(cli_name.to_string());
 
-    // Add description
     if let Some(command) = project.commands.get(cmd_name) {
         if let crate::models::Command::ComponentBinary {
             description: Some(desc),
@@ -246,7 +228,6 @@ async fn build_enriched_subcommand(
         }
     }
 
-    // Try to fetch input args from the component's OpenAPI spec
     let command_short = cmd_name.command_name();
     if let Some(fields) = fetch_command_input_schema(cmd_name, command_short).await {
         for field in &fields {
@@ -266,7 +247,6 @@ async fn build_enriched_subcommand(
             sub = sub.arg(arg);
         }
     } else {
-        // Fallback: keep the generic trailing args
         sub = sub.arg(
             clap::Arg::new("input_args")
                 .action(clap::ArgAction::Append)
@@ -285,10 +265,6 @@ struct InputField {
     field_type: Option<String>,
 }
 
-/// Fetch the input fields for a command from the component's OpenAPI spec.
-///
-/// Runs `cue def --out openapi` on the component's `forest.component.cue`,
-/// then extracts the input properties for the given command name.
 async fn fetch_command_input_schema(
     cmd_name: &crate::models::CommandName,
     command_short: &str,
@@ -320,7 +296,6 @@ async fn fetch_command_input_schema(
 
     let doc: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
 
-    // Navigate: components.schemas.Commands.properties.<command_short>.properties.input
     let command_schema = doc
         .get("components")?
         .get("schemas")?
@@ -353,13 +328,11 @@ async fn fetch_command_input_schema(
         });
     }
 
-    // Sort so required fields come first, then alphabetical
     fields.sort_by(|a, b| b.required.cmp(&a.required).then(a.name.cmp(&b.name)));
 
     Some(fields)
 }
 
-/// Build a spec JSON object from the project's component config.
 fn build_spec_json(
     project: &Project,
     comp_ref: &crate::models::ComponentReference,
@@ -370,14 +343,10 @@ fn build_spec_json(
     }
 }
 
-/// Build a call resolver that can invoke dependency components by their ID.
-/// Maps component IDs (e.g. "kjuulh/sealed-secrets") to their local paths
-/// and invokes them via the Deno or binary runtime.
 fn build_call_resolver(
     project: &Project,
     context: &forest_sdk::CallContext,
 ) -> component_deno::ComponentCallResolver {
-    // Build a map of component_id → (component_dir, entrypoint)
     let mut component_map: std::collections::HashMap<String, (std::path::PathBuf, String)> =
         std::collections::HashMap::new();
 
@@ -392,11 +361,6 @@ fn build_call_resolver(
                 }
             }
             crate::models::ComponentSource::Versioned(version) => {
-                // Versioned deps materialize in the shared cache via
-                // `forest update`. Resolve to that path and reuse the
-                // same is_deno detection — the cache layout is faithful
-                // to the source (deno.json + src/main.ts present iff
-                // the publisher uploaded them).
                 let Some(cache_dir) = dirs::cache_dir() else {
                     continue;
                 };
@@ -437,7 +401,6 @@ fn build_call_resolver(
                 .get(&component_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
 
-            // Use forwarded context if available, otherwise base context
             let ctx = call_context.unwrap_or(base_context);
 
             component_deno::invoke_deno_component(
@@ -454,17 +417,6 @@ fn build_call_resolver(
     })
 }
 
-/// Parse `--key value` pairs from trailing args into a JSON object.
-///
-/// A token is treated as a flag name only if it matches `--<letter>...` (exactly
-/// two hyphens followed by an ASCII letter). This avoids misinterpreting values
-/// that start with dashes (e.g. `-----BEGIN NATS USER JWT-----`).
-///
-/// Special value `@-` reads from stdin. Example:
-///   cat creds.txt | forest run seal --value @- --key MY_KEY
-///
-/// Special value `@<path>` reads from a file. Example:
-///   forest run seal --value @/path/to/creds.txt --key MY_KEY
 async fn parse_input_args(args: &ArgMatches) -> anyhow::Result<serde_json::Value> {
     let raw: Vec<String> = args
         .get_raw("input_args")
@@ -477,12 +429,10 @@ async fn parse_input_args(args: &ArgMatches) -> anyhow::Result<serde_json::Value
     while i < raw.len() {
         if let Some(key) = parse_flag_name(&raw[i]) {
             if i + 1 < raw.len() && parse_flag_name(&raw[i + 1]).is_none() {
-                // Next token is a value (not another flag)
                 let value = resolve_value(&raw[i + 1]).await?;
                 map.insert(key.replace('-', "_"), serde_json::Value::String(value));
                 i += 2;
             } else {
-                // No value follows — treat as boolean flag
                 map.insert(key.replace('-', "_"), serde_json::Value::Bool(true));
                 i += 1;
             }
@@ -494,7 +444,6 @@ async fn parse_input_args(args: &ArgMatches) -> anyhow::Result<serde_json::Value
     Ok(serde_json::Value::Object(map))
 }
 
-/// Resolve a value that may be a literal, `@-` (stdin), or `@<path>` (file).
 async fn resolve_value(raw: &str) -> anyhow::Result<String> {
     if raw == "@-" {
         use tokio::io::AsyncReadExt;
@@ -510,16 +459,13 @@ async fn resolve_value(raw: &str) -> anyhow::Result<String> {
     }
 }
 
-/// Check if a token is a CLI flag (`--name`). Returns the flag name if so.
-/// Only matches exactly two hyphens followed by an ASCII letter, so values
-/// like `-----BEGIN...` are not mistaken for flags.
 fn parse_flag_name(token: &str) -> Option<String> {
     let rest = token.strip_prefix("--")?;
     if rest.starts_with('-') || rest.is_empty() {
-        return None; // "---..." or bare "--"
+        return None;
     }
     if !rest.as_bytes()[0].is_ascii_alphabetic() {
-        return None; // "--123" etc.
+        return None;
     }
     Some(rest.to_string())
 }
@@ -566,9 +512,6 @@ impl CliRun {
                 requires,
                 ..
             } => {
-                // DATA-312: verify the component's declared tools are on PATH
-                // before dispatching, so a missing `cargo`/`docker` fails up
-                // front with an actionable diagnostic instead of mid-run.
                 let missing = crate::tools::which::missing_tools(
                     &requires
                         .iter()
@@ -600,8 +543,6 @@ impl CliRun {
                     ..Default::default()
                 };
 
-                // Streaming methods (e.g. a build component driving cargo) use
-                // passthrough mode: live child stdio, no timeout. DATA-312.
                 let result = if *streaming {
                     component_binary::invoke_component_passthrough(
                         binary_path,
@@ -622,10 +563,6 @@ impl CliRun {
                     .await?
                 };
 
-                // Render the component's JSON result for the chosen --format:
-                // a recognised shape (e.g. a build summary) becomes a tidy table
-                // for humans, while machines and nested invocations get it
-                // verbatim. DATA-312.
                 crate::cli::run_output::print(format, &result)?;
             }
             crate::models::Command::ComponentDeno {
@@ -660,10 +597,6 @@ impl CliRun {
                 )
                 .await?;
 
-                // Render the component's JSON result for the chosen --format:
-                // a recognised shape (e.g. a build summary) becomes a tidy table
-                // for humans, while machines and nested invocations get it
-                // verbatim. DATA-312.
                 crate::cli::run_output::print(format, &result)?;
             }
             crate::models::Command::Inline(items) => {

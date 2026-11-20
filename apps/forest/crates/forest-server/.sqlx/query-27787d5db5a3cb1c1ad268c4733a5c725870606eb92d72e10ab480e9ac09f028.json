@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE projects\n               SET readme = COALESCE($3, readme),\n                   description = COALESCE($4, description),\n                   metadata = COALESCE($5, metadata),\n                   visibility = COALESCE($6, visibility),\n                   updated = now()\n               WHERE organisation = $1 AND project = $2\n               RETURNING id, organisation, project, readme, description,\n                         metadata as \"metadata: sqlx::types::Json<ProjectMetadata>\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "organisation"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "project"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "readme",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "readme"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata: sqlx::types::Json<ProjectMetadata>",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "metadata"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "27787d5db5a3cb1c1ad268c4733a5c725870606eb92d72e10ab480e9ac09f028"
+}

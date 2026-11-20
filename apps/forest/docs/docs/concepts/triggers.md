@@ -1,88 +1,64 @@
 # Triggers
 
-Triggers automate releases based on patterns in release annotations. When an annotation matches a trigger's patterns, Forest automatically creates a release to the trigger's target environments and destinations.
+Triggers turn release annotations into releases. When an annotation matches a trigger's patterns, Forest releases it, either straight to the trigger's targets or through the project's pipeline.
 
-## How Triggers Work
+## How triggers work
 
-1. A release annotation is created (e.g., from CI/CD)
-2. Forest evaluates all triggers for the project
-3. Triggers whose patterns match the annotation fire automatically
-4. Each fired trigger creates releases to its configured targets
+1. CI (or a person) annotates a release: `forest release annotate`, or `forest release create` without a target.
+2. Forest evaluates every enabled trigger of the project against the annotation.
+3. Each matching trigger releases the annotated artifact.
 
-## Pattern Matching
+`forest release annotate --annotation-only` skips trigger evaluation. Since v0.3.17, `forest release create` with `--environment` or `--destination` also skips triggers **unless `--skip-commit` is supplied**. With `--skip-commit`, even `-e dev` enables triggers and can deploy prod. Released v0.3.16 requires an environment for `create`, skips triggers, and `--skip-commit` releases nothing; use `prepare` + `annotate` for its trigger flow.
 
-Triggers match on annotation fields using **regex patterns**. All specified patterns must match (AND semantics):
+## Pattern matching
 
-| Pattern Field | Matches Against |
-|---------------|----------------|
-| `branch` | Commit branch (e.g., `^main$`, `^release/.*`) |
-| `title` | Annotation context title |
-| `author` | Source username or email |
-| `commit_message` | Commit message text |
-| `source_type` | Source type (e.g., `ci`, `manual`, `webhook`) |
+Every pattern is a **regular expression, tested unanchored**: `--branch main` matches `feature/maintenance`. Anchor it as `^main$`. All patterns given must match. A pattern whose field is missing from the annotation does not match, and an invalid regex never matches.
 
-If a pattern field is not specified, it matches everything.
+| Flag | Matches against |
+|---|---|
+| `--branch` | commit branch |
+| `--title` | annotation title |
+| `--author` | source username or email |
+| `--commit-message` | commit message |
+| `--source-type` | source type (`ci`, `local`, `github_actions`, …) |
+
+## Targets
+
+| Flag | Effect |
+|---|---|
+| `-e`, `--env` | environment(s) to release to (repeatable) |
+| `-d`, `--dest` | destination(s) to release to (repeatable) |
+| `--use-pipeline` | start the project's pipeline instead |
+| `--force` | cancel queued releases for the same destinations; it does **not** bypass policies |
+
+**With `--use-pipeline` the trigger's own `--env`/`--dest` are ignored, and the whole pipeline runs**, including any prod stages. The trigger list still shows `environments: dev` for it. Read the pipeline, not the trigger's name, to know where a trigger can deploy.
 
 ## Examples
 
-### Deploy to staging on every commit to main
+Deploy every CI build of `main` through the pipeline:
 
 ```bash
-forest project trigger create deploy-staging \
-  --organisation my-org \
-  --project my-service \
-  --branch "^main$" \
-  --target-environment staging
+forest project trigger create -o my-org -p my-service \
+  --name deploy-main-via-pipeline \
+  --branch '^main$' --source-type '^ci$' --use-pipeline
 ```
 
-### Deploy to prod only from release tags
+Deploy release tags straight to staging:
 
 ```bash
-forest project trigger create deploy-prod \
-  --organisation my-org \
-  --project my-service \
-  --branch "^v[0-9]+\\." \
-  --target-environment prod
+forest project trigger create -o my-org -p my-service \
+  --name tags-to-staging --branch '^v[0-9]+\.' --env staging
 ```
 
-### Deploy specific destinations on hotfix branches
+## Interaction with policies
+
+Triggers create releases; [policies](policies.md) still apply to them. With the server enforcement changes in v0.3.17, a trigger-created release to an environment with a branch restriction is refused for a disallowed branch, and in a pipeline the stage for that environment fails. Released v0.3.16 does not enforce pipeline branch restrictions; updating only the CLI does not close that gap. `--force` never bypasses a policy.
+
+## CLI commands
 
 ```bash
-forest project trigger create hotfix \
-  --organisation my-org \
-  --project my-service \
-  --branch "^hotfix/" \
-  --target-destination k8s-prod-eu \
-  --force-release
+forest project trigger create -o <org> -p <project> --name <name> [patterns] [targets]
+forest project trigger list   -o <org> -p <project>
+forest project trigger update -o <org> -p <project> --name <name> [options]
+forest project trigger delete -o <org> -p <project> --name <name>
 ```
-
-## Trigger Options
-
-| Option | Description |
-|--------|-------------|
-| `--target-environment` | Environment(s) to deploy to |
-| `--target-destination` | Specific destination(s) to deploy to |
-| `--force-release` | Cancel any queued releases and deploy immediately |
-| `--use-pipeline` | Route the release through the project's pipeline |
-
-## Trigger Evaluation
-
-Triggers are evaluated during `forest release annotate` unless `--annotation-only` is set. The evaluation:
-
-1. Loads all enabled triggers for the project
-2. Tests each pattern against the annotation metadata
-3. For matching triggers, creates release intents for the target destinations
-4. If `use_pipeline` is set, creates a pipeline intent instead of direct releases
-
-## CLI Commands
-
-```bash
-forest project trigger create <name> [options]
-forest project trigger list --organisation my-org --project my-service
-forest project trigger update <name> [options]
-forest project trigger delete <name>
-```
-
-## Interaction with Policies
-
-Triggers create releases, but [policies](policies.md) still apply. A trigger-created release will be blocked if it violates a policy — unless `--force-release` is set.

@@ -5,10 +5,6 @@ use mire::{Aggregate, AggregateRoot, EventData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Events
-// ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ComponentEvent {
@@ -22,9 +18,6 @@ pub enum ComponentEvent {
         upload_id: Uuid,
         file_path: String,
     },
-    /// A manifest has been recorded against an in-flight upload.
-    /// See TASKS/023-publish-transactional.md — required before commit
-    /// (enforcement lands in a follow-up slice).
     ManifestRecorded {
         upload_id: Uuid,
     },
@@ -36,11 +29,6 @@ pub enum ComponentEvent {
         upload_id: Uuid,
         reason: String,
     },
-    /// A previously-published version has been unpublished by an owner
-    /// (TASKS/025). The version becomes unreachable for `forest global
-    /// add` and `forest components show`. Re-publishing at the same
-    /// version is allowed afterward — the event log retains the full
-    /// lifecycle for audit.
     VersionUnpublished {
         version: String,
         actor: String,
@@ -61,23 +49,10 @@ impl EventData for ComponentEvent {
     }
 }
 
-// ============================================================
-// Aggregate state
-// ============================================================
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionState {
-    Uploading {
-        upload_id: Uuid,
-        /// `true` once `ManifestRecorded` has been observed for this upload.
-        /// Will become a precondition for `publish_version` in a follow-up
-        /// slice of TASKS/023-publish-transactional.md.
-        has_manifest: bool,
-    },
+    Uploading { upload_id: Uuid, has_manifest: bool },
     Published,
-    /// Version was published then later removed by an owner (TASKS/025).
-    /// Read paths skip these; a new `begin_upload` for the same version is
-    /// allowed and treats the state as if the version had never existed.
     Unpublished,
 }
 
@@ -85,7 +60,6 @@ pub enum VersionState {
 pub struct ComponentAggregate {
     pub organisation: String,
     pub name: String,
-    /// version string → state
     pub versions: HashMap<String, VersionState>,
 }
 
@@ -114,9 +88,7 @@ impl Aggregate for ComponentAggregate {
                     },
                 );
             }
-            ComponentEvent::FileUploaded { .. } => {
-                // No state change — files tracked in projection table
-            }
+            ComponentEvent::FileUploaded { .. } => {}
             ComponentEvent::ManifestRecorded { upload_id } => {
                 for state in self.versions.values_mut() {
                     if let VersionState::Uploading {
@@ -146,21 +118,13 @@ impl Aggregate for ComponentAggregate {
     }
 }
 
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
-
 impl ComponentAggregate {
-    /// Validate and record an upload start.
     pub fn begin_upload(
         root: &mut AggregateRoot<Self>,
         organisation: &str,
         name: &str,
         version: &str,
     ) -> anyhow::Result<Uuid> {
-        // TASKS/025: Unpublished versions are treated like never-existed —
-        // a re-publish at the same version is allowed and lands cleanly on
-        // top of the unpublish event in the log.
         if root.state.versions.get(version) == Some(&VersionState::Published) {
             bail!(
                 "component {}/{} version {} is already published",
@@ -170,7 +134,6 @@ impl ComponentAggregate {
             );
         }
 
-        // Abort any in-flight upload for this version
         if let Some(VersionState::Uploading { upload_id, .. }) =
             root.state.versions.get(version).cloned()
         {
@@ -191,7 +154,6 @@ impl ComponentAggregate {
         Ok(upload_id)
     }
 
-    /// Record that a file was uploaded (audit trail).
     pub fn upload_file(
         root: &mut AggregateRoot<Self>,
         upload_id: Uuid,
@@ -213,17 +175,6 @@ impl ComponentAggregate {
         Ok(())
     }
 
-    /// Unpublish a previously-published version (TASKS/025).
-    ///
-    /// Outcomes:
-    /// - Version was `Published`: emits `VersionUnpublished`, transitions to
-    ///   `Unpublished`.
-    /// - Version was `Unpublished` already: no-op (idempotent), Ok(false).
-    /// - Version was `Uploading` or absent: error — only Published versions
-    ///   can be unpublished. (In-flight uploads are cleaned up via abort,
-    ///   absent versions don't need unpublishing.)
-    ///
-    /// Returns Ok(true) when a new event was recorded, Ok(false) on no-op.
     pub fn unpublish_version(
         root: &mut AggregateRoot<Self>,
         version: &str,
@@ -239,7 +190,7 @@ impl ComponentAggregate {
                 });
                 Ok(true)
             }
-            Some(VersionState::Unpublished) => Ok(false), // idempotent
+            Some(VersionState::Unpublished) => Ok(false),
             Some(VersionState::Uploading { .. }) => {
                 bail!(
                     "version {} is in-flight, not Published; use abort_upload to cancel",
@@ -250,15 +201,6 @@ impl ComponentAggregate {
         }
     }
 
-    /// Explicitly abort an in-flight upload (TASKS/023).
-    ///
-    /// The caller (typically a CLI's `AbortOnDrop` guard) signals that the
-    /// upload will not be committed. We emit `UploadAborted`, which removes
-    /// the version from `Uploading` state and frees the next `begin_upload`
-    /// for the same version to proceed cleanly without superseding.
-    ///
-    /// Idempotent: aborting an unknown / already-aborted upload is a no-op,
-    /// so retries from a flaky network are safe.
     pub fn abort_upload(
         root: &mut AggregateRoot<Self>,
         upload_id: Uuid,
@@ -280,12 +222,6 @@ impl ComponentAggregate {
         Ok(())
     }
 
-    /// Record that a manifest has been published for an in-flight upload.
-    ///
-    /// See TASKS/023-publish-transactional.md. This is the aggregate-level
-    /// counterpart to the service-layer `publish_manifest`, which writes
-    /// the manifest JSON to a projection. Recording the event here lets
-    /// `publish_version` later require manifest presence as a precondition.
     pub fn record_manifest(root: &mut AggregateRoot<Self>, upload_id: Uuid) -> anyhow::Result<()> {
         let is_active = root.state.versions.values().any(
             |v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id),
@@ -300,14 +236,6 @@ impl ComponentAggregate {
         Ok(())
     }
 
-    /// Publish a version (commit the upload).
-    ///
-    /// When `require_manifest` is `true`, refuses to commit unless a
-    /// `ManifestRecorded` event has been observed for this upload. The
-    /// caller is responsible for setting the flag based on the publish
-    /// shape: binary / external kinds MUST have a manifest; CUE-only and
-    /// Deno kinds today have no manifest validator and pass `false`.
-    /// See TASKS/023-publish-transactional.md.
     pub fn publish_version(
         root: &mut AggregateRoot<Self>,
         upload_id: Uuid,
@@ -343,14 +271,9 @@ impl ComponentAggregate {
     }
 }
 
-/// Stream key for a component aggregate: `{org}/{name}`
 pub fn stream_key(organisation: &str, name: &str) -> String {
     format!("{organisation}/{name}")
 }
-
-// ============================================================
-// Unit tests — pure aggregate logic, no database
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -404,7 +327,6 @@ mod tests {
                 has_manifest: false
             })
         );
-        // 3 events: UploadStarted, UploadAborted, UploadStarted
         assert_eq!(root.pending_count(), 3);
     }
 
@@ -591,10 +513,6 @@ mod tests {
         assert_eq!(ComponentAggregate::stream_category(), "component");
     }
 
-    // ============================================================
-    // TASKS/023 — Manifest recording (transactional publish prep)
-    // ============================================================
-
     #[test]
     fn record_manifest_flips_has_manifest_flag() {
         let mut root = new_root();
@@ -636,7 +554,6 @@ mod tests {
         let id = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         ComponentAggregate::publish_version(&mut root, id, false).unwrap();
 
-        // The upload is no longer in Uploading state — record_manifest must reject.
         let err = ComponentAggregate::record_manifest(&mut root, id);
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("not active"));
@@ -650,7 +567,6 @@ mod tests {
         ComponentAggregate::record_manifest(&mut root, id).unwrap();
         ComponentAggregate::record_manifest(&mut root, id).unwrap();
 
-        // Flag is still set; no panic, no state corruption.
         assert_eq!(
             root.state.versions.get("1.0.0"),
             Some(&VersionState::Uploading {
@@ -729,7 +645,6 @@ mod tests {
         let bogus = Uuid::now_v7();
         ComponentAggregate::abort_upload(&mut root, bogus, "no such upload").unwrap();
 
-        // No new event recorded, no panic.
         assert_eq!(root.pending_count(), pending_before);
         assert!(matches!(
             root.state.versions.get("1.0.0"),
@@ -762,8 +677,6 @@ mod tests {
         let pending_before = root.pending_count();
         let id2 = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
 
-        // begin_upload only emits UploadStarted (no supersede UploadAborted) since
-        // the previous upload was already aborted.
         assert_eq!(root.pending_count(), pending_before + 1);
         assert_ne!(id1, id2);
         assert_eq!(
@@ -781,8 +694,6 @@ mod tests {
         let id = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         ComponentAggregate::upload_file(&mut root, id, "binary.bin").unwrap();
 
-        // No record_manifest call. With require_manifest=true (= caller knows
-        // this is a binary/external publish), this must reject.
         let err = ComponentAggregate::publish_version(&mut root, id, true);
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
@@ -791,7 +702,6 @@ mod tests {
             "expected 'no manifest recorded' in: {msg}"
         );
 
-        // Aggregate state is unchanged — still Uploading.
         assert!(matches!(
             root.state.versions.get("1.0.0"),
             Some(VersionState::Uploading {
@@ -817,8 +727,6 @@ mod tests {
 
     #[test]
     fn publish_version_succeeds_when_manifest_not_required_and_absent() {
-        // CUE-only / Deno publish path: caller passes require_manifest=false,
-        // and the absence of a manifest is fine.
         let mut root = new_root();
         let id = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         ComponentAggregate::upload_file(&mut root, id, "schema.cue").unwrap();
@@ -839,8 +747,6 @@ mod tests {
 
         let _ = ComponentAggregate::publish_version(&mut root, id, true);
 
-        // No new event was recorded — the version remains in Uploading state
-        // so a subsequent record_manifest + publish_version can succeed cleanly.
         assert_eq!(root.pending_count(), pending_before);
         ComponentAggregate::record_manifest(&mut root, id).unwrap();
         ComponentAggregate::publish_version(&mut root, id, true).unwrap();
@@ -849,10 +755,6 @@ mod tests {
             Some(&VersionState::Published)
         );
     }
-
-    // ============================================================
-    // TASKS/025 — Unpublish
-    // ============================================================
 
     #[test]
     fn unpublish_transitions_published_to_unpublished() {
@@ -910,16 +812,11 @@ mod tests {
 
     #[test]
     fn republish_after_unpublish_is_allowed() {
-        // Critical zombie-cleanup property: after admin unpublish, the
-        // user can re-publish the same version cleanly. Without this,
-        // unpublish would orphan the version number forever.
         let mut root = new_root();
         let id1 = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         ComponentAggregate::publish_version(&mut root, id1, false).unwrap();
         ComponentAggregate::unpublish_version(&mut root, "1.0.0", "user:alice", None).unwrap();
 
-        // begin_upload for the same version succeeds (Unpublished is treated
-        // like absent).
         let id2 = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         assert_ne!(id1, id2);
         ComponentAggregate::record_manifest(&mut root, id2).unwrap();
@@ -1003,7 +900,6 @@ mod tests {
         let id1 = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
         ComponentAggregate::record_manifest(&mut root, id1).unwrap();
 
-        // New upload for same version supersedes id1 — fresh has_manifest=false.
         let id2 = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0").unwrap();
 
         assert_ne!(id1, id2);

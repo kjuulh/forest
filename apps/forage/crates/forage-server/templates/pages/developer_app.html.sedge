@@ -1,0 +1,96 @@
+use forage_ui::components::CsrfField;
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use crate::views::org_pages::{GRANTS, SCOPES, developer_app_href, settings_href};
+use crate::views::org_settings::message;
+props crate::views::org_pages::DeveloperAppPage { chrome, org, csrf_token, app, client_secret, error };
+
+{let href = developer_app_href(org, &app.app_id);}
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Developers}>
+    <div class="mb-8">
+      <a href={settings_href(org, "/developers")} class="text-sm text-gray-500 hover:text-gray-900">← Developer settings</a>
+      <h2 class="text-lg font-bold mt-2">{app.name}</h2>
+    </div>
+    {if let Some(error) = message(error) {
+      <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{error}</div>
+    }}
+    {if let Some(secret) = client_secret.as_deref().filter(|s| !s.is_empty()) {
+      <div class="mb-8 px-4 py-4 bg-green-50 border border-green-200 rounded-lg">
+        <p class="text-sm font-medium text-green-800">Client secret created</p>
+        <p class="text-xs text-green-700 mt-1 mb-3">Copy it now — for security, you won't be able to see it again. If you lose it, rotate to generate a new one.</p>
+        <code class="block w-full px-3 py-2 text-sm font-mono bg-white border border-green-200 rounded select-all break-all">{secret}</code>
+      </div>
+    }}
+    <div class="mb-8 max-w-xl">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+      <code class="block w-full px-3 py-2 text-sm font-mono bg-gray-50 border border-gray-200 rounded select-all break-all">{app.client_id}</code>
+    </div>
+    <form method="POST" action={href.as_str()} class="space-y-6 max-w-xl">
+      <CsrfField token={csrf_token} name="_csrf" />
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="name">Application name</label>
+        <input id="name" name="name" type="text" required maxlength="100" value={app.name} class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="description">Description</label>
+        <input id="description" name="description" type="text" value={app.description} class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="homepage_url">Homepage URL</label>
+        <input id="homepage_url" name="homepage_url" type="url" value={app.homepage_url} class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="redirect_uris">Redirect URIs</label>
+        <p class="text-xs text-gray-500 mb-1">One per line.</p>
+        <textarea id="redirect_uris" name="redirect_uris" rows="3" required class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">{app.redirect_uris.join("\n")}</textarea>
+      </div>
+      <fieldset>
+        <legend class="block text-sm font-medium text-gray-700 mb-1">Scopes</legend>
+        <div class="space-y-2">
+          {for option in SCOPES.iter() {
+            <label class="flex items-start gap-2">
+              <input type="checkbox" name={option.field} checked={app.scopes.iter().any(|s| s == option.value)} class="mt-0.5">
+              <span class="text-sm"><span class="font-mono">{option.label}</span> — {option.help}</span>
+            </label>
+          }}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend class="block text-sm font-medium text-gray-700 mb-1">Grant types</legend>
+        <p class="text-xs text-gray-500 mb-2">How the app authenticates. An app may use both. Removing a grant takes effect immediately — in-flight authorization codes and existing refresh tokens for that flow stop working.</p>
+        <div class="space-y-2">
+          {for option in GRANTS.iter() {
+            <label class="flex items-start gap-2">
+              <input type="checkbox" name={option.field} checked={app.grant_types.iter().any(|g| g == option.value)} class="mt-0.5">
+              <span class="text-sm"><span class="font-mono">{option.label}</span> — {option.help}</span>
+            </label>
+          }}
+        </div>
+      </fieldset>
+      <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Save changes</button>
+    </form>
+    <div class="mt-12 pt-8 border-t border-gray-200 max-w-xl space-y-4">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Rotate client secret</p>
+          <p class="text-xs text-gray-500">Invalidates the current secret and generates a new one.</p>
+        </div>
+        <form method="POST" action="{href}/rotate">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">Rotate secret</button>
+        </form>
+      </div>
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-red-700">Delete this application</p>
+          <p class="text-xs text-gray-500">Revokes all tokens issued by this app. This cannot be undone.</p>
+        </div>
+        <form method="POST" action="{href}/delete" data-confirm="Delete this OAuth application? All issued tokens will stop working.">
+          <CsrfField token={csrf_token} name="_csrf" />
+          <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50">Delete</button>
+        </form>
+      </div>
+    </div>
+  </OrgSettings>
+</Shell>

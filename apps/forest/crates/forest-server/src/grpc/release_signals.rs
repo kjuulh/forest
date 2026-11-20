@@ -1,7 +1,3 @@
-//! The `SignalService` RPCs. See `interface/proto/forest/v1/signals.proto`
-//! for what a signal is and why reporting is open to more than the deploying
-//! provider.
-
 use forest_grpc_interface::{
     HealthStatus, ListSignalsRequest, ListSignalsResponse, ReportSignalRequest,
     ReportSignalResponse, Signal, signal_service_server::SignalService,
@@ -16,8 +12,6 @@ pub struct SignalServer {
     pub state: State,
 }
 
-/// `HealthStatus` is reused as the signal vocabulary, so this is the only
-/// place the wire enum and the stored string meet.
 fn proto_status_to_string(status: i32) -> Option<&'static str> {
     match HealthStatus::try_from(status).ok()? {
         HealthStatus::Healthy => Some("HEALTHY"),
@@ -25,9 +19,6 @@ fn proto_status_to_string(status: i32) -> Option<&'static str> {
         HealthStatus::Degraded => Some("DEGRADED"),
         HealthStatus::Unhealthy => Some("UNHEALTHY"),
         HealthStatus::Missing => Some("MISSING"),
-        // Rejected rather than stored. A signal with no status cannot satisfy
-        // a gate and cannot fail one, so accepting it would mean a reporter
-        // believing it had reported while nothing could ever act on it.
         HealthStatus::Unspecified => None,
     }
 }
@@ -89,10 +80,6 @@ impl SignalService for SignalServer {
             ))
         })?;
 
-        // An unparseable timestamp becomes "now" rather than an error, but it
-        // is worth a warning: a gate compares `observed_at` against the stage
-        // before it, so a reporter with a broken clock format silently gets
-        // its observation dated on arrival instead.
         let observed_at = match chrono::DateTime::parse_from_rfc3339(&signal.observed_at) {
             Ok(dt) => dt.with_timezone(&chrono::Utc),
             Err(e) => {
@@ -188,9 +175,6 @@ mod tests {
         }
     }
 
-    /// UNSPECIFIED is the default a client gets by simply not setting the
-    /// field, which is exactly why it must not be storable: it would look like
-    /// a report and satisfy nothing.
     #[test]
     fn unspecified_is_not_a_reportable_status() {
         assert_eq!(

@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Validate that a slug (org name, project name) is safe for use in URLs and templates.
-/// Allows lowercase alphanumeric, hyphens, max 64 chars. Must not be empty.
 pub fn validate_slug(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
@@ -20,12 +18,6 @@ pub struct Organisation {
     pub role: String,
 }
 
-/// Project payload — the canonical Overview surface in forage.
-///
-/// `description` is the project-level prose (with a fallback to the
-/// canonical component's manifest description, applied in the handler).
-/// `readme` is the markdown body. `metadata` is the blessed "About"
-/// sidebar block. See spec 009.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Project {
     pub organisation: String,
@@ -38,8 +30,6 @@ pub struct Project {
     pub metadata: ProjectMetadata,
 }
 
-/// Blessed project metadata. Mirrors the forest server's struct; kept
-/// separate so forage-core stays prost-free.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectMetadata {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -70,28 +60,12 @@ impl ProjectMetadata {
     }
 }
 
-/// Turn a URL into a short display label suitable for an About sidebar
-/// entry. Raw URLs are visually noisy — the user already sees the icon,
-/// they just need to know *which* repo / host the link points at.
-///
-/// Rules:
-/// - Empty → empty (caller hides the row).
-/// - Strip `https://` / `http://` and `www.`.
-/// - Strip trailing `/`.
-/// - `github.com/<org>/<repo>` → `<org>/<repo>` (canonical form for both
-///   forges below).
-/// - `gitlab.com/<group>/<project>` → `<group>/<project>`.
-/// - Anything else: keep `host/path` but cap at 48 chars with an `…`.
-///
-/// Strings that don't parse as URLs are returned unchanged (within the
-/// length cap), so a malformed metadata value still shows the raw text.
 pub fn prettify_url(url: &str) -> String {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
-    // Strip scheme + www.
     let without_scheme = trimmed
         .strip_prefix("https://")
         .or_else(|| trimmed.strip_prefix("http://"))
@@ -101,20 +75,14 @@ pub fn prettify_url(url: &str) -> String {
         .unwrap_or(without_scheme);
     let trailing_slash_trimmed = without_www.trim_end_matches('/');
 
-    // Forge-specific: GitHub / GitLab repo URLs collapse to `org/repo`.
     for forge in ["github.com/", "gitlab.com/"] {
         if let Some(rest) = trailing_slash_trimmed.strip_prefix(forge) {
-            // Take the first two path segments. Anything deeper (issues,
-            // tree/main, …) is dropped — the icon already tells the user
-            // "this is a git repo".
             let mut parts = rest.split('/');
             let org = parts.next().unwrap_or("");
             let repo = parts.next().unwrap_or("");
             if !org.is_empty() && !repo.is_empty() {
                 return format!("{org}/{repo}");
             }
-            // Single-segment GitHub URL (org page) — fall through to host
-            // handling so we still get something readable.
             break;
         }
     }
@@ -122,8 +90,6 @@ pub fn prettify_url(url: &str) -> String {
     cap_chars(trailing_slash_trimmed, 48)
 }
 
-/// Truncate a string to `max` chars by ellipsis. Operates on chars, not
-/// bytes, so multi-byte URLs (rare but legal) don't split mid-codepoint.
 fn cap_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -149,7 +115,6 @@ mod prettify_url_tests {
             prettify_url("https://github.com/rawpotion/forest-hello"),
             "rawpotion/forest-hello"
         );
-        // Trailing slash + extra path segments dropped.
         assert_eq!(
             prettify_url("https://github.com/rawpotion/forest-hello/issues"),
             "rawpotion/forest-hello"
@@ -177,7 +142,6 @@ mod prettify_url_tests {
     fn long_url_is_capped_with_ellipsis() {
         let pretty =
             prettify_url("https://very-long.example.com/path/that/keeps/going/and/going/forever");
-        // 48 chars including the ellipsis at the end.
         assert!(pretty.chars().count() <= 48);
         assert!(pretty.ends_with('…'));
     }
@@ -251,15 +215,37 @@ pub struct OrgMember {
     pub joined_at: Option<String>,
 }
 
-/// One row from an org's auto-invite allowlist (DATA-252).
+/// `can_change` is Forest's own admin decision; render the form only when it is true.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Visibility {
+    pub organisation: String,
+    pub project: Option<String>,
+    pub can_change: bool,
+}
+
+impl Visibility {
+    pub fn organisation_is_public(&self) -> bool {
+        self.organisation == "public"
+    }
+
+    pub fn project_is_public(&self) -> bool {
+        self.project.as_deref() == Some("public")
+    }
+
+    pub fn component_is_public(&self) -> bool {
+        self.organisation_is_public() || self.project_is_public()
+    }
+}
+
+pub fn validate_visibility(value: &str) -> bool {
+    matches!(value, "public" | "private")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowedDomain {
     pub domain: String,
-    /// 'auto_invite_any_verified' | 'manual_only' | (v1.1) 'auto_join_oauth'.
     pub policy: String,
     pub dns_verified: bool,
-    /// Token to publish as the TXT record at `_forest-verify.<domain>`
-    /// so the server can confirm DNS ownership.
     pub dns_verification_token: String,
     pub created_at: Option<String>,
 }
@@ -271,8 +257,6 @@ pub enum VerifyDomainOutcome {
     Missing,
 }
 
-/// One auto-invite join offer surfaced to a user with a matching verified
-/// email. Accepting it makes them an org member (DATA-252).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinOffer {
     pub organisation_id: String,
@@ -295,26 +279,18 @@ pub struct Destination {
     pub name: String,
     pub environment: String,
     pub organisation: String,
-    /// Non-sensitive metadata only — the platform withholds values for keys it
-    /// considers credentials.
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
-    /// Names of the metadata keys whose values were withheld. Fetch one at a
-    /// time via `reveal_destination_metadata`.
     #[serde(default)]
     pub sensitive_keys: Vec<String>,
     #[serde(default)]
     pub dest_type: Option<DestinationType>,
 }
 
-/// Everything needed to create a destination. A struct rather than a long
-/// parameter list so the call sites stay readable.
 pub struct NewDestination<'a> {
     pub name: &'a str,
     pub environment: &'a str,
     pub metadata: &'a std::collections::HashMap<String, String>,
-    /// Metadata keys to treat as credentials on top of whatever the
-    /// destination type declares sensitive.
     pub sensitive_keys: &'a [String],
     pub dest_type: Option<&'a DestinationType>,
 }
@@ -343,8 +319,6 @@ pub struct MetadataFieldDef {
     pub required: bool,
     pub field_type: String,
     pub default_value: String,
-    /// This field holds a credential: render it masked and never print the
-    /// value into the page by default.
     #[serde(default)]
     pub sensitive: bool,
 }
@@ -365,17 +339,12 @@ pub struct DestinationState {
     pub started_at: Option<String>,
 }
 
-/// Runtime status of a single pipeline stage.
-///
-/// `Default` is derived so a construction site — a test fixture especially —
-/// can state only the fields it cares about and let the rest fall out. Every
-/// field added here would otherwise have to be spelled into all of them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PipelineRunStageState {
     pub stage_id: String,
     pub depends_on: Vec<String>,
-    pub stage_type: String, // "deploy", "wait", or "plan"
-    pub status: String, // "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "AWAITING_APPROVAL"
+    pub stage_type: String,
+    pub status: String,
     pub environment: Option<String>,
     pub duration_seconds: Option<i64>,
     pub queued_at: Option<String>,
@@ -389,22 +358,17 @@ pub struct PipelineRunStageState {
     pub approval_status: Option<String>,
     #[serde(default)]
     pub auto_approve: Option<bool>,
-    /// Gate stages: when `on_timeout` decides.
     #[serde(default)]
     pub gate_deadline: Option<String>,
-    /// Gate stages: the requirements not yet satisfied, already rendered for a
-    /// human — "rollout to be HEALTHY (currently UNHEALTHY)".
     #[serde(default)]
     pub gate_waiting_on: Vec<String>,
 }
 
-/// Combined response from get_destination_states: destinations only.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeploymentStates {
     pub destinations: Vec<DestinationState>,
 }
 
-/// Full state of a release intent: pipeline stages + individual release steps.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseIntentState {
     pub release_intent_id: String,
@@ -415,7 +379,6 @@ pub struct ReleaseIntentState {
     pub steps: Vec<ReleaseStepState>,
 }
 
-/// Status of an individual release step (deploy work item).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseStepState {
     pub release_id: String,
@@ -429,8 +392,6 @@ pub struct ReleaseStepState {
     pub completed_at: Option<String>,
     pub error_message: Option<String>,
 }
-
-// ── Organisation rule sets (org-scoped defaults/overrides) ───────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectSelector {
@@ -503,8 +464,6 @@ pub struct UpdateOrgRuleSetInput {
     pub release_pipelines: Vec<OrgReleasePipelineRule>,
 }
 
-// ── Triggers (auto-release triggers) ────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {
     pub id: String,
@@ -551,8 +510,6 @@ pub struct UpdateTriggerInput {
     pub use_pipeline: Option<bool>,
 }
 
-// ── Policies (deployment gating) ────────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub id: String,
@@ -579,9 +536,6 @@ pub enum PolicyConfig {
         target_environment: String,
         required_approvals: i32,
     },
-    /// Deploy the newest pending release for a target and mark the ones it
-    /// overtook SUPERSEDED, rather than grinding through every queued one.
-    /// A selection policy, not a gate — see design/SKIP-TO-LATEST.md.
     SupersedePending {
         target_environment: String,
         same_branch_only: bool,
@@ -673,31 +627,16 @@ pub enum PipelineStageConfig {
     Plan {
         environment: String,
         auto_approve: bool,
-        /// A teardown plan (forest#286). Carried through unchanged so editing
-        /// a pipeline here cannot turn a destroy stage into an ordinary plan.
         #[serde(default)]
         destroy: bool,
     },
-    /// Waits for reported signals rather than a duration. See forest#252.
-    ///
-    /// Structured rather than pre-rendered, because forage writes pipelines
-    /// back as well as reading them (`convert_stages_to_grpc`) — a display
-    /// string here would not survive the round trip, and a stage that changes
-    /// when you edit an unrelated one is the kind of thing nobody finds until
-    /// it has already happened.
     Gate {
         requires: Vec<SignalRequirement>,
         timeout_seconds: i64,
-        /// "FAIL" or "PROCEED".
         on_timeout: String,
     },
 }
 
-/// One thing a gate waits to be told, and the states it accepts.
-///
-/// Statuses are carried as their forest `HealthStatus` names so neither this
-/// crate nor the frontend needs the enum. An empty `accept` means HEALTHY,
-/// which is how the server reads it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalRequirement {
     pub signal: String,
@@ -751,7 +690,6 @@ pub enum PlatformError {
     Other(String),
 }
 
-/// A user's notification preference for a specific event type + channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationPreference {
     pub notification_type: String,
@@ -759,8 +697,6 @@ pub struct NotificationPreference {
     pub enabled: bool,
 }
 
-/// Trait for platform data from forest-server (organisations, projects, artifacts).
-/// Separate from `ForestAuth` which handles identity.
 #[async_trait::async_trait]
 pub trait ForestPlatform: Send + Sync {
     async fn list_my_organisations(
@@ -774,9 +710,6 @@ pub trait ForestPlatform: Send + Sync {
         organisation: &str,
     ) -> Result<Vec<String>, PlatformError>;
 
-    /// Fetch the project's full payload (readme + description + metadata).
-    /// Returns `None` when the project doesn't exist so callers can show
-    /// an empty Overview without a fatal error.
     async fn get_project(
         &self,
         access_token: &str,
@@ -879,11 +812,9 @@ pub trait ForestPlatform: Send + Sync {
         organisation: &str,
         name: &str,
         metadata: &std::collections::HashMap<String, String>,
-        // `None` leaves the stored set untouched.
         sensitive_keys: Option<&[String]>,
     ) -> Result<(), PlatformError>;
 
-    /// Fetches the value of exactly one withheld metadata key.
     async fn reveal_destination_metadata(
         &self,
         access_token: &str,
@@ -1046,7 +977,7 @@ pub trait ForestPlatform: Send + Sync {
         name: &str,
     ) -> Result<(), PlatformError>;
 
-    /// Get the spec (forest.cue) content for an artifact. Returns empty string if no spec was uploaded.
+    /// Empty string, not an error, when no spec was uploaded.
     async fn get_artifact_spec(
         &self,
         access_token: &str,
@@ -1064,6 +995,13 @@ pub trait ForestPlatform: Send + Sync {
         notification_type: &str,
         channel: &str,
         enabled: bool,
+    ) -> Result<(), PlatformError>;
+
+    async fn reset_notification_preference(
+        &self,
+        access_token: &str,
+        notification_type: &str,
+        channel: &str,
     ) -> Result<(), PlatformError>;
 
     async fn evaluate_policies(
@@ -1127,7 +1065,27 @@ pub trait ForestPlatform: Send + Sync {
         stage_id: &str,
     ) -> Result<PlanOutput, PlatformError>;
 
-    // -- Auto-invite by verified email domain (DATA-252) ----------------------
+    async fn get_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+    ) -> Result<Visibility, PlatformError>;
+
+    async fn set_organisation_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn set_project_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError>;
 
     async fn list_allowed_domains(
         &self,
@@ -1180,10 +1138,6 @@ pub struct PlanDestinationOutput {
     pub status: String,
 }
 
-// ─── OAuth applications ("Sign in with Forest") ──────────────────────
-
-/// Public view of an organisation-owned OAuth application. Never carries the
-/// client_secret — that is only present on [`CreatedOAuthApp`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OAuthApp {
     pub app_id: String,
@@ -1194,23 +1148,20 @@ pub struct OAuthApp {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
-    /// Which OAuth grants this app may use. An app can hold both —
-    /// acting for a user and acting as itself.
     pub grant_types: Vec<String>,
+    #[serde(default)]
+    pub public: bool,
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
-/// An app together with its freshly-minted raw client_secret. Returned only
-/// from create / rotate; the secret is shown to the org once and never again.
 #[derive(Debug, Clone)]
 pub struct CreatedOAuthApp {
     pub app: OAuthApp,
     pub client_secret: String,
 }
 
-/// Public client metadata for rendering the consent screen at /oauth/authorize.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthClientInfo {
     pub app_id: String,
@@ -1220,9 +1171,9 @@ pub struct OAuthClientInfo {
     pub homepage_url: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
+    pub public: bool,
 }
 
-/// Tokens returned from a successful code exchange at /oauth/token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthIssuedTokens {
     pub access_token: String,
@@ -1230,23 +1181,57 @@ pub struct OAuthIssuedTokens {
     pub token_type: String,
     pub expires_in_seconds: i64,
     pub scopes: Vec<String>,
-    /// OIDC id_token (present only when the `openid` scope was granted).
     pub id_token: Option<String>,
 }
 
-/// What a machine token turned out to belong to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthDeviceAuthorization {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
+    pub expires_in_seconds: i64,
+    pub interval_seconds: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingOAuthDeviceAuthorization {
+    pub client_id: String,
+    pub name: String,
+    pub homepage_url: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OAuthDeviceToken {
+    Issued(OAuthIssuedTokens),
+    AuthorizationPending,
+    SlowDown,
+    AccessDenied,
+    ExpiredToken,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientPrincipal {
     pub app_id: String,
     pub organisation_id: String,
     pub scopes: Vec<String>,
+    pub user: Option<DelegatingUser>,
 }
 
-/// How to find a person in the directory.
-///
-/// `Provider` is the join that email cannot make: people commit from
-/// addresses their Forest account has never seen, but a linked GitHub
-/// identity is exact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatingUser {
+    pub user_id: String,
+    pub username: String,
+    pub organisations: Vec<DelegatingUserOrganisation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatingUserOrganisation {
+    pub organisation_id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirectoryLookup {
     Email(String),
@@ -1256,7 +1241,6 @@ pub enum DirectoryLookup {
     },
 }
 
-/// A person as the directory sees them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryUser {
     pub user_id: String,
@@ -1264,9 +1248,6 @@ pub struct DirectoryUser {
     pub emails: Vec<String>,
 }
 
-/// A minted machine token. Deliberately narrower than
-/// [`OAuthIssuedTokens`]: no refresh token (the client re-mints with the
-/// secret it holds) and no id_token (there is no subject to describe).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthClientToken {
     pub access_token: String,
@@ -1275,7 +1256,6 @@ pub struct OAuthClientToken {
     pub scopes: Vec<String>,
 }
 
-/// A user's authorization of an OAuth app, for the "authorized apps" page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthGrant {
     pub app_id: String,
@@ -1284,7 +1264,6 @@ pub struct OAuthGrant {
     pub authorized_at: String,
 }
 
-/// User claims resolved from an OAuth access token, gated by granted scopes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthUserinfo {
     pub sub: String,
@@ -1295,9 +1274,6 @@ pub struct OAuthUserinfo {
     pub scopes: Vec<String>,
 }
 
-/// RFC 6749 §5.2 error conditions for the token / authorization endpoints,
-/// so Forage can emit the correct OAuth error response. Distinct from
-/// [`PlatformError`] because the OAuth error *code* is part of the contract.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OAuthFlowError {
     #[error("invalid_client")]
@@ -1312,8 +1288,6 @@ pub enum OAuthFlowError {
     ServerError(String),
 }
 
-/// Org-owned OAuth-app management, delegated to forest-server. Kept separate
-/// from [`ForestPlatform`] so it can be wired (and mocked) independently.
 #[async_trait::async_trait]
 pub trait ForestOAuthApps: Send + Sync {
     #[allow(clippy::too_many_arguments)]
@@ -1371,10 +1345,6 @@ pub trait ForestOAuthApps: Send + Sync {
         app_id: &str,
     ) -> Result<(), PlatformError>;
 
-    // ── Authorization server (Forage authenticates as a service account) ──
-
-    /// The `client_credentials` grant: an app authenticating as itself,
-    /// with no user in the loop. No refresh token, no id_token.
     async fn issue_client_credentials_token(
         &self,
         client_id: &str,
@@ -1382,28 +1352,22 @@ pub trait ForestOAuthApps: Send + Sync {
         scopes: &[String],
     ) -> Result<OAuthClientToken, OAuthFlowError>;
 
-    /// Resolve a machine token to the app behind it, for authorising a
-    /// request. `None` when the token is unknown, expired or revoked —
-    /// deliberately indistinguishable to the caller.
+    /// `None` for unknown, expired and revoked tokens alike, deliberately indistinguishable.
     async fn introspect_client_token(
         &self,
         access_token: &str,
     ) -> Result<Option<ClientPrincipal>, OAuthFlowError>;
 
-    /// Resolve a person from an external identity or a verified email.
     async fn resolve_directory_user(
         &self,
         lookup: DirectoryLookup,
     ) -> Result<Option<DirectoryUser>, PlatformError>;
 
-    /// Public client metadata for the consent screen. `None` if no such client.
     async fn lookup_oauth_client(
         &self,
         client_id: &str,
     ) -> Result<Option<OAuthClientInfo>, PlatformError>;
 
-    /// Mint a single-use authorization code after the user consents. Returns
-    /// the raw code.
     #[allow(clippy::too_many_arguments)]
     async fn create_oauth_authorization_code(
         &self,
@@ -1416,7 +1380,6 @@ pub trait ForestOAuthApps: Send + Sync {
         nonce: Option<&str>,
     ) -> Result<String, OAuthFlowError>;
 
-    /// Exchange an authorization code for tokens at the token endpoint.
     async fn exchange_oauth_code(
         &self,
         client_id: &str,
@@ -1426,10 +1389,8 @@ pub trait ForestOAuthApps: Send + Sync {
         code_verifier: Option<&str>,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError>;
 
-    /// Resolve an access token to user claims at the userinfo endpoint.
     async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError>;
 
-    /// Exchange a refresh token for a fresh token pair (with rotation).
     async fn refresh_oauth_token(
         &self,
         client_id: &str,
@@ -1437,22 +1398,80 @@ pub trait ForestOAuthApps: Send + Sync {
         refresh_token: &str,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError>;
 
-    /// Revoke a user's grant for an app. Returns the number of tokens revoked.
     async fn revoke_oauth_grant(&self, user_id: &str, app_id: &str) -> Result<u32, PlatformError>;
 
-    /// List the apps a user has authorized (one entry per app).
     async fn list_oauth_grants(&self, user_id: &str) -> Result<Vec<OAuthGrant>, PlatformError>;
 
-    /// Scopes the user has previously consented to for a client (empty = none).
     async fn get_oauth_consent(
         &self,
         client_id: &str,
         user_id: &str,
     ) -> Result<Vec<String>, PlatformError>;
+
+    async fn initiate_oauth_device_authorization(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthDeviceAuthorization, OAuthFlowError>;
+
+    /// `None` for anything but an app's pending grant, a Forest CLI login included.
+    async fn lookup_oauth_device_authorization(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<PendingOAuthDeviceAuthorization>, PlatformError>;
+
+    async fn approve_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn deny_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn exchange_oauth_device_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> Result<OAuthDeviceToken, OAuthFlowError>;
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{Visibility, validate_visibility};
+
+    fn vis(organisation: &str, project: Option<&str>) -> Visibility {
+        Visibility {
+            organisation: organisation.into(),
+            project: project.map(Into::into),
+            can_change: false,
+        }
+    }
+
+    #[test]
+    fn a_component_is_public_through_its_own_setting_or_its_organisation() {
+        assert!(!vis("private", Some("private")).component_is_public());
+        assert!(vis("private", Some("public")).component_is_public());
+        assert!(vis("public", Some("private")).component_is_public());
+        assert!(vis("public", None).component_is_public());
+    }
+
+    #[test]
+    fn only_public_and_private_are_visibilities() {
+        assert!(validate_visibility("public"));
+        assert!(validate_visibility("private"));
+        assert!(!validate_visibility("internal"));
+        assert!(!validate_visibility("PUBLIC"));
+        assert!(!validate_visibility(""));
+    }
+
     use super::*;
 
     #[test]

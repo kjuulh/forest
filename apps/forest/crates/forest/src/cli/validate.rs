@@ -17,17 +17,7 @@ pub struct ValidateCommand {}
 
 impl ValidateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // TASKS/028: run the publish-readiness preflight first. Until
-        // this was added, `forest validate` reported "Validated 0
-        // component(s)" on projects whose names disagreed across files —
-        // a silent pass through real configuration errors. Preflight
-        // failures stop validation here; if you can't publish, the
-        // dependency-config check is moot.
         let current_dir = std::env::current_dir()?;
-        // build_context re-evaluates cue, which is the same work the
-        // dependency-config validation below relies on the project
-        // parser to have already done. The duplicate eval is cheap and
-        // keeps preflight standalone-runnable.
         match crate::services::preflight::build_context(&current_dir).await {
             Ok(ctx) => {
                 let checks = crate::services::preflight::standard_checks();
@@ -47,19 +37,12 @@ impl ValidateCommand {
                 }
             }
             Err(e) => {
-                // If we can't even build the context (e.g. there's no
-                // forest.cue here), fall through to the dependency-config
-                // path which has its own diagnostics. Don't bail — the
-                // user may be invoking `validate` from a non-project dir
-                // intentionally, in which case the dep path is the only
-                // useful work to do.
                 tracing::debug!("preflight context unavailable: {e:#}");
             }
         }
 
         let project = state.project_parser().get_project().await?;
 
-        // Derive available contracts from dependencies
         let enabled_contracts = contracts::EnabledContracts::from_project_dependencies(&project);
         if enabled_contracts.has_any() {
             eprintln!("Contracts (from dependencies):");
@@ -77,20 +60,18 @@ impl ValidateCommand {
         for dep in &project.dependencies.dependencies {
             let path = match &dep.dependency_type {
                 DependencyType::Local(path) => path.clone(),
-                DependencyType::Versioned(_) => continue, // skip registry deps for now
+                DependencyType::Versioned(_) => continue,
             };
 
             if !component_binary::is_v2_component(&path) {
                 continue;
             }
 
-            // Skip contract-only dependencies (they define types, not services)
             let dep_key = format!("{}/{}", dep.organisation, dep.name);
             if contracts::is_contract(&dep_key) {
                 continue;
             }
 
-            // Build the spec from project config
             let comp_ref = crate::models::ComponentReference {
                 organisation: dep.organisation.clone(),
                 name: dep.name.clone(),
@@ -108,7 +89,6 @@ impl ValidateCommand {
                 }
             };
 
-            // Check which contracts this component implements (before validation)
             let descriptor = component_binary::load_cached_descriptor(&path)
                 .or_else(|| crate::services::component_deno::load_cached_descriptor(&path));
             if let Some(ref descriptor) = descriptor {
@@ -121,7 +101,6 @@ impl ValidateCommand {
                 }
             }
 
-            // Invoke commands/validate — try binary first, then deno
             let validate_result = if let Some(binary_path) =
                 component_binary::resolve_binary(&path, &dep.name)
             {
@@ -202,7 +181,6 @@ impl ValidateCommand {
             }
         }
 
-        // Contract coverage check
         if enabled_contracts.has_any() {
             eprintln!();
             eprintln!("Contract coverage:");

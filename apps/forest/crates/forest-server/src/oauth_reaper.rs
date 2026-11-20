@@ -5,9 +5,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{State, repositories::oauth_apps::OAuthAppRepository};
 
-/// Periodically prunes dead OAuth rows (expired/consumed authorization codes,
-/// fully-expired or long-revoked access tokens). Pure housekeeping — these
-/// rows never resolve, so this only bounds table growth.
 pub struct OAuthReaper {
     repo: OAuthAppRepository,
     interval: Duration,
@@ -17,7 +14,6 @@ impl OAuthReaper {
     pub fn new(state: &State) -> Self {
         Self {
             repo: OAuthAppRepository::new(state.db.clone()),
-            // OAuth tables churn slowly; hourly is plenty.
             interval: Duration::from_secs(60 * 60),
         }
     }

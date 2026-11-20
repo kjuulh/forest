@@ -1,0 +1,205 @@
+use forage_ui::components::{CsrfField, EnvDot, Icon, RemoveRowButton, SecretToggle, TypeChip};
+use forage_ui::layouts::Shell;
+use crate::views::destinations::{destination_href, destinations_href, plural, type_option, type_option_label, DestinationRow};
+component ArrowIcon(class: &str = "w-4 h-4 text-gray-400 shrink-0") {
+<svg class={class} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+}
+component AddRowButton() {
+<button type="button" class="add-meta-row mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+  <Icon name="plus" class="w-3.5 h-3.5" />
+  Add row
+</button>
+}
+component DestinationItem(org: &str, env: &str, dest: &DestinationRow) {
+<div class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+  <a href={destination_href(org, &dest.name)} class="flex items-center gap-3 min-w-0 flex-1">
+    <ArrowIcon />
+    <span class="text-sm font-medium text-gray-900">{dest.name}</span>
+    {if let Some(t) = dest.shown_type() { <TypeChip name={t.name.as_str()} version={t.version} /> }}
+    {if dest.key_count > 0 { <span class="text-xs text-gray-400">{plural(dest.key_count, "key")}</span> }}
+    {if !dest.sensitive_keys.is_empty() { <span class="text-xs text-gray-400" title="Hidden values are not included in the exported JSON">{dest.sensitive_keys.len()} hidden</span> }}
+  </a>
+  <button type="button" class="export-dest text-gray-300 hover:text-gray-600 transition-colors p-1 shrink-0" title="Copy JSON to clipboard"
+    data-name={dest.name}
+    data-env={env}
+    data-type-org={dest.type_org()}
+    data-type-name={dest.type_name()}
+    data-type-version={dest.type_version()}
+    data-metadata={dest.metadata_json}
+    data-sensitive-keys={dest.sensitive_keys_json}>
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+  </button>
+</div>
+}
+props crate::views::destinations::DestinationsPage { chrome, org, csrf_token, is_admin, environments, orphans, types, script };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+      <h1 class="text-2xl font-bold">Environments &amp; Destinations</h1>
+    </div>
+
+    {if !environments.is_empty() {
+      <div id="env-list" class="space-y-6" data-org={org}>
+        {for (i, env) in environments.iter().enumerate() {
+          {let idx = i + 1;}
+          <div class={if *is_admin { "env-card border border-gray-200 rounded-lg overflow-hidden cursor-move" } else { "env-card border border-gray-200 rounded-lg overflow-hidden" }}
+               data-env-id={env.id}
+               draggable={if *is_admin { Some("true") } else { None }}>
+            <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                {if *is_admin { <span class="env-drag-handle text-gray-300 select-none" title="Drag to reorder" aria-hidden="true">⋮⋮</span> }}
+                <EnvDot env={env.name.as_str()} />
+                <span class="font-medium text-gray-900">{env.name}</span>
+                {if let Some(description) = &env.description { <span class="text-xs text-gray-500">{format!("— {description}")}</span> }}
+              </div>
+              <span class="text-xs text-gray-400">order: {env.sort_order}</span>
+            </div>
+
+            {if !env.destinations.is_empty() {
+              <div class="divide-y divide-gray-100">
+                {for dest in env.destinations.iter() { <DestinationItem org={org.as_str()} env={env.name.as_str()} dest={dest} /> }}
+              </div>
+            } else {
+              <div class="px-5 py-3 text-sm text-gray-400">No destinations in this environment</div>
+            }}
+
+            {if *is_admin {
+              <details class="border-t border-gray-100">
+                <summary class="px-5 py-3 bg-gray-50/50 text-sm text-gray-500 cursor-pointer hover:text-gray-700 select-none">Add destination to {env.name}</summary>
+                <div class="px-5 py-4">
+                  <div class="mb-3">
+                    <details>
+                      <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Import from JSON</summary>
+                      <div class="mt-2 space-y-2">
+                        <textarea id="import-json-{idx}" rows="4" placeholder="Paste destination JSON here..."
+                          class="w-full text-xs font-mono px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"></textarea>
+                        <div class="flex gap-2">
+                          <button type="button" data-import-paste={idx.to_string()}
+                            class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Paste from clipboard</button>
+                          <button type="button" data-import-apply={idx.to_string()}
+                            class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Apply</button>
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                  <form method="post" action="{destinations_href(org)}/create" class="space-y-3" id="create-dest-form-{idx}">
+                    <CsrfField token={csrf_token} name="_csrf" />
+                    <input type="hidden" name="environment" value={env.name}>
+                    <input type="hidden" name="type_organisation" id="type_organisation_{idx}">
+                    <input type="hidden" name="type_name" id="type_name_{idx}">
+                    <input type="hidden" name="type_version" id="type_version_{idx}">
+
+                    <div>
+                      <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                      <input type="text" name="name" placeholder="e.g. my-app-prod" required
+                        class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                    </div>
+
+                    <div>
+                      <label for="destination_type_{idx}" class="block text-xs font-medium text-gray-600 mb-1">Destination type <span class="text-gray-400">(optional)</span></label>
+                      <select id="destination_type_{idx}" data-index={idx.to_string()}
+                        class="dest-type-select w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white">
+                        <option value="">None (manual metadata only)</option>
+                        <option value="custom">Custom (manual metadata)</option>
+                        {for dt in types.iter() { <option value={type_option(dt)}>{type_option_label(dt)}</option> }}
+                      </select>
+                    </div>
+
+                    <div id="type-fields-{idx}" class="hidden space-y-2"></div>
+
+                    <div id="custom-fields-{idx}" class="space-y-1">
+                      <label class="block text-xs font-medium text-gray-600 mb-1">Metadata <span class="text-gray-400">(key-value pairs)</span></label>
+                      <div class="space-y-1.5 create-meta-rows">
+                        <div class="flex gap-2 items-center metadata-row">
+                          <input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+                          <input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+                          <SecretToggle title="Mark as a credential: the value is hidden after saving" />
+                          <RemoveRowButton />
+                        </div>
+                      </div>
+                      <AddRowButton />
+                    </div>
+
+                    <div id="extra-fields-{idx}" class="hidden space-y-1">
+                      <div class="flex items-center gap-3 pt-2">
+                        <div class="flex-1 border-t border-gray-200"></div>
+                        <span class="text-xs text-gray-400">additional metadata</span>
+                        <div class="flex-1 border-t border-gray-200"></div>
+                      </div>
+                      <div class="space-y-1.5 extra-meta-rows"></div>
+                      <AddRowButton />
+                    </div>
+
+                    <div class="flex justify-end">
+                      <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create destination</button>
+                    </div>
+                  </form>
+                </div>
+              </details>
+            }}
+          </div>
+        }}
+      </div>
+
+      {if !orphans.is_empty() {
+        <div class="mt-6 border border-gray-200 rounded-lg overflow-hidden">
+          <div class="px-5 py-3 bg-gray-50">
+            <span class="font-medium text-gray-700">Other destinations</span>
+          </div>
+          <div class="divide-y divide-gray-100">
+            {for dest in orphans.iter() {
+              <a href={destination_href(org, &dest.name)} class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors block">
+                <div class="flex items-center gap-3">
+                  <ArrowIcon />
+                  <span class="text-sm text-gray-900">{dest.name}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{dest.environment}</span>
+                  {if let Some(t) = dest.shown_type() { <TypeChip name={t.name.as_str()} version={t.version} /> }}
+                </div>
+                <Icon name="chevron-right" class="w-4 h-4 text-gray-300" />
+              </a>
+            }}
+          </div>
+        </div>
+      }}
+    } else {
+      <div class="border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p class="font-medium text-gray-700">No environments yet</p>
+        <p class="mt-1 text-sm">Create your first environment below, or use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">forest env create</code> from the CLI.</p>
+      </div>
+    }}
+
+    {if *is_admin {
+      <div class="mt-8 border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-gray-50">
+          <span class="font-medium text-gray-900">Create environment</span>
+        </div>
+        <div class="px-5 py-4">
+          <form method="post" action="{destinations_href(org)}/environments" class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <CsrfField token={csrf_token} name="_csrf" />
+            <div class="flex-1">
+              <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+              <input type="text" name="name" placeholder="e.g. production" required
+                class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            </div>
+            <div class="flex-1">
+              <label class="block text-xs font-medium text-gray-600 mb-1">Description <span class="text-gray-400">(optional)</span></label>
+              <input type="text" name="description" placeholder="e.g. Live production environment"
+                class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            </div>
+            <div class="w-24">
+              <label class="block text-xs font-medium text-gray-600 mb-1">Order</label>
+              <input type="number" name="sort_order" value="0"
+                class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            </div>
+            <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create</button>
+          </form>
+        </div>
+      </div>
+    }}
+  </section>
+  <:scripts>
+    {if *is_admin { <script type="application/json" id="destination-types">{types}</script> }}
+    <script src={script} defer></script>
+  </:scripts>
+</Shell>

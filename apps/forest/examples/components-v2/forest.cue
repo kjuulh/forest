@@ -22,12 +22,7 @@ forest: component: sdk.#ForestComponent & {
 		architectures: {
 			linux: {
 				amd64: {}
-				// arm64: {}
 			}
-			// macos: {
-			// 	amd64: {}
-			// 	arm64: {}
-			// }
 		}
 	}
 }

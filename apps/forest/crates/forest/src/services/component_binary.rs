@@ -1,34 +1,17 @@
 use std::path::{Path, PathBuf};
 
-/// Env var carrying the invocation id of the *parent* forest invocation.
-/// forest stamps it onto every component child process, so a component that
-/// re-invokes `forest run` produces a nested forest able to see its parent.
-/// Presence at startup means "not the outermost layer": the nested forest emits
-/// raw JSON for its parent to parse instead of rendering a human view. The id is
-/// a UUIDv7 (time-ordered), so a future version can stitch the values into an
-/// invocation tree. See `crate::cli::run_output`.
 pub const INVOCATION_ENV: &str = "FOREST_INVOCATION_ID";
 
-/// This process's own invocation id, generated once. Passed to component
-/// children via [`INVOCATION_ENV`] so each records us as its parent.
 pub fn invocation_id() -> &'static str {
     use std::sync::OnceLock;
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| uuid::Uuid::now_v7().to_string())
 }
 
-/// The parent invocation's id when forest was spawned beneath another forest
-/// invocation (this is a nested layer); `None` at the outermost layer.
 pub fn parent_invocation_id() -> Option<String> {
     std::env::var(INVOCATION_ENV).ok().filter(|s| !s.is_empty())
 }
 
-/// Compute the shared cache directory for a component's metadata.
-/// Layout: `~/.cache/forest/component-meta/<org>/<name>/<version>/`
-///
-/// This is separate from the component cache (`~/.cache/forest/components/`)
-/// which is scanned for registry-downloaded components. Local component
-/// metadata must not live there or the scanner will try to parse incomplete dirs.
 pub fn component_meta_dir(organisation: &str, name: &str, version: &str) -> Option<PathBuf> {
     let cache_dir = dirs::cache_dir()?;
     Some(
@@ -41,15 +24,12 @@ pub fn component_meta_dir(organisation: &str, name: &str, version: &str) -> Opti
     )
 }
 
-/// Resolve meta.json for a component, checking the shared cache first,
-/// then falling back to the local `.forest/component/` directory.
 pub fn resolve_meta_json(
     component_dir: &Path,
     organisation: &str,
     name: &str,
     version: &str,
 ) -> Option<PathBuf> {
-    // Check shared cache first
     if let Some(cache_meta_dir) = component_meta_dir(organisation, name, version) {
         let cache_meta = cache_meta_dir.join("meta.json");
         if cache_meta.exists() {
@@ -57,7 +37,6 @@ pub fn resolve_meta_json(
         }
     }
 
-    // Fall back to local .forest/component/meta.json
     let local_meta = component_dir
         .join(".forest")
         .join("component")
@@ -69,30 +48,6 @@ pub fn resolve_meta_json(
     None
 }
 
-/// Resolves the binary path for a v2 component.
-///
-/// For local deps: finds the built binary on disk, checks if it changed
-/// since last cached, and updates the cache automatically. Rebuilding
-/// the component just works — no manual cache invalidation.
-///
-/// For registry deps: uses the content-addressable cache via meta.json.
-/// Every platform binary the build produced, as `(os, arch, path)`.
-///
-/// Publishing used to record only `current_platform()`, so a project whose
-/// architecture matrix named four targets — and whose build dutifully produced
-/// all four — shipped one, and colleagues on other platforms got "missing" from
-/// `forest global add`. The artifacts were already on disk; nothing was looking
-/// at them.
-///
-/// Reads the layout the build component writes,
-/// `.forest/component/output/<os>/<arch>/<name>`, so it needs no manifest and
-/// stays correct for whatever subset actually built.
-///
-/// DATA-654: this is publish's source of truth, not a preference. Empty means
-/// the build has not run, which publish reports as an error rather than papering
-/// over with something found in `target/`. Since DATA-654 no resolver in forest
-/// reads a cargo target directory at all — the host-platform equivalent of this
-/// function is [`staged_output_binary`].
 pub fn discover_output_binaries(
     component_dir: &Path,
     component_name: &str,
@@ -119,7 +74,6 @@ pub fn discover_output_binaries(
             }
             let arch = arch_entry.file_name().to_string_lossy().to_string();
 
-            // Windows builds carry .exe; everything else is bare.
             for candidate in [
                 arch_entry.path().join(component_name),
                 arch_entry.path().join(format!("{component_name}.exe")),
@@ -132,7 +86,6 @@ pub fn discover_output_binaries(
         }
     }
 
-    // Deterministic order so manifests and logs are reproducible.
     found.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
     found
 }
@@ -141,7 +94,6 @@ pub fn resolve_binary(component_dir: &Path, component_name: &str) -> Option<Path
     resolve_binary_with_meta(component_dir, component_name, None, None, None)
 }
 
-/// Resolve binary with optional org/name/version for shared cache meta lookup.
 pub fn resolve_binary_with_meta(
     component_dir: &Path,
     component_name: &str,
@@ -149,22 +101,14 @@ pub fn resolve_binary_with_meta(
     name: Option<&str>,
     version: Option<&str>,
 ) -> Option<PathBuf> {
-    // 1. Try to find a locally-built binary and sync to cache if changed
     if let Some(local_binary) = staged_output_binary(component_dir, component_name) {
         let meta_path = resolve_meta_for_sync(component_dir, organisation, name, version);
         return sync_local_binary_to_cache_at(component_dir, &local_binary, meta_path.as_deref());
     }
 
-    // 2. Fall back to meta.json → content-addressable cache (registry deps)
     resolve_cached_binary(component_dir, organisation, name, version)
 }
 
-/// Resolve this platform's binary through `meta.json` → the content-addressable
-/// cache. Used for registry deps, whose binary never exists in the working tree.
-///
-/// Not reachable from `forest publish`: it records only the *host* platform and only
-/// whatever was cached last, so it is right for a registry dep and wrong for a
-/// publish. See [`resolve_publishable_binary`].
 fn resolve_cached_binary(
     component_dir: &Path,
     organisation: Option<&str>,
@@ -201,27 +145,6 @@ fn resolve_cached_binary(
     resolve_binary_from_hash(sha256)
 }
 
-/// The host-platform binary `forest publish` may upload, or `None`.
-///
-/// DATA-654. Exactly one source: `.forest/component/output/<os>/<arch>/<name>`,
-/// what the build components write.
-///
-/// Not [`resolve_binary`], which still falls back to `meta.json` → the
-/// content-addressable cache. That fallback is right for a registry dep, whose
-/// binary never exists in the working tree, and wrong for a publish twice over:
-/// `meta.json` records only the *host* platform, so honouring it would ship a
-/// single-platform manifest for a project whose matrix names four (the DATA-312
-/// bug), and the blob it names is whatever was cached last rather than what this
-/// tree just built.
-///
-/// The `target/` probe that used to sit behind this — walking up to the cargo
-/// workspace root for `target/debug/<name>` *before* `target/release/<name>* —
-/// is gone from forest entirely, so there is no longer a way for a debug build
-/// to reach `meta.json` either. See [`staged_output_binary`].
-///
-/// Returning the host platform's artifact specifically is what the publish flow
-/// needs: it runs this binary's `_meta/describe` to derive the manifest. Every
-/// *other* platform in the matrix is picked up by [`discover_output_binaries`].
 pub fn resolve_publishable_binary(
     component_dir: &Path,
     component_name: &str,
@@ -231,10 +154,6 @@ pub fn resolve_publishable_binary(
 ) -> Option<PathBuf> {
     let staged = staged_output_binary(component_dir, component_name)?;
 
-    // Sync to the content-addressable cache exactly as the run/validate paths
-    // do, so meta.json stays current for consumers. Falling back to the staged
-    // path keeps publish working if the cache is unwritable — it is still the
-    // artifact the build produced.
     let meta_path = resolve_meta_for_sync(component_dir, organisation, name, version);
     Some(
         sync_local_binary_to_cache_at(component_dir, &staged, meta_path.as_deref())
@@ -242,7 +161,6 @@ pub fn resolve_publishable_binary(
     )
 }
 
-/// Resolve the meta.json path for sync operations.
 fn resolve_meta_for_sync(
     component_dir: &Path,
     organisation: Option<&str>,
@@ -264,37 +182,12 @@ fn resolve_meta_for_sync(
     }
 }
 
-/// The one place forest looks on disk for a locally-built component binary:
-/// `.forest/component/output/<os>/<arch>/<name>`.
-///
-/// DATA-312 put the artifact here — the deterministic, toolchain-agnostic
-/// location, independent of cargo's per-triple `target/<triple>/release` layout
-/// (which a plain `target/release` probe misses for cross/explicit-target
-/// builds).
-///
-/// DATA-654 made it the *only* one. There used to be a second source behind
-/// this: a walk up to the cargo workspace root probing `target/debug/<name>`
-/// before `target/release/<name>`. `forest publish` fell through to it whenever
-/// the output tree was empty and uploaded stale debug builds to the registry —
-/// and because this result is what `sync_local_binary_to_cache_at` records in
-/// `meta.json`, a single `forest run` was enough to put a debug binary's hash
-/// into the content-addressable cache as well. Deleting the probe closes both
-/// at once, so nothing downstream has to defend against a hash-verified debug
-/// build: one can no longer be recorded.
-///
-/// The cost is the bootstrap case — forest's own build components cannot build
-/// themselves, so `cargo build` alone no longer makes them runnable. Stage them
-/// with `mise run contrib:stage`, the same recipe `publish-build-component.yml`
-/// uses in CI. Every other component arrives here via `forest run build`, which
-/// writes this layout by construction.
 fn staged_output_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf> {
     let (os, arch) = current_platform();
     let dir = component_dir
         .join(".forest/component/output")
         .join(os)
         .join(arch);
-    // Windows builds carry .exe; everything else is bare. Matches
-    // `discover_output_binaries` and `forest_build_core::output_filename`.
     [
         dir.join(binary_name),
         dir.join(format!("{binary_name}.exe")),
@@ -303,13 +196,10 @@ fn staged_output_binary(component_dir: &Path, binary_name: &str) -> Option<PathB
     .find(|candidate| candidate.is_file())
 }
 
-/// Hash a local binary, compare to meta.json, update cache if changed.
 fn sync_local_binary_to_cache(component_dir: &Path, local_binary: &Path) -> Option<PathBuf> {
     sync_local_binary_to_cache_at(component_dir, local_binary, None)
 }
 
-/// Hash a local binary, compare to meta.json, update cache if changed.
-/// If `meta_path_override` is provided, use that instead of the local `.forest/` path.
 fn sync_local_binary_to_cache_at(
     component_dir: &Path,
     local_binary: &Path,
@@ -330,7 +220,6 @@ fn sync_local_binary_to_cache_at(
     let (os, arch) = current_platform();
     let platform_key = format!("{os}_{arch}");
 
-    // Check if hash matches what's in meta.json
     let stored_hash = std::fs::read_to_string(&meta_path)
         .ok()
         .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
@@ -342,18 +231,12 @@ fn sync_local_binary_to_cache_at(
                 .map(String::from)
         });
 
-    if stored_hash.as_deref() == Some(&current_hash) {
-        // Binary unchanged since last sync — reuse the cached blob if it's
-        // still there. If the content-addressable cache was cleared or evicted,
-        // the local binary is right here, so fall through and re-store it
-        // rather than reporting "no artifact" — otherwise a cleared cache makes
-        // `forest publish` fail preflight C6 even after a successful build.
-        if let Some(cached) = resolve_binary_from_hash(&current_hash) {
-            return Some(cached);
-        }
+    if stored_hash.as_deref() == Some(&current_hash)
+        && let Some(cached) = resolve_binary_from_hash(&current_hash)
+    {
+        return Some(cached);
     }
 
-    // Binary changed — update cache and meta.json
     tracing::debug!(
         "local binary changed ({}), syncing to cache",
         &current_hash[..12]
@@ -361,7 +244,6 @@ fn sync_local_binary_to_cache_at(
 
     let (hash, cache_path) = store_binary_in_cache(&content).ok()?;
 
-    // Update meta.json
     let mut meta: serde_json::Value = std::fs::read_to_string(&meta_path)
         .ok()
         .and_then(|c| serde_json::from_str(&c).ok())
@@ -383,11 +265,6 @@ fn sync_local_binary_to_cache_at(
     Some(cache_path)
 }
 
-/// Resolves a binary from the content-addressable cache by its SHA-256 hash.
-/// Path: `~/.cache/forest/components/bin/{prefix}/{sha256}`
-/// where prefix = first 2 characters of the hash (like git objects).
-///
-/// Verifies the SHA-256 of the cached file matches the expected hash before returning.
 pub fn resolve_binary_from_hash(sha256: &str) -> Option<PathBuf> {
     use sha2::{Digest, Sha256};
 
@@ -407,7 +284,6 @@ pub fn resolve_binary_from_hash(sha256: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // Verify hash integrity before trusting the cached binary
     let content = std::fs::read(&binary_path).ok()?;
     let actual_hash = hex::encode(Sha256::digest(&content));
     if actual_hash != sha256 {
@@ -424,12 +300,6 @@ pub fn resolve_binary_from_hash(sha256: &str) -> Option<PathBuf> {
     Some(binary_path)
 }
 
-/// Stores a binary in the content-addressable cache.
-/// Returns the SHA-256 hash and the path where it was stored.
-/// Path layout: `~/.cache/forest/components/bin/{prefix}/{sha256}`
-///
-/// Uses atomic write (write to temp file, then rename) to prevent
-/// concurrent readers from seeing a partially written binary.
 pub fn store_binary_in_cache(binary_content: &[u8]) -> anyhow::Result<(String, PathBuf)> {
     use sha2::{Digest, Sha256};
 
@@ -446,7 +316,6 @@ pub fn store_binary_in_cache(binary_content: &[u8]) -> anyhow::Result<(String, P
 
     let binary_path = bin_dir.join(&sha256);
     if !binary_path.exists() {
-        // Atomic write: write to temp file then rename
         let tmp_path = bin_dir.join(format!(".{sha256}.tmp"));
         std::fs::write(&tmp_path, binary_content)?;
         #[cfg(unix)]
@@ -460,18 +329,43 @@ pub fn store_binary_in_cache(binary_content: &[u8]) -> anyhow::Result<(String, P
     Ok((sha256, binary_path))
 }
 
-/// Check whether a directory contains a v2 component (has `forest.component.cue`).
+pub fn binary_download_dir() -> anyhow::Result<PathBuf> {
+    let cache_dir = dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("cache dir not available"))?;
+    Ok(cache_dir.join("forest").join("components").join("bin"))
+}
+
+pub async fn install_downloaded_binary(
+    streamed: crate::grpc::StreamedBinary,
+) -> anyhow::Result<(String, PathBuf)> {
+    let sha256 = streamed.sha256_hex;
+    let bin_dir = binary_download_dir()?.join(&sha256[..2]);
+    let binary_path = bin_dir.join(&sha256);
+    let installed = async {
+        tokio::fs::create_dir_all(&bin_dir).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&streamed.temp_path, std::fs::Permissions::from_mode(0o755))
+                .await?;
+        }
+        tokio::fs::rename(&streamed.temp_path, &binary_path).await
+    }
+    .await;
+    if let Err(e) = installed {
+        tokio::fs::remove_file(&streamed.temp_path).await.ok();
+        return Err(anyhow::Error::new(e).context(format!("installing {}", binary_path.display())));
+    }
+    Ok((sha256, binary_path))
+}
+
 pub fn is_v2_component(component_dir: &Path) -> bool {
     component_dir.join("forest.component.cue").exists()
 }
 
-/// Load the cached descriptor from meta.json without spawning the binary.
-/// Returns None if meta.json doesn't exist or doesn't contain a descriptor.
 pub fn load_cached_descriptor(component_dir: &Path) -> Option<forest_sdk::ComponentDescriptor> {
     load_cached_descriptor_with_meta(component_dir, None, None, None)
 }
 
-/// Load the cached descriptor, checking the shared cache if org/name/version are provided.
 pub fn load_cached_descriptor_with_meta(
     component_dir: &Path,
     organisation: Option<&str>,
@@ -498,7 +392,6 @@ pub fn load_cached_descriptor_with_meta(
     serde_json::from_value(descriptor_val.clone()).ok()
 }
 
-/// Fetch template rendering config from a component binary.
 pub async fn get_template_config(binary_path: &Path) -> anyhow::Result<forest_sdk::TemplateConfig> {
     let output = tokio::time::timeout(
         DESCRIBE_TIMEOUT,
@@ -512,7 +405,6 @@ pub async fn get_template_config(binary_path: &Path) -> anyhow::Result<forest_sd
     .map_err(|e| anyhow::anyhow!("failed to get template config: {e}"))?;
 
     if !output.status.success() {
-        // If the component doesn't support template_config, return defaults
         return Ok(forest_sdk::TemplateConfig::default());
     }
 
@@ -521,16 +413,10 @@ pub async fn get_template_config(binary_path: &Path) -> anyhow::Result<forest_sd
     Ok(config)
 }
 
-/// Default timeout for component binary invocations.
 const COMPONENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Timeout for `_meta/describe` (should be fast).
 const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Sentinels for "binary doesn't implement `_meta/describe` as a subcommand."
-/// Matched case-insensitively against the binary's stderr after a non-zero
-/// exit. Covers clap (Rust), cobra (Go), and a generic fallback.
-/// See TASKS/026-publish-describe-error.md.
 const SUBCOMMAND_MISSING_SENTINELS: &[&str] = &[
     "unrecognized subcommand",
     "unrecognised subcommand",
@@ -538,9 +424,6 @@ const SUBCOMMAND_MISSING_SENTINELS: &[&str] = &[
     "no such subcommand",
 ];
 
-/// Returns `true` iff `stderr` looks like a CLI framework's
-/// "this subcommand isn't registered" complaint, as opposed to any other
-/// runtime failure (segfault, permission denied, panic, etc.).
 fn is_missing_subcommand(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
     SUBCOMMAND_MISSING_SENTINELS
@@ -548,38 +431,24 @@ fn is_missing_subcommand(stderr: &str) -> bool {
         .any(|sentinel| lower.contains(sentinel))
 }
 
-/// Structured failure modes for `_meta/describe` probing. Each variant
-/// renders distinct, actionable user-facing text via [`std::fmt::Display`].
-/// See TASKS/026-publish-describe-error.md for the rationale.
 #[derive(Debug)]
 pub enum DescribeError {
-    /// The binary exited non-zero with stderr matching a known "subcommand
-    /// not found" pattern. Means the binary doesn't implement the describe
-    /// contract — the user should either ship it as a plain binary or add
-    /// the subcommand. This is the dominant failure mode for first-time
-    /// publishers (see the publish debrief, 2026-06-10).
-    MissingSubcommand { bin: std::path::PathBuf },
-    /// The binary exited 0 but stdout isn't valid JSON matching the
-    /// descriptor shape. The binary "implements" `_meta/describe` but
-    /// emits the wrong payload.
+    MissingSubcommand {
+        bin: std::path::PathBuf,
+    },
     MalformedDescriptor {
         bin: std::path::PathBuf,
         parse_error: serde_json::Error,
         stdout_prefix: String,
     },
-    /// Binary exited non-zero for a reason that isn't "subcommand not found":
-    /// permission denied, panic, segfault, missing shared library, etc.
     ProbeFailed {
         bin: std::path::PathBuf,
         stderr: String,
     },
-    /// Probe took longer than [`DESCRIBE_TIMEOUT`]. Likely an interactive
-    /// prompt or an infinite loop — both are bugs in the binary.
     Timeout {
         bin: std::path::PathBuf,
         after: std::time::Duration,
     },
-    /// Failed to spawn the binary at all (typically `NotFound`).
     SpawnFailed {
         bin: std::path::PathBuf,
         source: std::io::Error,
@@ -661,7 +530,6 @@ impl std::error::Error for DescribeError {
     }
 }
 
-/// Discover available methods by running `_meta/describe` on the component binary.
 pub async fn describe_component(
     binary_path: &Path,
 ) -> anyhow::Result<forest_sdk::ComponentDescriptor> {
@@ -697,9 +565,6 @@ pub async fn describe_component(
         return Err(err.into());
     }
 
-    // Even on a zero exit, the stdout may not be the descriptor we expect.
-    // Return a typed MalformedDescriptor so the user sees the parse failure
-    // alongside the stdout that produced it.
     let descriptor: forest_sdk::ComponentDescriptor = serde_json::from_slice(&output.stdout)
         .map_err(|e| {
             const PREFIX_LEN: usize = 1024;
@@ -801,8 +666,6 @@ mod describe_error_tests {
     }
 }
 
-/// Invoke a component binary method with a spec, input, and context payload.
-/// Payload is passed via stdin (not CLI args) to avoid leaking secrets in process listing.
 pub async fn invoke_component(
     binary_path: &Path,
     method: &str,
@@ -812,7 +675,6 @@ pub async fn invoke_component(
     invoke_component_with_context(binary_path, method, spec_json, input_json, None).await
 }
 
-/// Invoke a component binary method with full context.
 pub async fn invoke_component_with_context(
     binary_path: &Path,
     method: &str,
@@ -849,14 +711,12 @@ pub async fn invoke_component_with_context(
             |e| anyhow::anyhow!("failed to spawn component {}: {e}", binary_path.display(),),
         )?;
 
-    // Write payload to stdin
     if let Some(mut stdin) = child.stdin.take() {
         let payload_bytes = serde_json::to_vec(&payload)?;
         stdin.write_all(&payload_bytes).await?;
-        drop(stdin); // Close stdin to signal EOF
+        drop(stdin);
     }
 
-    // Wait with timeout
     let output = tokio::time::timeout(COMPONENT_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {
@@ -870,7 +730,6 @@ pub async fn invoke_component_with_context(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Extract the useful part — component stderr often has "error: <message>"
         let clean_error = stderr
             .trim()
             .strip_prefix("error: ")
@@ -883,21 +742,6 @@ pub async fn invoke_component_with_context(
     Ok(result)
 }
 
-/// Invoke a component method in *passthrough* mode (DATA-312).
-///
-/// Differs from [`invoke_component_with_context`] in two ways that matter for
-/// build/publish components wrapping long-running toolchains:
-///
-///   * **stderr is inherited**, so the child's live output (cargo/go/docker
-///     progress) streams straight to the user's terminal instead of being
-///     buffered and replayed only on failure.
-///   * **no timeout** — a release build can legitimately run for many minutes,
-///     well past [`COMPONENT_TIMEOUT`].
-///
-/// stdin still carries the `{spec,input,context}` payload, and stdout is still
-/// captured and parsed as the component's JSON summary (empty stdout → `Null`).
-/// Contract for components invoked this way: human-facing progress to stderr,
-/// a single JSON result object to stdout.
 pub async fn invoke_component_passthrough(
     binary_path: &Path,
     method: &str,
@@ -920,7 +764,6 @@ pub async fn invoke_component_passthrough(
         .env(INVOCATION_ENV, invocation_id())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        // Inherit stderr: stream the toolchain's output live.
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
@@ -929,26 +772,21 @@ pub async fn invoke_component_passthrough(
     if let Some(mut stdin) = child.stdin.take() {
         let payload_bytes = serde_json::to_vec(&payload)?;
         stdin.write_all(&payload_bytes).await?;
-        drop(stdin); // close stdin to signal EOF
+        drop(stdin);
     }
 
-    // No timeout — build tooling can run arbitrarily long. The child's stderr
-    // is already streaming to the terminal, so the user sees progress.
     let output = child
         .wait_with_output()
         .await
         .map_err(|e| anyhow::anyhow!("command '{method}' failed to execute: {e}"))?;
 
     if !output.status.success() {
-        // stderr was inherited (already shown to the user), so we only need to
-        // report the exit. Callers wrap this as a miette diagnostic.
         anyhow::bail!(
             "component command '{method}' failed (exit {})",
             output.status.code().unwrap_or(-1)
         );
     }
 
-    // The JSON summary on stdout is optional — a component may emit nothing.
     if output.stdout.iter().all(u8::is_ascii_whitespace) {
         return Ok(serde_json::Value::Null);
     }
@@ -990,13 +828,11 @@ mod tests {
     }
 
     fn binary_path() -> Option<PathBuf> {
-        // Try the .forest/component/output location first (placed by build step)
         let from_output = resolve_binary(&component_dir(), "kubernetes-service");
         if from_output.is_some() {
             return from_output;
         }
 
-        // Fall back to target/debug from workspace root
         let workspace_binary =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/kubernetes-service");
         if workspace_binary.exists() {
@@ -1010,7 +846,6 @@ mod tests {
     fn test_is_v2_component() {
         assert!(is_v2_component(&component_dir()));
 
-        // A directory without forest.component.cue should not be detected as v2
         let empty_dir = std::env::temp_dir().join("forest-test-not-v2");
         std::fs::create_dir_all(&empty_dir).unwrap();
         assert!(!is_v2_component(&empty_dir));
@@ -1041,7 +876,6 @@ mod tests {
         assert_eq!(descriptor.protocol_version, "1.1");
         assert!(!descriptor.methods.is_empty());
 
-        // Should have commands
         let command_names: Vec<&str> = descriptor
             .methods
             .iter()
@@ -1054,7 +888,6 @@ mod tests {
         assert!(command_names.contains(&"commands/diff"));
         assert!(command_names.contains(&"commands/logs"));
 
-        // Should have hooks across 3 topics
         let hook_topics: std::collections::HashSet<&str> = descriptor
             .methods
             .iter()
@@ -1187,7 +1020,6 @@ mod tests {
             "annotations": {},
         });
 
-        // Hook should succeed without error
         let result = invoke_component(
             &binary,
             "hooks/forest/deployment/prepare",
@@ -1197,7 +1029,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Hook returns empty output (side effects only)
         assert!(result.is_object() || result.is_null());
     }
 
@@ -1246,8 +1077,6 @@ mod discover_tests {
         std::fs::write(d.join(name), b"binary").unwrap();
     }
 
-    /// The whole point: a matrix build leaves several platforms on disk and all
-    /// of them must be found, not just the host's.
     #[test]
     fn finds_every_built_platform() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1263,7 +1092,6 @@ mod discover_tests {
             .map(|(os, arch, _)| format!("{os}/{arch}"))
             .collect();
 
-        // Sorted, so manifests and logs are reproducible.
         assert_eq!(keys, vec!["linux/amd64", "linux/arm64", "macos/arm64"]);
         assert!(found.iter().all(|(_, _, p)| p.is_file()));
     }
@@ -1278,16 +1106,12 @@ mod discover_tests {
         assert!(found[0].2.ends_with("mytool.exe"));
     }
 
-    /// Empty means "fall back to the single-binary resolution", so it must be
-    /// empty rather than erroring when nothing has been built.
     #[test]
     fn empty_when_nothing_built() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(discover_output_binaries(tmp.path(), "mytool").is_empty());
     }
 
-    /// A directory for a platform whose build failed has no binary in it, and
-    /// must not be reported as publishable.
     #[test]
     fn ignores_platform_dirs_without_a_binary() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1299,7 +1123,6 @@ mod discover_tests {
         assert_eq!(found[0].1, "amd64");
     }
 
-    /// Another component's binary in the same tree is not ours.
     #[test]
     fn ignores_other_component_names() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1308,19 +1131,10 @@ mod discover_tests {
     }
 }
 
-/// DATA-654 — no resolver in forest sees the cargo target directory any more.
-///
-/// The decoy in each of these is a `target/debug/<name>` inside a real cargo
-/// workspace layout: exactly what publish used to upload, and what a single
-/// `forest run` used to launder into `meta.json` and the content-addressable
-/// cache.
 #[cfg(test)]
 mod publishable_resolution_tests {
     use super::*;
 
-    /// A cargo workspace root with a component subdirectory and a decoy
-    /// `target/debug/<name>` — the stale debug build that used to get
-    /// published.
     fn workspace_with_decoy(name: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
@@ -1345,9 +1159,6 @@ mod publishable_resolution_tests {
         );
     }
 
-    /// The probe is gone from the general-purpose resolver too, not just from
-    /// publish. `forest run` on a component whose build has not been staged
-    /// gets nothing rather than a debug binary.
     #[test]
     fn local_resolution_no_longer_finds_a_cargo_target_binary() {
         let (_tmp, component, _decoy) = workspace_with_decoy("mytool");
@@ -1375,11 +1186,6 @@ mod publishable_resolution_tests {
         );
     }
 
-    /// Closing the probe closes the laundering path with it: because
-    /// `meta.json` is written from [`staged_output_binary`]'s result, a decoy in
-    /// `target/` can no longer reach the content-addressable cache at all.
-    /// Nothing downstream has to defend against a hash-verified debug build,
-    /// because one can no longer be recorded.
     #[test]
     fn a_target_build_can_no_longer_be_synced_into_the_cache() {
         let (_tmp, component, decoy) = workspace_with_decoy("mytool");
@@ -1395,8 +1201,6 @@ mod publishable_resolution_tests {
         );
     }
 
-    /// Nothing built at all: no staged output, no meta.json. Publish gets
-    /// `None` and reports it rather than guessing.
     #[test]
     fn publish_resolves_nothing_when_nothing_was_built() {
         let tmp = tempfile::tempdir().unwrap();

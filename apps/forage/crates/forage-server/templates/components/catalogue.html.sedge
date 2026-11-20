@@ -1,0 +1,32 @@
+use forage_core::registry::ComponentSummary;
+use forage_ui::components::{Badge, Timeago, ToolShapeBadge, VisibilityBadge};
+use crate::views::catalogue::{component_href, shape_key, versions_label};
+component ComponentRow(c: &ComponentSummary, title: &str, details: bool) {
+<a href={component_href(c)} class="block p-5 border border-gray-200 rounded-lg hover:border-gray-400 transition-colors">
+  <div class="flex items-center justify-between">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 min-w-0 flex-wrap">
+        <h2 class="font-bold text-base truncate">{title}</h2>
+        <Badge label={&format!("v{}", c.latest_version)} />
+        <ToolShapeBadge shape={shape_key(c.shape)} />
+        <VisibilityBadge visibility={c.visibility} />
+        {if !c.upstream_host.is_empty() { <span class="text-xs text-gray-500">← {c.upstream_host}</span> }}
+      </div>
+      {if !c.description.is_empty() {
+        <p class="mt-1 text-sm text-gray-600 truncate">{c.description}</p>
+      }}
+    </div>
+    <div class="text-right text-xs text-gray-400 shrink-0 ml-4">
+      <div>{versions_label(c.version_count)}</div>
+      {if *details && !c.updated_at.is_empty() {
+        <Timeago value={c.updated_at} class="text-xs text-gray-400" />
+      }}
+    </div>
+  </div>
+  {if *details && !c.contracts.is_empty() {
+    <div class="mt-2 flex gap-1.5 flex-wrap">
+      {for contract in c.contracts.iter() { <Badge label={contract} /> }}
+    </div>
+  }}
+</a>
+}

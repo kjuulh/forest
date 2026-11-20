@@ -1,0 +1,90 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: case.parent()
+---
+{
+  "blocks": [
+    {
+      "text": {
+        "text": ":raised_hand: *<https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|Waiting for approval: understory/agent-gateway>*",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "text": {
+        "text": ":memo: feat(tasks): default a task to task-general (#152)",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "*<https://forest.understory.sh/orgs/understory/projects/agent-gateway|agent-gateway>* / <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|vivaciously-ultimate-condor>  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "text": {
+        "text": ":white_check_mark:  Deployed to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-dev|dev>  ·  1m 12s\n:raised_hand:  Plan for <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod|prod> needs approval\n:hourglass_flowing_sand:  Deploy to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-prod|prod>",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "1/3 stages complete  ·  started <!date^1795084190^{time}|10:29 UTC>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "elements": [
+        {
+          "action_id": "review_plan",
+          "style": "primary",
+          "text": {
+            "text": "Review plan",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod"
+        },
+        {
+          "action_id": "view_logs",
+          "text": {
+            "text": "Logs",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs"
+        },
+        {
+          "action_id": "view_source",
+          "text": {
+            "text": "Source",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://github.com/understory-io/agent-gateway/commit/dc989e4"
+        },
+        {
+          "action_id": "view_project",
+          "text": {
+            "text": "Project",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway"
+        }
+      ],
+      "type": "actions"
+    }
+  ],
+  "text": "Waiting for approval: understory/agent-gateway"
+}

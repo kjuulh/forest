@@ -1,12 +1,7 @@
 import { describe, it, expect } from "vitest";
-// The switcher is a plain module served straight out of static/ — no build
-// step, which is the point of it. The matcher is still the piece worth
-// testing: the dropdown renders either way, it just puts the wrong project
-// under the cursor when the ranking is wrong, and Enter takes you there.
 import { fuzzyMatch, rankMatches } from "../../../static/js/fuzzy-switcher.js";
 import parity from "./fzf-parity.json";
 
-// A representative slice of the understory org — the list this exists for.
 const PROJECTS = [
   "awslogin",
   "bark",
@@ -59,16 +54,10 @@ describe("the ranking this exists to get right", () => {
   });
 
   it("an initialism beats an accident of spelling", () => {
-    // `cardigan` holds c-d-g more tightly than canopy-data-gateway does, but
-    // the initials are what was meant, and the boundary bonuses say so.
     expect(top("cdg", ["cardigan", "canopy-data-gateway"])).toBe("canopy-data-gateway");
   });
 
   it("a repeated leading character costs you", () => {
-    // fzf's first row restarts the alignment on every occurrence of the first
-    // pattern character rather than carrying the best score forward, so the
-    // second `c` in `cxxxxcxxp` drags it below the name without one. This is
-    // the asymmetry the port got wrong first time round.
     expect(rank("cp", ["cxxxxcxxp", "cxxxxxxxp"])).toEqual([
       "cxxxxxxxp",
       "cxxxxcxxp",
@@ -76,7 +65,6 @@ describe("the ranking this exists to get right", () => {
   });
 
   it("the shorter name wins a tie", () => {
-    // Both are prefix matches; commission-dashboard is one character shorter.
     expect(rank("commission")).toEqual([
       "commission-dashboard",
       "commission-accounting",
@@ -97,9 +85,6 @@ describe("case", () => {
   });
 
   it("a query's case never changes its score", () => {
-    // A deliberate departure from fzf, which is smart-case: there, `CDG`
-    // matches nothing in an all-lowercase list. In a dropdown of a dozen rows
-    // that reads as broken rather than as a feature.
     expect(fuzzyMatch("CDG", "canopy-data-gateway")).toEqual(
       fuzzyMatch("cdg", "canopy-data-gateway"),
     );
@@ -138,7 +123,6 @@ describe("what does not match", () => {
 
 describe("the positions the dropdown underlines", () => {
   it("are the characters the winning alignment used", () => {
-    // c·d·g on the three word boundaries of canopy-data-gateway.
     expect(fuzzyMatch("cdg", "canopy-data-gateway").positions).toEqual([0, 7, 12]);
   });
 
@@ -156,7 +140,6 @@ describe("the positions the dropdown underlines", () => {
         const match = fuzzyMatch(query, label);
         if (!match) continue;
         expect(match.positions).toHaveLength(query.length);
-        // In order, in range, and actually the characters typed.
         const chars = match.positions.map((p) => label[p].toLowerCase()).join("");
         expect(chars).toBe(query);
         for (let k = 1; k < match.positions.length; k++) {
@@ -176,10 +159,6 @@ describe("the shape rankMatches returns", () => {
   });
 });
 
-// The port is only worth having if it ranks the way fzf ranks. These are real
-// fzf answers, recorded by fzf-parity.gen.mjs so the suite doesn't need fzf
-// installed. Regenerate that file when tracking a new fzf release and read the
-// diff — a change here is a change in what the switcher puts under the cursor.
 describe(`parity with fzf ${parity.fzf}`, () => {
   for (const [query, expected] of Object.entries(parity.expected)) {
     it(`${JSON.stringify(query)} ranks the way fzf ranks it`, () => {

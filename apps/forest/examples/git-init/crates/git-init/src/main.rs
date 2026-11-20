@@ -1,8 +1,3 @@
-//! `forest-contrib/git-init@v0.1` — initialise a fresh git repository
-//! at `work_dir` with a configured author identity and an empty initial
-//! commit. Idempotent: if work_dir is already a git repo, leaves it
-//! alone and reports the current HEAD.
-
 #[allow(dead_code)]
 mod forestgen;
 
@@ -28,9 +23,6 @@ impl CommandHandler for Commands {
 
         let already = Path::new(work_dir).join(".git").exists();
         if already {
-            // Read back what's already there so the workflow author
-            // gets consistent outputs regardless of whether we
-            // initialised or no-op'd.
             let sha =
                 git_output(work_dir, &["rev-parse", "HEAD"]).unwrap_or_else(|_| String::new());
             let branch = git_output(work_dir, &["rev-parse", "--abbrev-ref", "HEAD"])

@@ -1,21 +1,3 @@
-//! Bootstrap for the `cue` CLI binary.
-//!
-//! Forest shells out to `cue` from many code paths. Rather than probing
-//! for `cue` at every command entry point (paid even on the happy path),
-//! we let the spawn happen normally and react only when `tokio::process`
-//! returns `ErrorKind::NotFound`. At that point — and only then — we
-//! decide what to do:
-//!
-//!   * macOS with `brew` on PATH and an interactive terminal → prompt to
-//!     `brew install cue`, then retry the spawn.
-//!   * macOS without brew, or non-interactive, or Linux → clean error
-//!     pointing at <https://cuelang.org/docs/install/>.
-//!
-//! The result of the first `NotFound` handling is memoised for the rest
-//! of the process, so concurrent or repeat call sites don't re-prompt.
-//!
-//! See `apps/forest/TASKS/022-cue-bootstrap.md` for the spec.
-
 use std::io::{IsTerminal, Write};
 
 use tokio::sync::OnceCell;
@@ -64,9 +46,6 @@ pub enum Action {
     Fail(InstallHint),
 }
 
-/// Pure decision function for the cue-missing case. `cue` is known to be
-/// absent at this point — we only choose between "prompt for brew" and
-/// "fail with a hint".
 pub fn classify(env: &Env, platform: Platform) -> Action {
     if platform != Platform::MacOs || !env.brew_on_path {
         return Action::Fail(InstallHint::Generic);
@@ -93,13 +72,6 @@ pub fn hint_message(hint: InstallHint) -> &'static str {
     }
 }
 
-/// Run a `cue` invocation. If the spawn fails with `NotFound`, trigger
-/// the bootstrap flow (prompt + brew install on macOS, clean error
-/// otherwise) and retry the spawn once.
-///
-/// The `build` closure is invoked at most twice: once for the initial
-/// attempt, once for the post-install retry. It must be a `Fn` (not
-/// `FnOnce`) so we can call it on retry.
 pub async fn output<F>(build: F) -> anyhow::Result<std::process::Output>
 where
     F: Fn() -> tokio::process::Command,
@@ -117,9 +89,6 @@ where
     }
 }
 
-/// Memoised bootstrap: prompt + `brew install cue` on macOS-with-brew-and-TTY,
-/// otherwise a clean error pointing at the cuelang install docs. Called
-/// only after a real `Command::new("cue")` spawn returned `NotFound`.
 async fn ensure_installed() -> anyhow::Result<()> {
     let result = ENSURED
         .get_or_init(|| async {
@@ -159,7 +128,6 @@ fn env_set(key: &str) -> bool {
 }
 
 async fn prompt_and_install_brew() -> anyhow::Result<()> {
-    // Render on stderr so stdout pipes stay clean.
     {
         let mut stderr = std::io::stderr().lock();
         let _ = writeln!(stderr, "cue is required but not installed.");
@@ -167,8 +135,6 @@ async fn prompt_and_install_brew() -> anyhow::Result<()> {
         let _ = stderr.flush();
     }
 
-    // `read_line` is blocking; bounce to a blocking thread so we don't
-    // pin a tokio worker while we wait for the user.
     let answer = tokio::task::spawn_blocking(read_yes_no_default_yes)
         .await
         .unwrap_or(false);
@@ -207,7 +173,7 @@ async fn prompt_and_install_brew() -> anyhow::Result<()> {
 fn read_yes_no_default_yes() -> bool {
     let mut line = String::new();
     match std::io::stdin().read_line(&mut line) {
-        Ok(0) => false, // EOF — treat as NO.
+        Ok(0) => false,
         Ok(_) => parse_yes_no_default_yes(&line),
         Err(_) => false,
     }

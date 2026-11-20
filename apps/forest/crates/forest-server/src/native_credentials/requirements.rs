@@ -2,8 +2,6 @@ use anyhow::bail;
 
 use crate::native_credentials::PasswordRequirement;
 
-// === Length (the most important one) ===
-
 pub struct MinLength(pub usize);
 
 impl PasswordRequirement for MinLength {
@@ -27,8 +25,6 @@ impl PasswordRequirement for MaxLength {
         }
     }
 }
-
-// === Character class requirements ===
 
 pub struct LowerCaseLetter;
 
@@ -79,8 +75,6 @@ impl PasswordRequirement for SpecialCharacter {
     }
 }
 
-// === Security requirements ===
-
 pub struct NoWhitespace;
 
 impl PasswordRequirement for NoWhitespace {
@@ -114,7 +108,6 @@ pub struct NotCommonPassword;
 
 impl PasswordRequirement for NotCommonPassword {
     fn fulfill_requirements(&self, input: &str) -> anyhow::Result<()> {
-        // In production, use a proper list (e.g., Have I Been Pwned's top 100k)
         const COMMON: &[&str] = &[
             "password", "123456", "12345678", "qwerty", "abc123", "monkey", "1234567", "letmein",
             "trustno1", "dragon", "baseball", "iloveyou", "master", "sunshine", "ashley",

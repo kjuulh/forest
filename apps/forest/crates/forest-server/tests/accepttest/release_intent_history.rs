@@ -1,20 +1,7 @@
-//! A project's release history must not be cut off at an arbitrary depth.
-//!
-//! forage rebuilds each release's destinations from these intents' steps
-//! (DATA-660). A release past the cap has none, falls back to the
-//! current-state-per-destination view, matches nothing, and renders as an
-//! undeployed commit with a blank swim lane — so the cap silently put a floor
-//! under how far the Releases timeline could go (DATA-662).
-//!
-//! Project-scoped lookups are therefore uncapped; org-wide ones, which span
-//! every project and are a recent-activity feed, stay capped.
-
 use forest_grpc_interface::GetReleaseIntentStatesRequest;
 
 use crate::accepttest::fixtures::{Fixture, fixture};
 
-/// Local copy: the identical helper in `authz_flow` is module-private, and the
-/// other flow modules each keep their own rather than widening it.
 fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     let mut req = tonic::Request::new(inner);
     let val: tonic::metadata::MetadataValue<_> =
@@ -23,8 +10,6 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
-/// More intents than the org-wide cap, so "all of them" and "the cap" are
-/// distinguishable in the assertions below.
 const SEEDED: usize = 60;
 const ORG_CAP: usize = 50;
 
@@ -57,9 +42,6 @@ async fn create_org(fixture: &Fixture, token: &str) -> String {
     name
 }
 
-/// Seed `SEEDED` completed intents for one project, straight into the tables.
-/// Going through the release API would mean 60 full release round-trips to
-/// exercise a read-path limit.
 async fn seed_intents(db: &sqlx::PgPool, org: &str) -> String {
     let project = format!("proj-{}", uuid::Uuid::now_v7());
     let project_id: uuid::Uuid = sqlx::query_scalar(
@@ -79,8 +61,6 @@ async fn seed_intents(db: &sqlx::PgPool, org: &str) -> String {
         .bind(uuid::Uuid::now_v7())
         .bind(uuid::Uuid::now_v7())
         .bind(project_id)
-        // Descending age, so `ORDER BY created DESC` has a stable order and a
-        // cap would drop the oldest — the ones a deep page needs.
         .bind((SEEDED - i) as f64)
         .execute(db)
         .await

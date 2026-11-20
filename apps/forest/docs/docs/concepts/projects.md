@@ -89,10 +89,12 @@ forest-contrib/kubernetes-service@0.1.2 linux/amd64 sha256:abc123...
 forest-contrib/terraform-service@0.1.0 path:../../components/forest-contrib/terraform-service
 ```
 
-- **Registry deps** are "hard-locked" — SHA verified on download
-- **Path deps** are "soft-locked" — always resolved from disk
+- **Registry binary deps** are "hard-locked": a binary dependency's sha256 for this platform is checked when downloaded, and a mismatch fails instead of being re-pinned. Since v0.3.17, forest also checks the resolved cached binary digest against the project lock before loading commands.
+- **Path deps** are "soft-locked": always resolved from disk.
 
-Run `forest update` to refresh the lock file.
+Since **v0.3.17**, a version range in `forest.cue` (`"0.1"`, `"1"`, `"latest"`) resolves to a matching binary version lock when present, otherwise to the newest published stable match (a prerelease only if no stable version matches). Binary selections are locked when resolved; `forest update` moves a binary lock to the newest match. Released v0.3.16 cannot load these ranges at runtime; use exact published dependency versions there.
+
+Lock-first selection only applies when a registry binary lock entry exists. File/template-only components have no version/digest lock entry and their ranges resolve again; choose exact versions for reproducible selection. Binary digest checks do not establish integrity of component files.
 
 ## CLI Commands
 

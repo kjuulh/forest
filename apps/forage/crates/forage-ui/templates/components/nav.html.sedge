@@ -1,0 +1,51 @@
+use crate::{Crumb, NavItem};
+use crate::components::Icon;
+component Breadcrumbs(crumbs: &[Crumb], truncate_last: bool = false) {
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+  {for (i, c) in crumbs.iter().enumerate() {
+    {if i > 0 { <span class="text-gray-300" aria-hidden="true">›</span> }}
+    {if let Some(href) = &c.href {
+      <a href={href} class="hover:text-gray-900 hover:underline">{c.label}</a>
+    } else {
+      <span class={if *truncate_last { "text-gray-900 truncate" } else { "text-gray-900" }}>{c.label}</span>
+    }}
+  }}
+</nav>
+}
+component BackLink(href: &str, label: &str) {
+<a href={href} class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+  <Icon name="arrow-left" class="w-4 h-4" />
+  Back to {label}
+</a>
+}
+component SideNav(items: &[NavItem], label: &str) {
+<nav class="w-48 shrink-0 hidden md:block" aria-label={label}>
+  <ul class="space-y-0.5">
+    {for item in items.iter() {
+      <li><a href={item.href} aria-current={if item.current { Some("page") } else { None }} class={if item.current { "block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium" } else { "block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50" }}>{item.label}</a></li>
+    }}
+  </ul>
+</nav>
+}
+component PillNav(items: &[NavItem], label: &str) {
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label={label}>
+  <ul class="flex gap-1.5 w-max">
+    {for item in items.iter() {
+      <li><a href={item.href} aria-current={if item.current { Some("page") } else { None }} class={if item.current { "block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium" } else { "block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50" }}>{item.label}</a></li>
+    }}
+  </ul>
+</nav>
+}
+component Tabs(items: &[NavItem]) {
+<div class="flex gap-1 -mb-px overflow-x-auto scrollbar-none">
+  {for item in items.iter() {
+    <a href={item.href} aria-current={if item.current { Some("page") } else { None }} class={if item.current { "whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300 text-gray-900 border-gray-900" } else { "whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300" }}>{item.label}</a>
+  }}
+</div>
+}
+component IconLink(href: &str, icon: &str, children: Html) {
+<a href={href} class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+  <Icon name={icon} class="w-4 h-4" />
+  {children}
+</a>
+}

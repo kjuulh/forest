@@ -1,103 +1,90 @@
 # Policies
 
-Policies are guardrails that gate releases to specific environments. They enforce rules like soak times, branch restrictions, and approval requirements before a release is allowed to proceed.
+Policies are guardrails on releases to an environment. The server enforces them on every path that can deploy there: an explicit release by environment or by destination, a trigger, and each stage of a pipeline.
 
-## Policy Types
+**Version boundary:** the enforcement below is in server source since **v0.3.17**. Released v0.3.16 checks branch restrictions only for environment-targeted direct releases, not destination-only releases or pipeline stages; its scheduler counts any artifact's success for soak, pipeline soak includes plans, missing source success passes, and policy-evaluation errors can be treated as no policies. Updating the CLI alone does not update the server. Confirm the server revision and independently review branch and same-artifact source exposure before approval.
 
-### Soak Time
+## Policy types
 
-Requires that a release has been successfully deployed to a **source environment** for a minimum duration before it can be released to the **target environment**.
+### Soak time
 
-```bash
-forest project policy create staging-soak \
-  --organisation my-org \
-  --project my-service \
-  --type soak_time \
-  --source-environment staging \
-  --target-environment prod \
-  --duration 7200  # 2 hours in seconds
-```
-
-This means: "Before releasing to `prod`, the same artifact must have been running in `staging` for at least 2 hours."
-
-The soak time check queries the `release_states` table for the last successful deployment to the source environment and compares the elapsed time.
-
-### Branch Restriction
-
-Restricts which branches can be released to a target environment:
+The **same artifact** must have been successfully deployed to a source environment for at least a duration before it can be deployed to the target environment.
 
 ```bash
-forest project policy create prod-branch \
-  --organisation my-org \
-  --project my-service \
-  --type branch_restriction \
-  --target-environment prod \
-  --branch "^main$"
+forest project policy create -o my-org -p my-service \
+  --name staging-soak --type soak_time \
+  --source-environment staging --target-environment prod \
+  --duration 7200
 ```
 
-This means: "Only releases from the `main` branch can go to `prod`."
+- Only a successful **deploy** of that artifact to the source environment counts. A successful plan does not, and neither does another artifact's deploy.
+- An artifact never deployed to the source environment has not soaked, so a release of it to the target waits.
+- A direct release waits as `QUEUED` and is dispatched once the soak is met. A pipeline stage waits and is re-checked.
+- After **v0.3.16**, release status includes the live artifact-specific soak reason for queued steps and ready pending plan/deploy stages, including the missing source environment and required duration. `forest release show <slug>` labels it `blocked:`; a queued prerequisite is not a terminal failure.
+- Reasons are derived on each status read, not persisted as execution errors. A successful plan or another artifact's deploy cannot clear this artifact's blocker. Policy changes, assignment and same-artifact successful deploys are reflected on the next read; if evaluation fails, status says policies could not be evaluated rather than implying approval.
+- After **v0.3.16**, `release show --follow` refreshes terminal status before rendering its final body, so the original queued blocker is not left on a completed release. An interrupted or prematurely ended follower exits nonzero rather than implying deployment success.
 
-Branch restrictions are enforced at the gRPC layer — the release is rejected immediately if the branch doesn't match.
+### Branch restriction
 
-### External Approval
-
-Requires a minimum number of approvals from external systems before a release can proceed:
+Only artifacts annotated from a matching branch can be released to an environment with a branch restriction:
 
 ```bash
-forest project policy create prod-approval \
-  --organisation my-org \
-  --project my-service \
-  --type external_approval \
-  --target-environment prod \
-  --required-approvals 2
+forest project policy create -o my-org -p my-service \
+  --name prod-main-only --type branch_restriction \
+  --target-environment prod --branch-pattern '^main$'
 ```
 
-External systems approve or reject via the gRPC API:
+- The pattern is a regex tested **unanchored**, so anchor it.
+- An explicit release (`-e prod` or `-d <a prod destination>`) of a disallowed branch is refused immediately with `blocked by policy '<name>': …`.
+- A pipeline plan or deploy stage for that environment **fails** with the same reason, before any plan is offered for approval, and the stages after it are cancelled.
+- Queued work rechecks the stored annotation branch against current policies before assignment. If a policy changed to disallow it, that release fails with the same reason; a prior admission or plan approval is not a dispatch exemption.
+- After **v0.3.16**, an applicable restriction denies absent, empty or whitespace-only branch metadata, including with a permissive regex. Older servers skipped the restriction when no branch was recorded. The server does not infer a checkout/default branch or rewrite historical annotations. Projects without an applicable branch restriction are unchanged.
 
-```
-ExternalApproveRelease { intent_id, approver }
-ExternalRejectRelease { intent_id, reason }
-```
+### Supersede pending
 
-## Evaluation
-
-You can dry-run policy evaluation without creating a release:
+Older releases still queued for an environment collapse to the newest. After v0.3.18 (server-side), queued plan steps collapse only against other queued plans and queued deploys only against other deploys, so a plan held behind another release's apply is never superseded by that release's deploy:
 
 ```bash
-forest project policy evaluate \
-  --organisation my-org \
-  --project my-service \
-  --environment prod
+forest project policy create -o my-org -p my-service \
+  --name collapse-prod --type supersede_pending \
+  --target-environment prod [--same-branch-only]
 ```
 
-This returns per-policy pass/fail results with human-readable reasons:
+### Approval
 
-```
-soak_time (staging-soak): PASS — deployed to staging 3h ago (required: 2h)
-branch_restriction (prod-branch): PASS — branch "main" matches "^main$"
-external_approval (prod-approval): FAIL — 1/2 approvals received
-```
+The server also has an approval policy, which gates pipeline stages until enough approvals are recorded. The CLI cannot create one. Plan stages with `auto_approve: false` are the CLI-managed approval gate ([pipelines](pipelines.md)).
 
-## Enforcement Points
-
-Different policy types are enforced at different points:
-
-| Policy | Enforced At |
-|--------|------------|
-| Branch restriction | gRPC `release()` handler — immediate rejection |
-| Soak time | IntentCoordinator — deferred, re-evaluated periodically |
-| External approval | IntentCoordinator — waits for approval signals |
-
-## CLI Commands
+## Evaluating before you release
 
 ```bash
-forest project policy create <name> --type <type> [options]
-forest project policy list --organisation my-org --project my-service
-forest project policy update <name> [options]
-forest project policy delete <name>
-forest project policy evaluate --organisation my-org --project my-service --environment prod
+forest project policy evaluate -o my-org -p my-service \
+  --target-environment prod --branch main
 ```
 
-## Interaction with Triggers
+```text
+[PASS] prod-main-only (branch_restriction)
+       branch 'main' matches pattern '^main$'
+[FAIL] staging-soak (soak_time)
+       soak time not met: 5400s remaining (1800s since any artifact deployed to staging, 7200s required)
+Some policies FAILED for 'prod' — deployment would be blocked
+```
 
-Triggers create releases, but policies still apply. A triggered release to `prod` will be blocked by a soak time policy if the staging deployment is too recent — unless the trigger has `force_release` enabled.
+This command has no artifact selector: soak is reported against the most recent successful deploy of **any artifact**. It is a partial diagnostic, not release approval: a PASS does not prove the selected artifact has soaked, and an unrelated newer deploy can produce a FAIL. A release checks the artifact actually being released. The command exits 0 whether or not a policy fails, so it is not a CI gate.
+
+## Force
+
+`--force` on a release or trigger only cancels queued releases for the same destinations. It never bypasses a policy.
+
+## If a policy can't be evaluated
+
+When the server cannot evaluate policies, for example on a database error, it fails closed. An explicit release is refused, a trigger does not fire, and a queued release stays queued.
+
+## CLI commands
+
+```bash
+forest project policy create   -o <org> -p <project> --name <name> --type <type> [options]
+forest project policy list     -o <org> -p <project>
+forest project policy update   -o <org> -p <project> --name <name> [options]
+forest project policy delete   -o <org> -p <project> --name <name>
+forest project policy evaluate -o <org> -p <project> --target-environment <env> [--branch <b>]
+```

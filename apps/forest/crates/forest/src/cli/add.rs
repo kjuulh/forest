@@ -23,7 +23,6 @@ pub struct AddCommand {
 
 impl AddCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // Parse component reference: "org/name" or "org/name@version"
         let (org_name, explicit_version) =
             if let Some((name, version)) = self.component.split_once('@') {
                 (name.to_string(), Some(version.to_string()))
@@ -37,15 +36,12 @@ impl AddCommand {
             )
         })?;
 
-        // Determine the dependency value
         let dep_value = if let Some(path) = &self.path {
             format!("path: \"{}\"", path)
         } else {
-            // Resolve version from registry if not specified
             let version = if let Some(v) = explicit_version {
                 v
             } else {
-                // Fetch latest version from registry
                 let client = state.grpc_client();
                 let component = client
                     .get_component(name, organisation)
@@ -59,11 +55,9 @@ impl AddCommand {
             format!("version: \"{}\"", version)
         };
 
-        // Find and update forest.cue
         let forest_cue = find_forest_cue().await?;
         let content = tokio::fs::read_to_string(&forest_cue).await?;
 
-        // Check if dependency already exists
         let dep_key = format!("\"{organisation}/{name}\"");
         if content.contains(&dep_key) {
             anyhow::bail!(
@@ -72,18 +66,15 @@ impl AddCommand {
             );
         }
 
-        // Insert into the dependencies block
         let new_content = insert_dependency(&content, &dep_key, &dep_value)?;
 
         tokio::fs::write(&forest_cue, &new_content).await?;
 
-        // Set up cue.mod/ if it doesn't exist (enables CUE module imports)
         let project_dir = forest_cue.parent().unwrap_or(std::path::Path::new("."));
         let cue_mod_dir = project_dir.join("cue.mod");
         let module_cue = cue_mod_dir.join("module.cue");
 
         if !module_cue.exists() {
-            // Read project name from forest.cue for the module path
             let project_name =
                 extract_project_name(&new_content).unwrap_or_else(|| "my-project".to_string());
             let project_org =
@@ -100,7 +91,6 @@ impl AddCommand {
             eprintln!("Created cue.mod/module.cue");
         }
 
-        // Add the CUE module dependency to cue.mod/module.cue
         if !self.path.is_some() {
             let version = dep_value
                 .strip_prefix("version: \"")
@@ -140,7 +130,6 @@ impl AddCommand {
     }
 }
 
-/// Find forest.cue in the current directory or parents.
 async fn find_forest_cue() -> anyhow::Result<std::path::PathBuf> {
     let mut dir = std::env::current_dir()?;
     loop {
@@ -161,19 +150,12 @@ async fn find_forest_cue() -> anyhow::Result<std::path::PathBuf> {
     }
 }
 
-/// Insert a dependency into the CUE dependencies block.
 fn insert_dependency(content: &str, dep_key: &str, dep_value: &str) -> anyhow::Result<String> {
-    // Strategy: find `dependencies: {` and insert before its closing `}`
-    // This is simple text manipulation — works for the common CUE format.
-
-    // Look for the dependencies block
     if let Some(deps_start) = content.find("dependencies:") {
-        // Find the opening brace
         let after_deps = &content[deps_start..];
         if let Some(brace_offset) = after_deps.find('{') {
             let block_start = deps_start + brace_offset;
 
-            // Find the matching closing brace (simple: count braces)
             let mut depth = 0;
             let mut block_end = None;
             for (i, ch) in content[block_start..].char_indices() {
@@ -191,7 +173,6 @@ fn insert_dependency(content: &str, dep_key: &str, dep_value: &str) -> anyhow::R
             }
 
             if let Some(end) = block_end {
-                // Insert before the closing brace, with proper indentation
                 let new_dep = format!("\t{dep_key}: {dep_value}\n");
                 let mut result = String::with_capacity(content.len() + new_dep.len());
                 result.push_str(&content[..end]);
@@ -202,12 +183,10 @@ fn insert_dependency(content: &str, dep_key: &str, dep_value: &str) -> anyhow::R
         }
     }
 
-    // No dependencies block found — append one
     let dep_block = format!("\ndependencies: {{\n\t{dep_key}: {dep_value}\n}}\n");
     Ok(format!("{content}{dep_block}"))
 }
 
-/// Extract project name from forest.cue content.
 fn extract_project_name(content: &str) -> Option<String> {
     for line in content.lines() {
         let line = line.trim();
@@ -220,7 +199,6 @@ fn extract_project_name(content: &str) -> Option<String> {
     None
 }
 
-/// Extract project organisation from forest.cue content.
 fn extract_project_org(content: &str) -> Option<String> {
     for line in content.lines() {
         let line = line.trim();
@@ -233,9 +211,7 @@ fn extract_project_org(content: &str) -> Option<String> {
     None
 }
 
-/// Insert a CUE module dependency into cue.mod/module.cue.
 fn insert_cue_dep(content: &str, dep_key: &str, version: &str) -> anyhow::Result<String> {
-    // Find `deps: {` and insert before its closing `}`
     if let Some(deps_start) = content.find("deps:") {
         let after = &content[deps_start..];
         if let Some(brace_offset) = after.find('{') {

@@ -1,11 +1,3 @@
-//! Tool / shim name validation.
-//!
-//! Pure module — no I/O. Implements the regex `^[a-zA-Z][a-zA-Z0-9._-]{0,63}$`
-//! from TASKS/018-global-tools.md §1a.1, with the additional defence-in-depth
-//! rejection of literal `..` substrings (§1a.2 rule 3).
-
-/// Reasons a name can fail validation. Each variant is a single concrete defect
-/// so error messages can identify exactly what's wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NameError {
     Empty,
@@ -15,16 +7,8 @@ pub enum NameError {
     ContainsDotDot,
 }
 
-/// Maximum allowed name length (excluding the leading character, per the regex).
 pub const MAX_NAME_LEN: usize = 64;
 
-/// Validate a tool / shim name against the rules in §1a.1 + §1a.2 rule 3.
-///
-/// Accepts iff:
-///   - Length is in [1, 64].
-///   - First char is `[a-zA-Z]`.
-///   - Every subsequent char is `[a-zA-Z0-9._-]`.
-///   - Does NOT contain the literal substring `..`.
 pub fn validate_tool_name(name: &str) -> Result<(), NameError> {
     if name.is_empty() {
         return Err(NameError::Empty);
@@ -55,15 +39,6 @@ pub fn validate_tool_name(name: &str) -> Result<(), NameError> {
     Ok(())
 }
 
-// --- Environment variable names / values ------------------------------------
-//
-// Default env vars shipped in a component's `include` block (TASKS/023). The
-// name rule is the conventional POSIX env-name regex `^[A-Za-z_][A-Za-z0-9_]*$`;
-// values may contain anything except a NUL byte (the one byte `Command::env`
-// cannot carry on Unix). These are the single source of truth — the manifest
-// parser and the user-config parser both call them.
-
-/// Reasons an env-var name can fail validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvNameError {
     Empty,
@@ -71,13 +46,11 @@ pub enum EnvNameError {
     BadChar { ch: char, position: usize },
 }
 
-/// Reasons an env-var value can fail validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvValueError {
     ContainsNul { position: usize },
 }
 
-/// Validate an env-var name against `^[A-Za-z_][A-Za-z0-9_]*$`.
 pub fn validate_env_name(name: &str) -> Result<(), EnvNameError> {
     let mut chars = name.chars().enumerate();
     let (_, first) = chars.next().ok_or(EnvNameError::Empty)?;
@@ -92,7 +65,6 @@ pub fn validate_env_name(name: &str) -> Result<(), EnvNameError> {
     Ok(())
 }
 
-/// Validate an env-var value: anything but a NUL byte is allowed.
 pub fn validate_env_value(value: &str) -> Result<(), EnvValueError> {
     match value.find('\0') {
         Some(position) => Err(EnvValueError::ContainsNul { position }),
@@ -104,8 +76,6 @@ pub fn validate_env_value(value: &str) -> Result<(), EnvValueError> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
-
-    // --- Happy path ---
 
     #[test]
     fn accepts_simple_lowercase() {
@@ -130,13 +100,10 @@ mod tests {
 
     #[test]
     fn accepts_max_length_name() {
-        // 64 chars: one letter + 63 of the tail alphabet.
         let name = format!("a{}", "x".repeat(63));
         assert_eq!(name.len(), 64);
         validate_tool_name(&name).unwrap();
     }
-
-    // --- Rejections ---
 
     #[test]
     fn rejects_empty() {
@@ -145,7 +112,6 @@ mod tests {
 
     #[test]
     fn rejects_too_long() {
-        // 65 chars.
         let name = format!("a{}", "x".repeat(64));
         assert_eq!(name.len(), 65);
         let err = validate_tool_name(&name).unwrap_err();
@@ -163,7 +129,6 @@ mod tests {
 
     #[test]
     fn rejects_leading_hyphen() {
-        // §1a.10 E9 — defends against argv parsing as a flag.
         let err = validate_tool_name("-tool").unwrap_err();
         assert_eq!(err, NameError::BadFirstChar { ch: '-' });
     }
@@ -182,7 +147,6 @@ mod tests {
 
     #[test]
     fn rejects_slash() {
-        // §1a.10 E9 — path separator.
         let err = validate_tool_name("ab/cd").unwrap_err();
         assert_eq!(
             err,
@@ -232,15 +196,11 @@ mod tests {
     #[test]
     fn rejects_unicode_outside_ascii_alnum_set() {
         let err = validate_tool_name("toolé").unwrap_err();
-        // Position 4 is the byte index of `é`'s first byte; we report char
-        // position. Tighten this once the implementation is precise.
         assert!(matches!(err, NameError::BadChar { ch: 'é', .. }));
     }
 
     #[test]
     fn rejects_double_dot_substring() {
-        // §1a.2 rule 3: `..` is rejected as a literal substring even if every
-        // single character is otherwise valid.
         let err = validate_tool_name("a..b").unwrap_err();
         assert_eq!(err, NameError::ContainsDotDot);
     }
@@ -251,15 +211,9 @@ mod tests {
         assert_eq!(err, NameError::ContainsDotDot);
     }
 
-    // --- Property tests ---
-
     proptest! {
-        /// Every accepted name must round-trip through the regex.
         #[test]
         fn accepted_names_match_regex(s in r"[a-zA-Z][a-zA-Z0-9._-]{0,63}") {
-            // The proptest regex includes `..` patterns; we only assert
-            // that names *without* `..` are accepted, and names *with* `..`
-            // are rejected. This separates the two rules cleanly.
             if !s.contains("..") {
                 prop_assert!(validate_tool_name(&s).is_ok(), "expected accept for {s:?}");
             } else {
@@ -267,7 +221,6 @@ mod tests {
             }
         }
 
-        /// Any name longer than 64 chars must be rejected with `TooLong`.
         #[test]
         fn rejects_anything_too_long(s in r"[a-zA-Z][a-zA-Z0-9._-]{64,128}") {
             let err = validate_tool_name(&s);
@@ -275,8 +228,6 @@ mod tests {
             prop_assert!(is_too_long);
         }
 
-        /// Any name whose first byte is outside `[a-zA-Z]` must be rejected
-        /// with `BadFirstChar` (or `Empty` if length 0).
         #[test]
         fn rejects_bad_first_char(s in r"[0-9_.\-][a-zA-Z0-9._-]{0,10}") {
             let err = validate_tool_name(&s).unwrap_err();
@@ -287,8 +238,6 @@ mod tests {
             prop_assert!(ok_variant, "got {:?} for {:?}", err, s);
         }
     }
-
-    // --- Env name / value validation ---
 
     #[test]
     fn env_name_accepts_conventional_names() {
@@ -346,13 +295,11 @@ mod tests {
     }
 
     proptest! {
-        /// Names matching the POSIX regex are always accepted.
         #[test]
         fn env_name_accepts_regex(s in r"[A-Za-z_][A-Za-z0-9_]{0,32}") {
             prop_assert!(validate_env_name(&s).is_ok(), "expected accept for {s:?}");
         }
 
-        /// Any string free of NUL is a valid value.
         #[test]
         fn env_value_accepts_non_nul(s in r"[^\x00]{0,64}") {
             prop_assert!(validate_env_value(&s).is_ok());

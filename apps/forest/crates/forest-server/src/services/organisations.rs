@@ -25,7 +25,6 @@ impl OrganisationService {
 
         let org = self.repo.create_organisation(self.db(), id, name).await?;
 
-        // Add the creator as an admin member automatically
         self.repo
             .add_member(self.db(), org.id, creator_id, "admin")
             .await?;
@@ -88,8 +87,6 @@ impl OrganisationService {
         })
     }
 
-    // -- Member management --------------------------------------------------------
-
     async fn require_admin(&self, organisation_id: Uuid, requester_id: Uuid) -> anyhow::Result<()> {
         let member = self
             .repo
@@ -104,12 +101,6 @@ impl OrganisationService {
         Ok(())
     }
 
-    /// Typed variant of [`require_admin`] used by the allowed-domain paths
-    /// so the gRPC layer can map "not a member" / "not an admin" to
-    /// PermissionDenied instead of the generic Internal that
-    /// `anyhow::Error` collapses to. The standalone gRPC `require_org_access_by_id`
-    /// fires first in normal flow; this is the service-side belt that
-    /// keeps the right status if the gRPC gate is ever bypassed.
     async fn require_admin_typed(
         &self,
         organisation_id: Uuid,
@@ -219,8 +210,6 @@ impl OrganisationService {
             .collect())
     }
 
-    // -- Allowed-domain auto-invite (DATA-252) --------------------------------
-
     pub async fn add_allowed_domain(
         &self,
         organisation_id: Uuid,
@@ -228,8 +217,6 @@ impl OrganisationService {
         policy: AllowedDomainPolicy,
         requester_id: Uuid,
     ) -> Result<AllowedDomainInfo, AllowedDomainServiceError> {
-        // v1: schema supports it, runtime doesn't. Reject explicitly so an
-        // admin can't enable silent JIT on an unverified domain claim.
         if policy == AllowedDomainPolicy::AutoJoinOauth {
             return Err(AllowedDomainServiceError::PolicyNotYetSupported);
         }
@@ -289,7 +276,6 @@ impl OrganisationService {
         self.require_admin_typed(organisation_id, requester_id)
             .await?;
 
-        // Normalize so "@Understory.IO" matches what's stored.
         let canonical = domain_policy::normalize_domain(raw_domain)?;
 
         let removed = self
@@ -309,14 +295,6 @@ impl OrganisationService {
         Ok(removed)
     }
 
-    /// Look up the allowed-domain row's verification token, query DNS for
-    /// `_forest-verify.<domain>` TXT, and flip `dns_verified_at` if any
-    /// returned record matches the token verbatim.
-    ///
-    /// Admin-gated. Returns `Ok(true)` when the row is verified after the
-    /// call (either freshly or already-verified), `Ok(false)` when the
-    /// expected TXT is absent. Network/DNS errors map to
-    /// `VerifyAllowedDomainError::DnsLookup`.
     pub async fn verify_allowed_domain(
         &self,
         organisation_id: Uuid,
@@ -338,7 +316,6 @@ impl OrganisationService {
             .map_err(VerifyAllowedDomainError::Other)?
             .ok_or(VerifyAllowedDomainError::NotFound)?;
 
-        // Already verified: no need to re-query DNS. Idempotent success.
         if row.dns_verified_at.is_some() {
             return Ok(VerifyAllowedDomainOutcome::AlreadyVerified);
         }
@@ -389,10 +366,6 @@ impl OrganisationService {
             .collect())
     }
 
-    /// Add the user as a `'member'` of the org *iff* they currently have a
-    /// verified email at one of the org's allowed domains. The eligibility
-    /// check is run inside the same transaction as the insert so a domain
-    /// removed concurrently can't be raced.
     pub async fn accept_join_offer(
         &self,
         user_id: Uuid,
@@ -471,8 +444,6 @@ impl OrganisationService {
         })
     }
 }
-
-// -- Return types -------------------------------------------------------------
 
 pub struct CreatedOrganisation {
     pub organisation_id: Uuid,
@@ -574,12 +545,8 @@ impl From<PolicyParseError> for AllowedDomainServiceError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyAllowedDomainOutcome {
-    /// First-time verification succeeded — `dns_verified_at` was set.
     Verified,
-    /// The row was already verified before this call. No-op success.
     AlreadyVerified,
-    /// DNS lookup succeeded but no TXT record matched the expected token.
-    /// The admin needs to add `_forest-verify.<domain>` with the token.
     Missing,
 }
 
@@ -631,9 +598,6 @@ fn row_to_allowed_domain_info(
     }
 }
 
-/// 32 bytes of randomness, base64-url-safe-no-pad → 43-char token.
-/// Stored alongside the domain row; surfaced to admins for v1.1 DNS TXT
-/// verification. v1 generates and stores but doesn't validate.
 fn generate_dns_verification_token() -> String {
     let mut buf = [0u8; 32];
     rand::fill(&mut buf[..]);
@@ -646,8 +610,6 @@ fn validate_role(role: &str) -> anyhow::Result<()> {
         _ => anyhow::bail!("invalid role: {role}, must be 'admin' or 'member'"),
     }
 }
-
-// -- State trait --------------------------------------------------------------
 
 pub trait OrganisationServiceState {
     fn organisation_service(&self) -> OrganisationService;

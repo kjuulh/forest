@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE forest_replicas\n            SET stopped_at = now(), last_seen_at = now()\n            WHERE name = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6fcadd32ba65ea289564f72cfe2d846bcf800635aac4c0c59600f46abcc39b59"
+}

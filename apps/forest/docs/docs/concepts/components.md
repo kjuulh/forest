@@ -173,6 +173,28 @@ templates/
 
 Forest renders these with the project's spec values and copies them to the working directory.
 
+## Sharing
+
+A component is private to its organisation until an admin of that organisation makes it public:
+
+```bash
+forest components visibility <org>/<name> public
+```
+
+Anyone signed in can then depend on it and download it, and anyone, even without signing in, can see it (readme, versions, manifest) on the public registry pages. It is read-only to them: publishing still needs membership, and changing visibility needs a human admin of the organisation (app tokens are refused). `private` reverses it.
+
+An admin can make a whole organisation public instead, for one whose every component is meant to be shared:
+
+```bash
+forest organisation visibility <org> public
+```
+
+That opens all its components, current and future, to reads, and nothing else about the organisation: projects, releases, destinations and members stay members-only.
+
+Both settings are also in Forage, under the organisation's **Settings → Visibility** and each project's **Settings → Visibility**. A component is public when its own setting or its organisation's is, so a component set to private is still public while its organisation is.
+
+Visibility governs the registry API. The CUE module registry that `cue` imports component packages from serves their CUE files without authentication, so never put secrets in a component's CUE.
+
 ## Lifecycle
 
 1. **Author** — Define the component contract and implementation.

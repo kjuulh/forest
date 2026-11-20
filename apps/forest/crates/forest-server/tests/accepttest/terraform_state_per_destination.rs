@@ -1,6 +1,3 @@
-//! Terraform state ids per destination, without moving any existing state and
-//! without leaving an older server blind (understory-io/forest#285).
-
 use forest_grpc_interface::*;
 use forest_server::destinations::terraformv1::{TerraformStateStore, TerraformStateStoreState};
 use tonic::metadata::MetadataValue;
@@ -14,8 +11,6 @@ fn authed<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
-/// An org and an environment with real terraform destinations in it, so the
-/// prior-release check has rows to join against.
 struct World {
     org: String,
     env: String,
@@ -99,8 +94,6 @@ impl World {
     }
 }
 
-/// A release of `project` to `destination` that finished an hour ago — what a
-/// destination sharing a legacy state before #285 has in its history.
 async fn completed_release_an_hour_ago(f: &Fixture, org: &str, destination: &str, project: &str) {
     let destination_id: uuid::Uuid =
         sqlx::query_scalar("SELECT id FROM destinations WHERE organisation = $1 AND name = $2")
@@ -135,8 +128,6 @@ async fn completed_release_an_hour_ago(f: &Fixture, org: &str, destination: &str
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_with_one_destination_keeps_the_legacy_id() {
-    // Every project today, and every new one with one terraform destination
-    // per environment: `<env>.<project>`, which an older server also reads.
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     let dest = w.destination(&f, "tf-only").await;
@@ -153,8 +144,6 @@ async fn a_project_with_one_destination_keeps_the_legacy_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_existing_state_keeps_its_id() {
-    // tailscale, hetzner, screen, fungus: applied under `<env>.<project>`
-    // before this change, with no binding yet.
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     let dest = w.destination(&f, "hetzner-dev").await;
@@ -194,16 +183,12 @@ async fn a_second_destination_gets_its_own_state_and_the_first_keeps_legacy() {
         TerraformStateStore::destination_state_id(&w.env, &project, "dev/eu-west-1/second")
     );
 
-    // Stable, whichever order they run in from now on.
     assert_eq!(store.resolve_state_id(&second, &project).await.unwrap(), b);
     assert_eq!(store.resolve_state_id(&first, &project).await.unwrap(), a);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_destination_that_shared_the_legacy_state_is_refused_a_fresh_one() {
-    // Before #285 both destinations wrote to `<env>.<project>`. The first to
-    // run after the change claims it; the other must not get an empty state
-    // that would plan to re-create everything it already made.
     let f = fixture().await.unwrap();
     let w = world(&f).await;
     let first = w.destination(&f, "dev/eu-west-1/first").await;
@@ -225,7 +210,6 @@ async fn a_destination_that_shared_the_legacy_state_is_refused_a_fresh_one() {
     );
     assert!(err.contains("dev/eu-west-1/first"), "{err}");
 
-    // The owner is unaffected.
     assert_eq!(
         store.resolve_state_id(&first, &project).await.unwrap(),
         TerraformStateStore::legacy_state_id(&w.env, &project)

@@ -9,6 +9,36 @@ use crate::{
 
 pub mod models;
 
+const NON_COMPONENT_DIRS: [&str; 2] = ["bin", "include"];
+
+fn apply_cache_identity(
+    component: &mut CacheComponent,
+    organisation: &str,
+    name: &str,
+    version_dir: &str,
+) {
+    match semver::Version::parse(version_dir) {
+        Ok(version) => {
+            if version != component.version {
+                tracing::debug!(
+                    %organisation,
+                    %name,
+                    cached = %version,
+                    manifest = %component.version,
+                    "cached component manifest names another version; using the registry version",
+                );
+            }
+            component.organisation = organisation.to_string();
+            component.name = name.to_string();
+            component.version = version;
+        }
+        Err(e) => {
+            tracing::warn!(%organisation, %name, %version_dir, "cache directory is not a version: {e}");
+        }
+    }
+    component.source = models::CacheComponentSource::Versioned(component.version.clone());
+}
+
 use anyhow::Context;
 
 #[derive(Clone)]
@@ -24,10 +54,6 @@ impl ComponentCache {
         Ok(cache.join("components"))
     }
 
-    /// Resolve the cache directory for a (org, name, version) tuple.
-    /// Used by `release prepare` to find a versioned dependency's
-    /// downloaded files (templates, schemas, …) when reading the
-    /// component as a path-like source.
     pub async fn versioned_component_dir(
         &self,
         organisation: &str,
@@ -48,7 +74,6 @@ impl ComponentCache {
             .await
             .context("failed to get cache")?;
 
-        // cache is [organisation]/[name]/[version]/[component...]
         if !component_cache_path.exists() {
             tracing::debug!("found no local cache, skipping");
             return Ok(CacheComponents::default());
@@ -65,8 +90,9 @@ impl ComponentCache {
             .await
             .context("read organisations entry")?
         {
-            // Skip the content-addressable binary cache directory
-            if organisation_entry.file_name() == "bin" {
+            if NON_COMPONENT_DIRS
+                .contains(&organisation_entry.file_name().to_string_lossy().as_ref())
+            {
                 continue;
             }
             let mut name_entries = tokio::fs::read_dir(organisation_entry.path())
@@ -96,24 +122,11 @@ impl ComponentCache {
                         name_entry.path().to_string_lossy()
                     ))?
                 {
-                    // One unparseable component in the cache must not take the
-                    // scan down with it. The cache holds everything ever pulled
-                    // on this machine, most of which a given project does not
-                    // depend on — so a single bad entry would otherwise make
-                    // every project unloadable, with an error naming a component
-                    // the project has never heard of.
-                    //
-                    // Not hypothetical: every CUE component published before the
-                    // cue.mod fix is missing its module file and fails to parse,
-                    // so one stale entry bricked unrelated projects.
-                    //
-                    // A project that actually depends on the bad component still
-                    // fails, later, where the error can name the dependency.
                     let mut component =
                         match self.get_component_from_path(&version_entry.path()).await {
                             Ok(component) => component,
                             Err(e) => {
-                                tracing::warn!(
+                                tracing::debug!(
                                     path = %version_entry.path().to_string_lossy(),
                                     "skipping unparseable component in cache: {e:#}",
                                 );
@@ -121,8 +134,12 @@ impl ComponentCache {
                             }
                         };
 
-                    component.source =
-                        models::CacheComponentSource::Versioned(component.version.clone());
+                    apply_cache_identity(
+                        &mut component,
+                        &organisation_entry.file_name().to_string_lossy(),
+                        &name_entry.file_name().to_string_lossy(),
+                        &version_entry.file_name().to_string_lossy(),
+                    );
 
                     components.push(component);
                 }
@@ -164,10 +181,6 @@ impl ComponentCache {
         file_path: &str,
         file_content: &[u8],
     ) -> anyhow::Result<()> {
-        // Path-traversal refusal: the publisher controls `file_path`,
-        // and a malicious or buggy publisher must not be able to write
-        // outside the per-component cache dir. Reject `..`, absolute,
-        // or empty rel_paths before joining.
         if file_path.is_empty()
             || file_path.starts_with('/')
             || file_path.starts_with('\\')
@@ -196,11 +209,6 @@ impl ComponentCache {
         }
 
         tracing::trace!("writing component file: {}", dest.display());
-        // Truncating write — re-downloads overwrite. The cache is
-        // content-addressed by (org, name, version); if the version
-        // is the same, the bytes should be the same (immutable
-        // versions). This makes interrupted-then-retried downloads
-        // converge.
         tokio::fs::write(&dest, file_content)
             .await
             .with_context(|| format!("failed to write component file {}", dest.display()))?;
@@ -219,5 +227,45 @@ impl ComponentCacheState for State {
             locations: self.user_locations(),
             component_parser: self.component_parser(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached(version: &str) -> CacheComponent {
+        CacheComponent {
+            name: "greeter".into(),
+            organisation: "my-org".into(),
+            version: semver::Version::parse(version).unwrap(),
+            dependencies: vec![],
+            requirements: vec![],
+            commands: Default::default(),
+            path: PathBuf::from("/cache/components/my-org/greeter/0.4.0-rc.1"),
+            source: models::CacheComponentSource::Unknown,
+        }
+    }
+
+    #[test]
+    fn the_cache_directory_names_the_version_even_when_the_manifest_disagrees() {
+        let mut component = cached("0.3.0");
+
+        apply_cache_identity(&mut component, "my-org", "greeter", "0.4.0-rc.1");
+
+        assert_eq!(component.version.to_string(), "0.4.0-rc.1");
+        assert!(matches!(
+            component.source,
+            models::CacheComponentSource::Versioned(ref v) if v.to_string() == "0.4.0-rc.1"
+        ));
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_version_keeps_the_manifest_version() {
+        let mut component = cached("0.3.0");
+
+        apply_cache_identity(&mut component, "my-org", "greeter", "scratch");
+
+        assert_eq!(component.version.to_string(), "0.3.0");
     }
 }

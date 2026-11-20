@@ -24,10 +24,8 @@ impl TryFrom<&GlobalAddCommand> for AddComponent {
         let (organisation, rest) = match value.component.split_once("/") {
             Some((organisation, rest)) => (organisation, rest),
             None => {
-                // is forest
                 (
                     "forest",
-                    // Rest
                     value.component.as_str(),
                 )
             }

@@ -1,15 +1,3 @@
-//! `CheckDrift` (forest#286): compare what a project last deployed with what is
-//! actually running, without changing either.
-//!
-//! Terraform state records what forest last applied, which is not the same
-//! question as what is running now — anyone with console access can change a
-//! resource, and nothing would say so until the next release's plan shows a
-//! diff nobody asked for. This answers it on demand, per destination, against
-//! the artifact of that destination's last successful deploy.
-//!
-//! Authorization happens in the handler (`release.rs::check_drift`) before this
-//! runs; everything here assumes the caller may see the project.
-
 use anyhow::Context;
 use forest_grpc_interface::{CheckDriftRequest, CheckDriftResponse, DestinationDrift, DriftStatus};
 use uuid::Uuid;
@@ -43,8 +31,6 @@ pub(crate) async fn check_drift(
         )
     })?;
 
-    // The last successful deploy per destination in this environment. Its
-    // artifact is what the destination is supposed to be running.
     let deployed = sqlx::query!(
         r#"
             SELECT DISTINCT ON (rs.destination_id)

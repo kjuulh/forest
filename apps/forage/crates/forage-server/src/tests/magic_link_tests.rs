@@ -7,8 +7,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Request magic link ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn magic_link_request_returns_check_email_page() {
     let (state, _sessions) = test_state_with_magic_link();
@@ -57,7 +55,6 @@ async fn magic_link_request_invalid_email_shows_error() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Should re-render the login page with an error
     assert!(html.contains("Sign in"));
 }
 
@@ -79,8 +76,6 @@ async fn magic_link_returns_503_when_not_configured() {
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ─── Verify magic link ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn magic_link_verify_valid_token_redirects_to_dashboard() {
@@ -162,7 +157,6 @@ async fn magic_link_verify_new_user_redirects_to_complete_profile() {
 async fn magic_link_verify_expired_token_shows_error() {
     let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
     let (raw, hash) = generate_magic_link_token();
-    // Already expired
     let expired = chrono::Utc::now() - chrono::Duration::seconds(1);
     store
         .store_token(forage_core::auth::magic_link::TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expired, None)
@@ -196,7 +190,6 @@ async fn magic_link_verify_consumed_token_fails_on_reuse() {
         .await
         .unwrap();
 
-    // Consume the token first
     store
         .verify_and_consume(forage_core::auth::magic_link::TOKEN_TYPE_MAGIC_LINK, &hash)
         .await
@@ -236,8 +229,6 @@ async fn magic_link_verify_missing_token_returns_400() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
-
-// ─── Template visibility ────────────────────────────────────────────
 
 #[tokio::test]
 async fn login_page_shows_magic_link_when_configured() {
@@ -283,12 +274,6 @@ async fn login_page_hides_magic_link_when_not_configured() {
     assert!(!html.contains("Sign in with email link"));
 }
 
-// ─── DATA-251: magic-link round-trips return_to ──────────────────────
-
-/// Full magic-link sign-in flow with a pending device-login intent:
-/// request the link with `?return_to=/device?…` → token is stored with
-/// the intent → click the verify link → user lands on the device
-/// approval screen, not /dashboard.
 #[tokio::test]
 async fn magic_link_request_then_verify_honours_return_to() {
     let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
@@ -296,10 +281,6 @@ async fn magic_link_request_then_verify_honours_return_to() {
     let state = state.with_magic_link_store(store.clone());
     let app = build_router(state);
 
-    // Step 1: request the magic link, with return_to carried as a form
-    // field. We don't have NATS wired in tests so we can't intercept the
-    // email body, but the token IS persisted; we read the raw hash back
-    // out of the store via count_recent and a known token.
     let response = app
         .clone()
         .oneshot(
@@ -316,9 +297,6 @@ async fn magic_link_request_then_verify_honours_return_to() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Step 2: manually issue a parallel token with the same return_to
-    // (since we can't observe the random one the route minted). This
-    // proves the route handler's verify→redirect contract.
     let (raw, hash) = generate_magic_link_token();
     store
         .store_token(

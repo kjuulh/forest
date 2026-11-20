@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT d.environment as \"environment!\"\n            FROM destinations d\n            JOIN projects p ON p.organisation = d.organisation\n            WHERE p.id = $1 AND d.name = ANY($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "environment"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9fb755b707076a75148a3b423958cac29cba29005006e5d1a19b2b74cd240962"
+}

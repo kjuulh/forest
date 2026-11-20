@@ -1,0 +1,46 @@
+use forage_ui::components::Icon;
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use crate::views::org_pages::{developer_app_href, settings_href};
+use crate::views::org_settings::message;
+props crate::views::org_pages::DevelopersPage { chrome, org, error, apps };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Developers}>
+    <div class="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-bold">Developer settings</h2>
+        <p class="text-sm text-gray-500 mt-1">OAuth applications let other apps offer "Sign in with Forest" on behalf of your organisation.</p>
+      </div>
+      <a href={settings_href(org, "/developers/new")} class="shrink-0 inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">New OAuth app</a>
+    </div>
+    {if let Some(error) = message(error) {
+      <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{error}</div>
+    }}
+    {if !apps.is_empty() {
+      <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {for app in apps.iter() {
+          <a href={developer_app_href(org, &app.app_id)} class="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors first:rounded-t-lg last:rounded-b-lg">
+            <div>
+              <div class="font-medium text-gray-900">{app.name}</div>
+              <div class="text-sm text-gray-500 mt-0.5 font-mono">{app.client_id}</div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="hidden sm:flex gap-1">
+                {for scope in app.scopes.iter() {
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{scope}</span>
+                }}
+              </div>
+              <span class="text-gray-400"><Icon name="chevron-right" class="w-5 h-5" /></span>
+            </div>
+          </a>
+        }}
+      </div>
+    } else {
+      <div class="text-center border border-dashed border-gray-200 rounded-lg py-16">
+        <p class="text-sm text-gray-500">No OAuth applications yet.</p>
+        <a href={settings_href(org, "/developers/new")} class="inline-block mt-3 text-sm font-medium text-gray-900 underline">Register your first app</a>
+      </div>
+    }}
+  </OrgSettings>
+</Shell>

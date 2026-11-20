@@ -54,7 +54,6 @@ def rewrite(lock: Path, want: str) -> bool:
         if stripped == "[[package]]":
             in_block, is_forest = True, False
             continue
-        # Any other table header ends the block we were in.
         if stripped.startswith("[") and stripped != "[[package]]":
             in_block, is_forest = False, False
             continue

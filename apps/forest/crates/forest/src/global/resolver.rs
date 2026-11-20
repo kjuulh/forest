@@ -1,14 +1,3 @@
-//! Pure resolver.
-//!
-//! Given `(UserConfig, GlobalLockFile, Manifest, QualifiedRef, PlatformKey)`,
-//! produce a [`Plan`] describing what the effectful shell must do to exec
-//! the requested tool. Per TASKS/018-global-tools.md §1b.1, this function
-//! is the centre of the pure core — no I/O, no time, no random, never panics.
-//!
-//! Property P11 (manifest `kind ↔ plan-variant` correspondence) is encoded
-//! structurally: a `Binary` manifest never produces `FetchPlan::Url`, and
-//! an `External` manifest never produces `FetchPlan::Registry`.
-
 use crate::global::{
     lockfile::GlobalLockFile,
     manifest::{Archive, ComponentShape, Manifest, ManifestKind, PlatformKey},
@@ -16,9 +5,6 @@ use crate::global::{
     user_config::UserConfig,
 };
 
-/// The resolver's output. Caller (effectful shell) reads `expected_sha`,
-/// stats `cache_root/bin/<expected_sha>`; if present, `exec` it; if absent,
-/// run `fetch_if_missing`, then `exec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Plan {
     Resolve {
@@ -28,13 +14,9 @@ pub enum Plan {
     Error(PlanError),
 }
 
-/// How to fetch a binary that is not in the local cache.
-/// P11: this enum's discriminant is functionally derived from `manifest.kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchPlan {
-    /// Stream the binary via `RegistryService.DownloadBinary` (kind=binary).
     Registry,
-    /// HTTPS GET the URL, optionally extract from an archive (kind=external).
     Url {
         url: String,
         archive: Archive,
@@ -45,30 +27,15 @@ pub enum FetchPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
-    /// The manifest declares no platform matching the caller's host.
     PlatformNotAvailable {
         requested: PlatformKey,
         available: Vec<PlatformKey>,
     },
-    /// The manifest is a pure COMPONENT — no tool facet, no shim, no `forest
-    /// global *` install path. `forest run <command>` is the only valid
-    /// invocation for that shape.
-    ShapeNotInstallable { shape: ComponentShape },
+    ShapeNotInstallable {
+        shape: ComponentShape,
+    },
 }
 
-/// Plan an invocation.
-///
-/// Inputs are taken by reference so the caller can keep ownership.
-/// The function is total — every input combination returns a `Plan`.
-///
-/// Resolution rules (matching §1a.9 pseudocode):
-///   1. If the manifest has no entry for `platform` → `PlatformNotAvailable`.
-///   2. If the manifest's shape has no tool facet → `ShapeNotInstallable`.
-///   3. `expected_sha` is the lockfile pin if present (the user has run this
-///      before and we trust their pin), else the manifest's claim for this
-///      `(org, name, version, platform)` tuple (first-run case).
-///   4. `fetch_if_missing` follows P11: `Registry` for `kind=binary`,
-///      `Url{...}` for `kind=external`.
 pub fn plan(
     _user_config: &UserConfig,
     lockfile: &GlobalLockFile,
@@ -77,7 +44,6 @@ pub fn plan(
     version: &str,
     platform: PlatformKey,
 ) -> Plan {
-    // 1. Platform must be available.
     let platform_entry = match manifest.platforms.get(&platform) {
         Some(p) => p,
         None => {
@@ -88,7 +54,6 @@ pub fn plan(
         }
     };
 
-    // 2. Shape must be installable as a shim/tool.
     let installable = matches!(
         manifest.shape,
         ComponentShape::ToolBinary | ComponentShape::HybridComponent | ComponentShape::ToolExternal
@@ -99,7 +64,6 @@ pub fn plan(
         });
     }
 
-    // 3. expected_sha: lockfile pin wins; else manifest's claim.
     let expected_sha = match lockfile.get(
         &qref.organisation,
         &qref.name,
@@ -111,7 +75,6 @@ pub fn plan(
         None => platform_entry.sha256.clone(),
     };
 
-    // 4. FetchPlan correspondence with manifest.kind (P11).
     let fetch_if_missing = match manifest.kind {
         ManifestKind::Binary => FetchPlan::Registry,
         ManifestKind::External => FetchPlan::Url {
@@ -240,8 +203,6 @@ mod tests {
         }
     }
 
-    // --- Happy paths --------------------------------------------------------
-
     #[test]
     fn plan_for_tool_binary_with_no_lockfile_pin_uses_manifest_sha() {
         let cfg = UserConfig::default();
@@ -262,7 +223,6 @@ mod tests {
 
     #[test]
     fn plan_for_tool_binary_with_lockfile_pin_uses_lockfile_sha() {
-        // §1a.9: lockfile is the source of truth once a version has been run.
         let cfg = UserConfig::default();
         let mut lock = GlobalLockFile::default();
         lock.insert(GlobalLockEntry {
@@ -273,9 +233,6 @@ mod tests {
             arch: "amd64".into(),
             sha256: "sha256:locked".into(),
         });
-        // Manifest's sha differs (e.g., publisher republished the manifest
-        // pointing at new bytes). Per spec re-publish is `ALREADY_EXISTS` on
-        // the server side, but we defensively trust the lockfile here.
         let m = tool_binary_manifest("4f9c");
         let qref = QualifiedRef::new("cuteorg", "forest-hello");
 
@@ -292,7 +249,6 @@ mod tests {
 
     #[test]
     fn plan_for_tool_external_uses_url_fetch_plan() {
-        // P11: kind=external => FetchPlan::Url, never Registry.
         let cfg = UserConfig::default();
         let lock = GlobalLockFile::default();
         let m = tool_external_manifest("ad3a");
@@ -325,8 +281,6 @@ mod tests {
         }
     }
 
-    // --- Plan variant correspondence (P11) ---------------------------------
-
     #[test]
     fn p11_binary_kind_never_produces_url_fetch() {
         let cfg = UserConfig::default();
@@ -356,13 +310,11 @@ mod tests {
         }
     }
 
-    // --- Error cases --------------------------------------------------------
-
     #[test]
     fn errors_when_platform_not_available() {
         let cfg = UserConfig::default();
         let lock = GlobalLockFile::default();
-        let m = tool_binary_manifest("aa"); // only linux/amd64
+        let m = tool_binary_manifest("aa");
 
         let p = plan(
             &cfg,
@@ -410,7 +362,6 @@ mod tests {
 
     #[test]
     fn hybrid_component_is_installable() {
-        // HYBRID has a tool facet — should be installable just like TOOL_BINARY.
         let mut m = tool_binary_manifest("hyb");
         m.methods = vec!["greet".into()];
         m.shape = ComponentShape::HybridComponent;
@@ -423,12 +374,8 @@ mod tests {
         assert!(is_resolve, "hybrid must be installable");
     }
 
-    // --- Totality (P1) ------------------------------------------------------
-
     #[test]
     fn plan_is_total_on_arbitrary_empty_manifest_platforms() {
-        // An empty platform map for either kind still returns a Plan, never
-        // panics. (PlatformNotAvailable.available is empty in that case.)
         let mut m = tool_binary_manifest("x");
         m.platforms.clear();
         let p = plan(

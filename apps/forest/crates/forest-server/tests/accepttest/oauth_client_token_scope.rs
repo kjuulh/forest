@@ -1,16 +1,3 @@
-//! OAuth client-credentials tokens against the gRPC API: what a machine token
-//! may and may not do.
-//!
-//! Such a token authenticates as its app, and an app passes org-member checks
-//! in its own organisation, so these pin the boundary from both sides: the
-//! `components:publish` grant reaches the registry in its own org and nothing
-//! else, a token without it reaches nothing, and another org's registry is
-//! out of reach either way.
-//!
-//! Tokens are minted through `IssueClientCredentialsToken`, which is
-//! service-account-gated (Forage calls it), so that one call goes through
-//! `restricted_fixture()`. Both fixtures share the database.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -41,7 +28,6 @@ async fn registered_user(fixture: &Fixture) -> String {
         .access_token
 }
 
-/// Create an organisation owned by `token`'s user; returns (id, name).
 async fn create_org(fixture: &Fixture, token: &str) -> (String, String) {
     let name = format!("oct-org-{}", uuid::Uuid::now_v7());
     fixture
@@ -60,7 +46,6 @@ async fn create_org(fixture: &Fixture, token: &str) -> (String, String) {
     (id.to_string(), name)
 }
 
-/// A machine app in `org_id`, registered for both machine scopes.
 async fn machine_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, String) {
     let resp = fixture
         .oauth_apps()
@@ -74,6 +59,7 @@ async fn machine_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, S
                 redirect_uris: vec!["https://app.example/callback".into()],
                 scopes: vec!["components:publish".into(), "directory:read".into()],
                 grant_types: vec!["client_credentials".into()],
+                public: false,
             },
         ))
         .await
@@ -158,8 +144,6 @@ async fn a_token_without_the_publish_grant_cannot_publish() {
     assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
 }
 
-/// Another org's registry is out of reach even with the grant: the token is
-/// its app's, and the app belongs to one organisation.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_publish_token_cannot_publish_into_another_organisation() {
     let s = setup().await;
@@ -174,16 +158,11 @@ async fn a_publish_token_cannot_publish_into_another_organisation() {
     assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
 }
 
-/// The grant is for publishing, not for acting as an org member: a method
-/// outside its list is refused even in the token's own organisation, where
-/// an unscoped app would pass the org-member check.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_publish_token_cannot_call_methods_outside_publishing() {
     let s = setup().await;
     let token = client_token(&s.client_id, &s.client_secret, &["components:publish"]).await;
 
-    // GetDestinations needs only org membership, which an unscoped app in
-    // its own org has: this is refused by the scope list and nothing else.
     let err =
         s.fx.destinations()
             .get_destinations(authed(

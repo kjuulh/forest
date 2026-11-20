@@ -1,0 +1,55 @@
+use forage_ui::components::{BackToIntegrations, CsrfField, IntegrationLogo, SectionLabel};
+use forage_ui::layouts::Shell;
+use crate::views::catalogue::{integration_href, CoverageState, GithubHealth};
+component Pill(classes: &str, children: Html) {
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {classes}">{children}</span>
+}
+props crate::views::catalogue::GithubConnectionPage { chrome, org, csrf_token, integration_id, name, account_login, installed_by_login, health, truncated, rows };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <BackToIntegrations org={org} />
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+      <div class="flex items-start gap-4">
+        <IntegrationLogo kind="github" box_class="w-12 h-12" icon_class="w-6 h-6 text-gray-600" />
+        <div>
+          <h1 class="text-2xl font-bold">{name}</h1>
+          <div class="flex flex-wrap items-center gap-2 mt-1">
+            <span class="text-sm text-gray-500">GitHub organisation {account_login} &middot; connected by {installed_by_login}</span>
+            {match *health {
+              GithubHealth::Healthy => { <Pill classes="bg-green-50 text-green-700">Healthy</Pill> }
+              GithubHealth::Uninstalled => { <Pill classes="bg-red-50 text-red-700">Uninstalled on GitHub</Pill> }
+              GithubHealth::Suspended => { <Pill classes="bg-yellow-50 text-yellow-800">Suspended on GitHub</Pill> }
+              GithubHealth::Unreachable | GithubHealth::Unconfigured => { <Pill classes="bg-gray-100 text-gray-600">Could not reach GitHub</Pill> }
+            }}
+          </div>
+        </div>
+      </div>
+      <form method="POST" action="{integration_href(org, integration_id)}/delete" data-confirm="Disconnect this GitHub organisation from Forest? Uninstall the app on GitHub too to revoke its access.">
+        <CsrfField token={csrf_token} name="_csrf" />
+        <button type="submit" class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">Disconnect</button>
+      </form>
+    </div>
+    <SectionLabel>Attribution coverage</SectionLabel>
+    <p class="text-sm text-gray-500 mb-3">A release authored on GitHub reaches its author individually only when they linked that GitHub account to their Forest account (signing in with GitHub does this). GitHub membership is shown for context and never grants access to Forest.</p>
+    {if *truncated { <p class="text-sm text-gray-500 mb-3">The GitHub organisation is large; only its first 2000 members were checked.</p> }}
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+      {for r in rows.iter() {
+        <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+          <div class="sm:w-48 shrink-0">
+            <span class="text-sm font-medium text-gray-900">{r.username}</span>
+            <span class="text-xs text-gray-400 ml-1">{r.role}</span>
+          </div>
+          <div class="flex items-start gap-2 min-w-0">
+            {match r.state {
+              CoverageState::Reachable => { <Pill classes="shrink-0 bg-green-50 text-green-700">Attributable</Pill> }
+              CoverageState::Gap => { <Pill classes="shrink-0 bg-yellow-50 text-yellow-800">Setup gap</Pill> }
+              CoverageState::Off | CoverageState::Unknown => { <Pill classes="shrink-0 bg-gray-100 text-gray-600">Unknown</Pill> }
+            }}
+            <span class="text-sm text-gray-600 break-words">{r.detail}</span>
+          </div>
+        </div>
+      }}
+    </div>
+  </section>
+</Shell>

@@ -1,9 +1,3 @@
-//! `forest tool hash <url> [--archive zip] [--binary-in-archive <path>]`
-//!
-//! Downloads an upstream URL, computes the archive sha256 and (if extraction
-//! is requested) the inner binary's sha256. No network shortcuts — uses the
-//! same reqwest client the runtime will (https-only).
-
 use clap::Args;
 use sha2::{Digest, Sha256};
 
@@ -53,8 +47,6 @@ impl ToolHashCommand {
         println!("archive_sha256: {archive_sha}");
 
         if self.archive == "none" {
-            // For `archive: "none"`, the manifest's `sha256` equals the
-            // archive bytes (there's no extraction step).
             println!("binary_sha256:  {archive_sha}");
             return Ok(());
         }

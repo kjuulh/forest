@@ -1,283 +1,68 @@
 use std::path::Path;
 
-use anyhow::Context;
-use minijinja::Environment;
 use sha2::Digest;
 
-/// Format an ISO 8601 / RFC 3339 timestamp as a human-friendly relative time.
-fn timeago(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-        .or_else(|_| {
-            // Try parsing "2026-01-01" as a date
-            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                .map(|d| {
-                    d.and_hms_opt(0, 0, 0)
-                        .unwrap()
-                        .and_utc()
-                        .fixed_offset()
-                })
-        })
-    else {
-        return value.to_string();
-    };
+fn bytes_hash(bytes: &[u8]) -> String {
+    format!("{:x}", sha2::Sha256::digest(bytes))[..12].to_string()
+}
 
-    let now = chrono::Utc::now();
-    let diff = now.signed_duration_since(dt);
-
-    if diff.num_seconds() < 60 {
-        "just now".into()
-    } else if diff.num_minutes() < 60 {
-        let m = diff.num_minutes();
-        format!("{m}m ago")
-    } else if diff.num_hours() < 24 {
-        let h = diff.num_hours();
-        format!("{h}h ago")
-    } else if diff.num_days() < 30 {
-        let d = diff.num_days();
-        format!("{d}d ago")
-    } else {
-        dt.format("%d %b %Y").to_string()
+fn content_hash(path: &Path) -> String {
+    match std::fs::read(path) {
+        Ok(bytes) => bytes_hash(&bytes),
+        Err(_) => "dev".to_string(),
     }
 }
 
-/// Format a future ISO 8601 / RFC 3339 timestamp as a relative countdown.
-fn timeuntil(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-    else {
-        return value.to_string();
-    };
-
-    let now = chrono::Utc::now();
-    let diff = dt.signed_duration_since(now);
-
-    if diff.num_seconds() <= 0 {
-        "now".into()
-    } else if diff.num_seconds() < 60 {
-        let s = diff.num_seconds();
-        format!("in {s}s")
-    } else if diff.num_minutes() < 60 {
-        let m = diff.num_minutes();
-        let s = diff.num_seconds() % 60;
-        if s > 0 {
-            format!("in {m}m {s}s")
-        } else {
-            format!("in {m}m")
-        }
-    } else if diff.num_hours() < 24 {
-        let h = diff.num_hours();
-        let m = diff.num_minutes() % 60;
-        if m > 0 {
-            format!("in {h}h {m}m")
-        } else {
-            format!("in {h}h")
-        }
-    } else {
-        let d = diff.num_days();
-        format!("in {d}d")
-    }
-}
-
-/// Format an ISO 8601 / RFC 3339 timestamp as a full human-readable datetime.
-fn datetime(value: &str) -> String {
-    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
-        .or_else(|_| {
-            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map(|d| {
-                d.and_hms_opt(0, 0, 0)
-                    .unwrap()
-                    .and_utc()
-                    .fixed_offset()
-            })
-        })
-    else {
-        return value.to_string();
-    };
-
-    dt.format("%d %b %Y %H:%M:%S UTC").to_string()
+fn asset_href(path: &str) -> String {
+    static HASHES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::LazyLock::new(Default::default);
+    let mut hashes = HASHES.lock().unwrap_or_else(|e| e.into_inner());
+    let hash = hashes
+        .entry(path.to_string())
+        .or_insert_with(|| content_hash(&Path::new("static").join(path)));
+    format!("/static/{path}?v={hash}")
 }
 
 #[derive(Clone)]
 pub struct TemplateEngine {
-    env: Environment<'static>,
+    assets: forage_ui::chrome::Assets,
+    build: forage_ui::chrome::BuildStamp,
 }
 
 impl TemplateEngine {
-    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        if !path.exists() {
-            anyhow::bail!("templates directory not found: {}", path.display());
-        }
-
-        let mut env = Environment::new();
-        env.set_loader(minijinja::path_loader(path));
-        env.add_filter("timeago", |v: String| -> String { timeago(&v) });
-        env.add_filter("timeuntil", |v: String| -> String { timeuntil(&v) });
-        env.add_filter("datetime", |v: String| -> String { datetime(&v) });
-        env.add_filter("urlencode", |v: String| -> String {
-            urlencoding::encode(&v).into_owned()
-        });
-        // Compact sha256 chip — `5df1c9…ec945`. Used in the Platforms table
-        // and anywhere a long content-address would dominate the row.
-        env.add_filter("short_sha", |v: String| -> String {
-            crate::manifest_view::ManifestView::short_sha(&v)
-        });
-        // Human-readable byte count for manifest sizes (e.g. "438.0 KB").
-        env.add_filter("human_size", |v: u64| -> String {
-            crate::manifest_view::ManifestView::human_size(v)
-        });
-        // Short display label for a URL — strips scheme/www, collapses
-        // GitHub/GitLab repo URLs to `org/repo`, caps to 48 chars. Used
-        // by the About sidebar (spec 009). See
-        // `forage_core::platform::prettify_url` for the rules.
-        env.add_filter("prettify_url", |v: String| -> String {
-            forage_core::platform::prettify_url(&v)
-        });
-
-        // Default asset hashes for tests/dev — overridden in production by compute_asset_hashes.
-        env.add_global("css_hash", "dev");
-        env.add_global("components_js_hash", "dev");
-
-        // Build provenance for the footer. Globals rather than per-handler
-        // context: every page extends base.html.jinja, and threading these
-        // through each handler would guarantee a page that forgets them.
+    pub fn unhashed() -> Self {
         let build = crate::build_info::BuildInfo::from_env();
-        // `build.version` is intentionally not exposed — see the footer
-        // comment in base.html.jinja.
-        env.add_global("build_commit", build.commit);
-        env.add_global("build_time", build.build_time);
-
-        Ok(Self { env })
+        Self {
+            assets: forage_ui::chrome::Assets::default(),
+            build: forage_ui::chrome::BuildStamp {
+                commit: build.commit,
+                time: build.build_time,
+            },
+        }
     }
 
     pub fn new() -> anyhow::Result<Self> {
-        let mut engine = Self::from_path(Path::new("templates"))?;
-        engine.compute_asset_hashes();
+        let mut engine = Self::unhashed();
+        engine.assets = forage_ui::chrome::Assets {
+            css_hash: content_hash(Path::new("static/css/style.css")),
+            ui_js_hash: content_hash(Path::new("static/js/ui.js")),
+            components_js_hash: content_hash(Path::new(
+                "static/js/components/forage-components.js",
+            )),
+            sedx_js_hash: bytes_hash(sedx::JS.as_bytes()),
+        };
         Ok(engine)
     }
 
-    /// Compute content hashes for static assets and inject them as globals.
-    /// Templates use these for cache-busting query strings.
-    fn compute_asset_hashes(&mut self) {
-        fn asset_hash(path: &str) -> String {
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    let digest = sha2::Sha256::digest(&bytes);
-                    format!("{digest:x}")[..12].to_string()
-                }
-                Err(_) => "dev".to_string(),
-            }
-        }
-
-        self.env.add_global("css_hash", asset_hash("static/css/style.css"));
-        self.env.add_global(
-            "components_js_hash",
-            asset_hash("static/js/components/forage-components.js"),
-        );
+    pub fn assets(&self) -> &forage_ui::chrome::Assets {
+        &self.assets
     }
 
-    pub fn render(&self, template: &str, ctx: minijinja::Value) -> anyhow::Result<String> {
-        let tmpl = self
-            .env
-            .get_template(template)
-            .with_context(|| format!("template not found: {template}"))?;
-        tmpl.render(ctx)
-            .with_context(|| format!("failed to render template: {template}"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every page template parses.
-    ///
-    /// `path_loader` is lazy: a template is parsed the first time it is
-    /// rendered, not at startup. Nothing else in the suite renders most
-    /// of these pages, so without this a syntax error ships and is only
-    /// found by whoever opens that page in production. Parsing is cheap
-    /// and catches the whole class.
-    #[test]
-    fn every_page_template_parses() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("templates");
-        let engine = TemplateEngine::from_path(&root).expect("load templates");
-
-        let pages = root.join("pages");
-        let mut checked = 0;
-        let mut failures = Vec::new();
-        for entry in std::fs::read_dir(&pages).expect("read pages dir") {
-            let path = entry.expect("dir entry").path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if !name.ends_with(".jinja") {
-                continue;
-            }
-            let rel = format!("pages/{name}");
-            if let Err(e) = engine.env.get_template(&rel) {
-                failures.push(format!("{rel}: {e}"));
-            }
-            checked += 1;
-        }
-
-        assert!(checked > 0, "found no page templates under {pages:?}");
-        assert!(failures.is_empty(), "templates failed to parse:\n{failures:#?}");
-    }
-}
-
-
-#[cfg(test)]
-mod timeline_prefetch_tests {
-    //! The prefetch macro is a `<script>` built by string concatenation in a
-    //! template that renders with autoescaping off, so both halves are worth
-    //! pinning: that it renders at all, and that the URL it carries cannot
-    //! break out of its attribute.
-    use super::*;
-
-    fn engine() -> TemplateEngine {
-        TemplateEngine::from_path(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates"))
-            .expect("template engine")
+    pub fn build_stamp(&self) -> &forage_ui::chrome::BuildStamp {
+        &self.build
     }
 
-    fn releases_page(org: &str) -> String {
-        engine()
-            .render(
-                "pages/releases.html.jinja",
-                minijinja::context! {
-                    title => "t", description => "d",
-                    user => minijinja::context! { username => "u" },
-                    csrf_token => "c", current_org => org,
-                    orgs => Vec::<minijinja::Value>::new(),
-                    org_name => org,
-                    env_options => Vec::<minijinja::Value>::new(),
-                    active_tab => "releases",
-                },
-            )
-            .expect("render")
-    }
-
-    #[test]
-    fn the_page_starts_the_timeline_request() {
-        let html = releases_page("understory");
-        assert!(
-            html.contains("__forestTimeline"),
-            "the releases page no longer primes the timeline; \
-             <release-timeline> will wait for the bundle before it asks for data"
-        );
-    }
-
-    // Org names are slug-validated long before they reach here, so this is
-    // depth rather than a live hole — but the escaping is the only thing
-    // standing between an attribute and the rest of the document, and it is
-    // invisible when it works.
-    #[test]
-    fn the_url_cannot_break_out_of_its_attribute() {
-        let html = releases_page("evil\"><script>alert(1)</script>");
-        assert!(
-            !html.contains("<script>alert(1)</script>"),
-            "an org name escaped its attribute:\n{html}"
-        );
+    pub fn asset_href(&self, path: &str) -> String {
+        asset_href(path)
     }
 }

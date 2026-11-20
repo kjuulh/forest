@@ -1,31 +1,3 @@
-//! Server-side page timing for the footer.
-//!
-//! Measures the whole request — routing, handler, database work, template
-//! render — rather than just the template, because "why was that page slow"
-//! is almost never the template.
-//!
-//! # Why body substitution
-//!
-//! The number is only known *after* the handler has produced the body, so a
-//! template global cannot carry it. The alternatives were worse:
-//!
-//! - Threading a start `Instant` through every handler's context: invasive,
-//!   and easy to forget on a new page.
-//! - A `Server-Timing` header read back by JS: no body rewriting, but Firefox
-//!   and Safari do not expose `serverTiming` in Navigation Timing, so the
-//!   number would silently vanish for a chunk of users.
-//!
-//! So the base template emits [`RENDER_MS_PLACEHOLDER`] and this middleware
-//! swaps in the elapsed milliseconds on the way out.
-//!
-//! # Ordering
-//!
-//! This layer must sit *inside* the compression layer, or it would be handed
-//! an already-compressed body and the placeholder would never match. In axum
-//! the last `.layer()` applied is the outermost, so this is registered before
-//! `CompressionLayer`. Only `text/html` responses are buffered; everything
-//! else (static files, JSON, streams) passes straight through untouched.
-
 use std::time::Instant;
 
 use axum::{
@@ -36,18 +8,10 @@ use axum::{
     response::Response,
 };
 
-/// Token the base template emits where the server timing should appear.
-///
-/// Deliberately ugly so it cannot collide with page content, and so an
-/// unreplaced one is obvious rather than looking like real output.
 pub const RENDER_MS_PLACEHOLDER: &str = "__FOREST_RENDER_MS__";
 
-/// Cap on the HTML we will buffer to perform the substitution. Pages are tens
-/// of KiB; anything far larger is not a page we should be holding in memory,
-/// so it passes through with the placeholder left alone.
 const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
-/// Time the request and substitute the elapsed milliseconds into the HTML.
 pub async fn layer(request: Request, next: Next) -> Response {
     let started = Instant::now();
     let response = next.run(request).await;
@@ -60,9 +24,6 @@ pub async fn layer(request: Request, next: Next) -> Response {
     let (mut parts, body) = response.into_parts();
     let bytes = match axum::body::to_bytes(body, MAX_BUFFER_BYTES).await {
         Ok(b) => b,
-        // Body too large or already consumed — nothing sensible to rewrite.
-        // The page still renders; the footer just shows the raw placeholder,
-        // which is a cosmetic failure rather than a broken response.
         Err(_) => return Response::from_parts(parts, Body::empty()),
     };
 
@@ -75,11 +36,7 @@ pub async fn layer(request: Request, next: Next) -> Response {
 
     let rendered = text.replace(RENDER_MS_PLACEHOLDER, &format_ms(elapsed));
 
-    // Content-Length is now wrong. Drop it and let the body length speak for
-    // itself; leaving a stale value would truncate or hang the response.
     parts.headers.remove(header::CONTENT_LENGTH);
-    // Expose the same number as a standard header, so it is available to
-    // curl and to browsers whose devtools surface Server-Timing.
     if let Ok(value) = HeaderValue::from_str(&format!("total;dur={:.1}", elapsed.as_secs_f64() * 1000.0))
     {
         parts.headers.insert("server-timing", value);
@@ -88,7 +45,6 @@ pub async fn layer(request: Request, next: Next) -> Response {
     Response::from_parts(parts, Body::from(rendered))
 }
 
-/// True when the response is an HTML document we should rewrite.
 fn is_html(response: &Response) -> bool {
     response
         .headers()
@@ -97,9 +53,6 @@ fn is_html(response: &Response) -> bool {
         .is_some_and(|v| v.starts_with("text/html"))
 }
 
-/// Render a duration the way the footer wants it: whole milliseconds once we
-/// are past 1ms, sub-millisecond precision below that so a fast page does not
-/// read as a suspicious "0ms".
 fn format_ms(elapsed: std::time::Duration) -> String {
     let ms = elapsed.as_secs_f64() * 1000.0;
     if ms >= 10.0 {
@@ -144,7 +97,6 @@ mod tests {
 
     #[test]
     fn format_keeps_precision_for_fast_pages() {
-        // A sub-millisecond page must not read as "0ms" — that looks broken.
         assert_eq!(format_ms(Duration::from_micros(400)), "0.40ms");
         assert_eq!(format_ms(Duration::from_micros(2_500)), "2.5ms");
         assert_eq!(format_ms(Duration::from_millis(12)), "12ms");
@@ -171,8 +123,6 @@ mod tests {
             headers.contains_key("server-timing"),
             "should also expose the timing as a header"
         );
-        // The invariant is that no *stale* length survives: either the
-        // header is gone, or it matches the rewritten body exactly.
         if let Some(len) = headers.get(header::CONTENT_LENGTH) {
             let declared: usize = len.to_str().unwrap().parse().unwrap();
             assert_eq!(
@@ -195,8 +145,6 @@ mod tests {
 
     #[tokio::test]
     async fn non_html_responses_are_never_rewritten() {
-        // JSON containing the token must survive verbatim — the middleware has
-        // no business touching API payloads.
         let app = Router::new()
             .route(
                 "/api",
@@ -223,7 +171,6 @@ mod tests {
             .route(
                 "/slow",
                 get(|| async {
-                    // Stand-in for handler + database work.
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     html("took __FOREST_RENDER_MS__")
                 }),
@@ -244,8 +191,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_404_page_is_timed_too() {
-        // The fallback renders base.html.jinja as well, so its footer needs the
-        // substitution just as much as a 200 does.
         let app = Router::new()
             .fallback(get(|| async {
                 (

@@ -24,12 +24,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         print(f"\n{'━' * 60}")
         print(f"  [{now}] Webhook received on {self.path}")
 
-        # Print signature if present
         sig = self.headers.get("X-Forest-Signature")
         if sig:
             print(f"  Signature: {sig}")
 
-            # Verify against known test secret if set
             secret = "test-secret"
             expected = "sha256=" + hmac.new(
                 secret.encode(), body, hashlib.sha256
@@ -43,7 +41,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if ua:
             print(f"  User-Agent: {ua}")
 
-        # Parse and pretty-print JSON
         try:
             data = json.loads(body)
             event = data.get("event", "unknown")
@@ -80,7 +77,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
 
     def log_message(self, format, *args):
-        pass  # Suppress default access logs
+        pass
 
 
 if __name__ == "__main__":

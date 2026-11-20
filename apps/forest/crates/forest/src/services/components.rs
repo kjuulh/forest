@@ -40,8 +40,6 @@ pub struct ComponentsService {
     deployment: ComponentDeploymentService,
     user_config: UserConfigService,
     ctx: ForestContext,
-    /// Ceiling on concurrent registry downloads (DATA-505). Resolved once from
-    /// `--download-concurrency` / `FOREST_DOWNLOAD_CONCURRENCY`.
     max_in_flight: usize,
 
     components_project: Arc<OnceCell<CacheComponents>>,
@@ -63,7 +61,6 @@ impl ComponentsService {
     }
 
     pub async fn get_components_component(&self) -> anyhow::Result<&CacheComponents> {
-        // FIXME: implement proper support for components
         self.get_components_user_config().await
     }
 
@@ -121,7 +118,11 @@ impl ComponentsService {
 
         tracing::trace!("syncing components");
 
-        // 1. Construct local store of existing components
+        let project_dir = match &project {
+            Some(project) => project.path.clone(),
+            None => std::env::current_dir()?,
+        };
+
         let deps = if let Some(project) = project {
             let project = project.clone();
             project.dependencies
@@ -169,10 +170,6 @@ impl ComponentsService {
                 }
             }
 
-            // 2. Resolve the missing upstream versions. One RPC per dep, and
-            //    they are independent, so fan them out (DATA-505) — this used
-            //    to be a serial round-trip per dependency before any bytes
-            //    moved at all.
             let limiter = crate::download::Limiter::new(self.max_in_flight);
             let to_resolve: Vec<_> = missing_deps
                 .dependencies
@@ -197,24 +194,12 @@ impl ComponentsService {
             .await;
             let upstream = resolved.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
 
-            // 3. Download deps — component kind decides v1 (files) vs v2
-            //    (binary). Bounded, adaptive concurrency: the binaries are the
-            //    large ones and each has a serial prologue (server-side S3
-            //    fetch, hashing, disk write) worth overlapping.
-            //
-            //    `forest.lock` is loaded once and shared read-only for
-            //    verification; the writes are applied below, after the fan-out
-            //    drains, because a read-modify-write per download would lose
-            //    entries.
-            let project_dir = std::env::current_dir()?;
             let lockfile = crate::lockfile::LockFile::load(&project_dir).await?;
 
             let outcomes =
                 crate::download::map_bounded(upstream, Arc::clone(&limiter), |dep, lim| {
                     let lockfile = &lockfile;
                     async move {
-                        // Try to get manifest — if it exists and kind=binary,
-                        // download binary
                         let manifest: Result<String, _> = self
                             .grpc
                             .get_component_manifest(&dep.organisation, &dep.name, &dep.version)
@@ -252,9 +237,6 @@ impl ComponentsService {
                 })
                 .await;
 
-            // Surface the first failure, but only after every sibling has had
-            // its chance to finish — a flaky dep must not silently drop the
-            // work the others already did.
             let entries = outcomes
                 .into_iter()
                 .collect::<anyhow::Result<Vec<_>>>()?
@@ -296,13 +278,6 @@ impl ComponentsService {
         Ok(local_deps)
     }
 
-    /// Download a v2 binary component from the registry and store in the content-addressable cache.
-    ///
-    /// Returns the lockfile entry to record rather than writing it: several of
-    /// these run concurrently (DATA-505) and a read-modify-write of the shared
-    /// `forest.lock` inside each one would lose updates. The caller verifies
-    /// against `lockfile` (read-only, safe to share) and applies the returned
-    /// entries serially once the fan-out has drained.
     async fn download_binary_component(
         &self,
         name: &str,
@@ -314,11 +289,6 @@ impl ComponentsService {
     ) -> anyhow::Result<crate::lockfile::LockEntry> {
         let (os, arch) = crate::services::component_binary::current_platform();
 
-        // The registry stores macOS binaries under the "darwin" os key — publish
-        // translates macos→darwin on upload (see publish.rs, where the manifest
-        // validator requires "darwin"). Match it here so the download key lines
-        // up; otherwise a macOS consumer asks for "macos/arm64" and gets a
-        // spurious "binary not found". DATA-312.
         let registry_os = if os == "macos" { "darwin" } else { os };
 
         tracing::debug!(
@@ -326,28 +296,37 @@ impl ComponentsService {
         );
 
         let label = format!("Downloading {organisation}/{name}@{version}");
-        let binary = self
+        let streamed = self
             .grpc
-            .download_component_binary(organisation, name, version, registry_os, arch, Some(&label))
+            .download_component_binary_to_file(
+                &crate::grpc::BinaryRef {
+                    organisation,
+                    name,
+                    version,
+                    os: registry_os,
+                    arch,
+                },
+                &crate::services::component_binary::binary_download_dir()?,
+                None,
+                None,
+                Some(&label),
+            )
             .await
             .context("download binary from registry")?;
-        let size_bytes = binary.len();
-        // Feed the adaptive ramp: bytes actually moved is what it climbs.
-        // The driver signals completion; this only reports the bytes.
-        limiter.add_bytes(size_bytes as u64);
+        let size_bytes = streamed.size_bytes;
+        limiter.add_bytes(size_bytes);
 
-        // Store in content-addressable cache
+        let sha256_prefixed = format!("sha256:{}", streamed.sha256_hex);
+
+        if let Err(e) = lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed) {
+            tokio::fs::remove_file(&streamed.temp_path).await.ok();
+            return Err(e);
+        }
+
         let (sha256, cache_path) =
-            crate::services::component_binary::store_binary_in_cache(&binary)
+            crate::services::component_binary::install_downloaded_binary(streamed)
+                .await
                 .context("store binary in cache")?;
-        drop(binary);
-
-        let sha256_prefixed = format!("sha256:{sha256}");
-
-        // Verify against the lock file the caller loaded. Read-only, so it is
-        // safe to do here inside the concurrent region; the corresponding
-        // *write* is the caller's job.
-        lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed)?;
 
         let lock_entry = crate::lockfile::LockEntry {
             organisation: organisation.to_string(),
@@ -367,7 +346,6 @@ impl ComponentsService {
             size_bytes
         );
 
-        // Write meta.json to the component cache directory so resolve_binary can find it
         let cache_component_dir = dirs::cache_dir()
             .context("cache dir")?
             .join("forest")
@@ -390,7 +368,6 @@ impl ComponentsService {
             }
         });
 
-        // Include descriptor from manifest if available
         if let Some(manifest) = manifest_json {
             if let Ok(m) = serde_json::from_str::<serde_json::Value>(manifest) {
                 if let Some(caps) = m.get("capabilities") {
@@ -402,7 +379,6 @@ impl ComponentsService {
             }
         }
 
-        // Write meta.json in the .forest/component/ dir within the cache component path
         let meta_dir = cache_component_dir.join(".forest").join("component");
         tokio::fs::create_dir_all(&meta_dir).await?;
         tokio::fs::write(
@@ -411,19 +387,11 @@ impl ComponentsService {
         )
         .await?;
 
-        // Also write a minimal forest.component.cue marker so is_v2_component returns true
         let marker = cache_component_dir.join("forest.component.cue");
         if !marker.exists() {
             tokio::fs::write(&marker, format!("// {organisation}/{name}@{version}\n")).await?;
         }
 
-        // Download every published file. Two destinations:
-        //   1. The component cache dir (faithful mirror — used by
-        //      `release prepare` to read templates/, schemas/, etc).
-        //   2. For .cue files: also vendor into the project's
-        //      `cue.mod/pkg/forest.sh/{org}/{name}@v{major}/` so
-        //      `import "forest.sh/{org}/{name}@v0"` in consumer CUE
-        //      resolves.
         if let Ok(Some(comp)) = self
             .grpc
             .get_component_version(name, organisation, version)
@@ -465,7 +433,6 @@ impl ComponentsService {
                 }
 
                 if !cue_files.is_empty() {
-                    // Vendor into cue.mod/pkg/forest.sh/{org}/{name}@v0/
                     let project_dir = std::env::current_dir()?;
                     let major_version = version.split('.').next().unwrap_or("0");
                     let vendor_dir = project_dir
@@ -490,6 +457,56 @@ impl ComponentsService {
         }
 
         Ok(lock_entry)
+    }
+
+    pub async fn pin_version_specs(
+        &self,
+        project: &mut crate::models::Project,
+    ) -> anyhow::Result<()> {
+        let lockfile = crate::lockfile::LockFile::load(&project.path).await?;
+
+        for dep in project.dependencies.dependencies.iter_mut() {
+            let DependencyType::Versioned(spec_str) = &dep.dependency_type else {
+                continue;
+            };
+            let spec = crate::version_spec::VersionSpec::parse(spec_str).with_context(|| {
+                format!(
+                    "invalid version for {}/{}: '{spec_str}'",
+                    dep.organisation, dep.name
+                )
+            })?;
+            if spec.is_exact() {
+                continue;
+            }
+
+            let locked = lockfile.locked_versions(&dep.organisation, &dep.name);
+            let published = if spec.resolve(&locked).is_some() {
+                Vec::new()
+            } else {
+                self.grpc
+                    .list_component_versions(&dep.organisation, &dep.name)
+                    .await
+                    .with_context(|| format!("list versions of {}/{}", dep.organisation, dep.name))?
+                    .iter()
+                    .filter_map(|v| semver::Version::parse(&v.version).ok())
+                    .collect()
+            };
+
+            let pinned = spec.pin(&locked, &published).with_context(|| {
+                format!(
+                    "no published version of {}/{} matches '{spec}'",
+                    dep.organisation, dep.name
+                )
+            })?;
+            tracing::debug!(
+                "resolved {}/{} '{spec}' to {pinned}",
+                dep.organisation,
+                dep.name
+            );
+            dep.dependency_type = DependencyType::Versioned(pinned.to_string());
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -535,15 +552,6 @@ impl ComponentsService {
     pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, (String, CacheComponent)>> {
         let _user_config = self.user_config.get_user_config().await?;
 
-        // let deps: Dependencies = user_config.try_into()?;
-
-        // let local_deps = self
-        //     .component_cache
-        //     .get_local_components()
-        //     .await
-        //     .context("failed to get local components")?;
-
-        // FIXME(kjuulh): implement inits
         anyhow::bail!("component init templates are not yet supported")
     }
 
@@ -572,19 +580,6 @@ impl ComponentsService {
         Ok(())
     }
 
-    /// Make sure a versioned dep is materialized in
-    /// `~/.cache/forest/components/<org>/<name>/<version>/`. Used by
-    /// `forest update`, `forest generate` (when walking version deps),
-    /// and the deployment/run resolvers — all three need the cache
-    /// populated to operate, so this is the single ensure-cached
-    /// shim shared across them.
-    ///
-    /// Returns true if a fresh download happened, false if the cache
-    /// was already populated. Binary components are out of scope here:
-    /// those have a parallel `download_binary_component` path that owns
-    /// platform/sha256 bookkeeping. We detect "binary" via the
-    /// component manifest's `kind` field and skip — the caller is
-    /// expected to use the binary path in that case.
     pub async fn ensure_versioned_dep_cached(
         &self,
         organisation: &str,
@@ -599,13 +594,10 @@ impl ComponentsService {
             .join(name)
             .join(version);
 
-        // Already materialized? Presence of forest.component.cue
-        // (always uploaded for v2 components) is our cheap probe.
         if cache_dir.join("forest.component.cue").exists() {
             return Ok(EnsureCachedOutcome::AlreadyCached);
         }
 
-        // Determine kind. Binary deps go through the dedicated path.
         let manifest_raw = self
             .grpc
             .get_component_manifest(organisation, name, version)
@@ -624,11 +616,6 @@ impl ComponentsService {
             return Ok(EnsureCachedOutcome::BinaryRequiresPlatformDownload);
         }
 
-        // Files-based (kind=cue / kind=deno / kind=files). Look up the
-        // component id, then stream every uploaded file into the cache.
-        // `download_component` already writes via `ComponentCache::add_file`
-        // which puts files at `<cache_dir>/<file_path>` — matching exactly
-        // what the publisher uploaded.
         let comp = self
             .grpc
             .get_component_version(name, organisation, version)
@@ -646,12 +633,6 @@ impl ComponentsService {
     }
 }
 
-/// Result of [`ComponentsService::ensure_versioned_dep_cached`].
-///
-/// Callers interpret these as: `AlreadyCached` → no work, `Downloaded` →
-/// we just materialized this version (good time to log a friendly nudge),
-/// `BinaryRequiresPlatformDownload` → caller must invoke the per-platform
-/// binary downloader instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnsureCachedOutcome {
     AlreadyCached,
@@ -660,10 +641,6 @@ pub enum EnsureCachedOutcome {
 }
 
 impl ComponentsService {
-    // (continuation of the impl above — split for readability of the new
-    // ensure_versioned_dep_cached helper, since the original impl block
-    // contains a lot of unrelated methods.)
-
     pub async fn get_component_path(&self, component: &CacheComponent) -> anyhow::Result<PathBuf> {
         let path = self.component_cache.get_component_path(component).await?;
 

@@ -1,0 +1,94 @@
+---
+source: crates/forage-server/src/tests/org_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/testorg/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="mb-8">
+<a href="/orgs/testorg/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">← Developer settings</a>
+<h2 class="text-lg font-bold mt-2">Register OAuth application</h2>
+<p class="text-sm text-gray-500 mt-1">Forest will issue a client ID and secret once the app is created.</p>
+</div>
+<div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">Name taken</div>
+<form method="POST" action="/orgs/testorg/settings/developers" class="space-y-6 max-w-xl">
+<input type="hidden" name="_csrf" value="test-csrf">
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1" for="name">Application name</label>
+<input id="name" name="name" type="text" required maxlength="100" placeholder="My Integration" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1" for="description">Description <span class="text-gray-400 font-normal">(optional)</span></label>
+<input id="description" name="description" type="text" placeholder="What does this app do?" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1" for="homepage_url">Homepage URL <span class="text-gray-400 font-normal">(optional)</span></label>
+<input id="homepage_url" name="homepage_url" type="url" placeholder="https://app.example.com" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+</div>
+<div>
+<label class="block text-sm font-medium text-gray-700 mb-1" for="redirect_uris">Redirect URIs</label>
+<p class="text-xs text-gray-500 mb-1">One per line. Must be <code>https://</code> (or <code>http://localhost</code> for development).</p>
+<textarea id="redirect_uris" name="redirect_uris" rows="3" required placeholder="https://app.example.com/auth/callback" class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900"></textarea>
+</div>
+<fieldset>
+<legend class="block text-sm font-medium text-gray-700 mb-1">Scopes</legend>
+<p class="text-xs text-gray-500 mb-2">What the app may request access to.</p>
+<div class="space-y-2">
+<label class="flex items-start gap-2">
+<input type="checkbox" name="scope_openid" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">openid</span> — OpenID Connect sign-in (issues an ID token)</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_profile" checked class="mt-0.5">
+<span class="text-sm"><span class="font-mono">profile</span> — username, user ID and avatar</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_email" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">email</span> — verified email addresses</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_components_publish" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">components:publish</span> — publish Forest components from CI</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_tokens_introspect" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">tokens:introspect</span> — check other apps’ tokens (a service that accepts them)</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_datagateway_apply" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">datagateway:apply</span> — define data gateway project metrics</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="scope_datagateway_read" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">datagateway:read</span> — query data gateway project metrics</span>
+</label>
+</div>
+</fieldset>
+<fieldset>
+<legend class="block text-sm font-medium text-gray-700 mb-1">Grant types</legend>
+<p class="text-xs text-gray-500 mb-2">How the app authenticates. An app may use both — acting for a user and acting as itself.</p>
+<div class="space-y-2">
+<label class="flex items-start gap-2">
+<input type="checkbox" name="grant_authorization_code" checked class="mt-0.5">
+<span class="text-sm"><span class="font-mono">authorization_code</span> — “Sign in with Forest”, on behalf of a user</span>
+</label><label class="flex items-start gap-2">
+<input type="checkbox" name="grant_client_credentials" class="mt-0.5">
+<span class="text-sm"><span class="font-mono">client_credentials</span> — a service calling as itself, with no user involved</span>
+</label>
+</div>
+</fieldset>
+<div class="flex items-center gap-3">
+<button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Create application</button>
+<a href="/orgs/testorg/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+</div>
+</form>
+</div>
+</div>
+</section>
+</main>

@@ -2,7 +2,6 @@ use forage_core::auth::{AuthError, OidcExchange, OidcIdentity};
 use reqwest::header;
 use serde::Deserialize;
 
-/// Real Google OIDC exchange implementation using reqwest.
 pub struct GoogleOidcExchange {
     client_id: String,
     client_secret: String,
@@ -41,7 +40,6 @@ impl OidcExchange for GoogleOidcExchange {
         code: &str,
         redirect_uri: &str,
     ) -> Result<OidcIdentity, AuthError> {
-        // Step 1: Exchange authorization code for tokens.
         let token_resp = self
             .http
             .post("https://oauth2.googleapis.com/token")
@@ -69,7 +67,6 @@ impl OidcExchange for GoogleOidcExchange {
             .await
             .map_err(|e| AuthError::Other(format!("failed to parse Google token response: {e}")))?;
 
-        // Step 2: Fetch user info.
         let userinfo_resp = self
             .http
             .get("https://www.googleapis.com/oauth2/v3/userinfo")
@@ -99,8 +96,6 @@ impl OidcExchange for GoogleOidcExchange {
         })
     }
 }
-
-// ─── GitHub ─────────────────────────────────────────────────────────
 
 pub struct GitHubOidcExchange {
     client_id: String,
@@ -150,7 +145,6 @@ impl OidcExchange for GitHubOidcExchange {
         code: &str,
         _redirect_uri: &str,
     ) -> Result<OidcIdentity, AuthError> {
-        // Step 1: Exchange code for access token.
         let token_resp = self
             .http
             .post("https://github.com/login/oauth/access_token")
@@ -177,7 +171,6 @@ impl OidcExchange for GitHubOidcExchange {
             .await
             .map_err(|e| AuthError::Other(format!("failed to parse GitHub token response: {e}")))?;
 
-        // Step 2: Fetch user profile.
         let user: GitHubUser = self
             .http
             .get("https://api.github.com/user")
@@ -190,7 +183,6 @@ impl OidcExchange for GitHubOidcExchange {
             .await
             .map_err(|e| AuthError::Other(format!("failed to parse GitHub user: {e}")))?;
 
-        // Step 3: Get verified primary email (may not be in user profile).
         let email = if let Some(ref e) = user.email {
             e.clone()
         } else {

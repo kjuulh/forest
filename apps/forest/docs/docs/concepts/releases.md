@@ -11,6 +11,7 @@ Queued → Assigned → Running → Succeeded
                              → Failed
                              → TimedOut
                              → Cancelled
+                             → Superseded
 ```
 
 | State | Meaning |
@@ -22,6 +23,9 @@ Queued → Assigned → Running → Succeeded
 | **Failed** | Deployment failed |
 | **TimedOut** | No progress within timeout (5 min assigned, 1 hr running) |
 | **Cancelled** | Manually or automatically cancelled |
+| **Superseded** | Replaced by a newer queued release under a `supersede_pending` policy |
+
+A release can also stay **Queued** while a [soak-time policy](policies.md) for its environment is not yet met.
 
 Forest enforces a **partial unique index**: only one release can be in-flight per project+destination at a time.
 
@@ -33,6 +37,7 @@ An annotation creates an immutable record of what you're deploying and why:
 
 ```bash
 forest release annotate \
+  --annotation-only \
   --organisation my-org \
   --project-name my-service \
   --context-title "Deploy v1.2.3" \
@@ -47,27 +52,29 @@ The annotation captures three categories of metadata:
 - **Reference**: commit SHA, branch, message, version, repository URL
 
 !!! note
-    Annotations can trigger automatic releases if [triggers](triggers.md) are configured. Use `--annotation-only` to skip trigger evaluation.
+    This explicit-release recipe skips trigger evaluation with `--annotation-only`. For the normal pipeline-first flow, prepare then annotate without that flag, inspect the configured triggers and whole pipeline first, and do not also make the separate release call below.
 
 ### 2. Release
 
 Execute the deployment:
 
 ```bash
-forest release release \
+forest release release <slug> \
   --organisation my-org \
   --project my-service \
   --environment prod
 ```
 
-This creates one **release intent** per destination. Each intent is an independent unit of work that a runner picks up and executes.
+This creates one **release intent** with a release per destination. Each destination's release is an independent unit of work that a runner picks up and executes.
 
-### 3. Wait
+The slug printed by `annotate` names the artifact. `forest release release <slug> -e <env>` releases that same artifact again: this is how an artifact is promoted to another environment, or rolled back by releasing an earlier slug. There is no separate rollback command.
+
+### 3. Follow
 
 Stream progress in real-time:
 
 ```bash
-forest release wait <release-intent-id>
+forest release show <slug> --follow
 ```
 
 The wait stream includes:
@@ -78,17 +85,20 @@ The wait stream includes:
 
 ## Combined Command
 
-`forest release create` bundles all three steps:
+`forest release create` prepares and annotates, auto-detecting organisation, project and git context:
+
+The no-target form below is in **v0.3.17** and newer. Released v0.3.16 requires an environment and skips triggers; use `prepare` + `annotate --source-type ci` for a version-independent trigger flow. A build from source may print an older number, so check `create --help`.
 
 ```bash
-forest release create --environment dev
+forest release create --source-type ci       # triggers decide; usually the project's pipeline
+forest release create --environment dev      # release to dev directly, triggers skipped
 ```
 
-It auto-detects organisation, project, and git context from the local environment.
+Without `--environment` or `--destination`, matching triggers release the annotation, and they may deploy through the whole pipeline, including prod. With a target, it releases there directly **unless `--skip-commit` or `--pipeline` is supplied**. `--skip-commit` enables triggers even with `-e dev`; `--pipeline` runs the whole pipeline, not just dev. Neither is an environment fence.
 
 ## Force Release
 
-If a release is already queued for a destination, use `--force` to cancel it and jump to the front:
+If a release is already queued for a destination, use `--force` to cancel it and jump to the front. `--force` does not bypass [policies](policies.md):
 
 ```bash
 forest release release --environment prod --force
@@ -96,10 +106,10 @@ forest release release --environment prod --force
 
 ## Release with Pipeline
 
-Use `--pipeline` to route the release through the project's configured [pipeline](pipelines.md):
+Use `--pipeline` to route the release through the project's configured [pipeline](pipelines.md). The whole pipeline runs, whatever `--environment` says:
 
 ```bash
-forest release release --environment prod --pipeline
+forest release release <slug> --environment dev --pipeline
 ```
 
 ## Event Sourcing
@@ -114,7 +124,23 @@ Releases are stored as an append-only event log (`release_events` table) with a 
 
 A background process monitors stuck releases:
 
+- **Assigned** or **running** releases whose runner has sent no heartbeat for 90 seconds fail with "release heartbeat lost". Up to forest-server v0.3.18, a server restart mid-deploy ended in-process releases this way; later servers drain first (see [Server restarts](#server-restarts)).
 - **Assigned** releases that haven't started within 5 minutes are timed out
 - **Running** releases that haven't completed within 1 hour are timed out
 
-This prevents releases from being permanently stuck if a runner crashes.
+Every release that starts sends a `RELEASE_STARTED` notification, whether `forest release` or a matching trigger began it (triggered releases since forest-server after v0.3.18; earlier servers sent it for manual releases only).
+
+This prevents releases from being permanently stuck if a runner crashes. A reaped release sends a `RELEASE_FAILED` notification like any other failure, so Slack messages and webhooks show it as failed (since forest-server after v0.3.18; earlier servers sent none).
+
+## Server restarts
+
+Since forest-server after v0.3.18, a server that receives SIGTERM (a deploy or scale-in) drains instead of dropping the releases it is running:
+
+1. It stops claiming queued releases at once, so another replica picks them up, and its health check reports `accepting-releases` as unhealthy.
+2. Releases already running inside the server get `FOREST_DRAIN_TIMEOUT_SECS` (default 90 seconds, flag `--drain-timeout-secs`) to finish and are recorded as usual.
+3. A release still running after that is interrupted: Terraform gets SIGINT and up to 15 seconds to stop cleanly, save its state and release its state lock.
+4. Whatever is left then fails immediately with "interrupted by forest-server shutdown" and a `RELEASE_FAILED` notification, rather than 90 seconds later as "release heartbeat lost". The next queued release for that destination starts on another replica.
+
+Interrupted releases are failed, not re-queued: a half-applied Terraform run, a saved plan that no longer matches state, or a provider call already in flight is not safe to start again without someone looking at it. Re-run the release once you have checked the destination. If Terraform had to be killed rather than stopping on SIGINT, its state lock stayed held on forest-server v0.3.18 and earlier and needed `forest state unlock`; after v0.3.18 the replica releases the lock itself once Terraform has exited or been killed, and a lock left by a replica that disappeared is cleared by the next release once that replica has marked itself stopped or been silent for `FOREST_REPLICA_GONE_SECS` (default 20 minutes) (see [State locks](destinations.md#state-locks)). The reaper never removes locks.
+
+The server exits within the drain timeout plus 25 seconds, so the orchestrator's stop timeout must be at least that (120 seconds on ECS with the default). Remote runners are not failed when the server they are connected to shuts down: the server closes their stream after the drain and they reconnect to another replica. A runner reconnects only after the release it is running ends, so a remote release that outlives the drain by more than the 90-second heartbeat window is still reaped.

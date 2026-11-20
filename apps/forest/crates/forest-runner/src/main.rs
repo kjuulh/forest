@@ -47,8 +47,6 @@ fn register_destinations(cli: &Cli) -> Vec<Box<dyn RunnerDestination>> {
         dests.push(Box::new(FluxV1RunnerDestination));
     }
 
-    // Future: kubernetes, terraform
-
     dests
 }
 
@@ -68,7 +66,6 @@ async fn main() -> anyhow::Result<()> {
         anyhow::bail!("no destinations registered");
     }
 
-    // Collect capabilities from all registered destinations
     let capabilities: Vec<_> = destinations.iter().flat_map(|d| d.capabilities()).collect();
 
     tracing::info!(

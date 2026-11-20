@@ -9,16 +9,12 @@ use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "forage_session";
 
-/// Maximum access token lifetime: 24 hours.
-/// Defends against forest-server returning absolute timestamps instead of durations.
 const MAX_TOKEN_LIFETIME_SECS: i64 = 86400;
 
-/// Cap expires_in_seconds to a sane maximum.
 pub fn cap_token_expiry(expires_in_seconds: i64) -> i64 {
     expires_in_seconds.min(MAX_TOKEN_LIFETIME_SECS)
 }
 
-/// Active session data available to route handlers.
 pub struct Session {
     pub session_id: SessionId,
     pub access_token: String,
@@ -28,16 +24,9 @@ pub struct Session {
     pub session_data: forage_core::session::SessionData,
 }
 
-/// Validate a `return_to` path as safe to redirect to.
-///
-/// Accepts only same-origin absolute paths. Rejects:
-///   - empty / `None`
-///   - anything not starting with `/`
-///   - protocol-relative URLs (`//evil.com`) and `/\evil`
-///   - absolute URLs (`https://…`) — these don't start with `/`, caught above
 pub fn safe_return_to(raw: Option<&str>) -> Option<&str> {
     let p = raw?;
-    if p.len() < 2 || !p.starts_with('/') {
+    if p.len() < 2 || !p.starts_with('/') || p.chars().any(char::is_control) {
         return None;
     }
     let second = p.as_bytes()[1];
@@ -47,7 +36,6 @@ pub fn safe_return_to(raw: Option<&str>) -> Option<&str> {
     Some(p)
 }
 
-/// Build a /login redirect that preserves the original URL as a return_to parameter.
 pub(crate) fn login_redirect(uri: &axum::http::Uri) -> axum::response::Redirect {
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     if path == "/" || path == "/dashboard" || path.starts_with("/login") || path.starts_with("/signup") {
@@ -60,8 +48,6 @@ pub(crate) fn login_redirect(uri: &axum::http::Uri) -> axum::response::Redirect 
     }
 }
 
-/// Extractor that requires an active session. Redirects to /login if not authenticated.
-/// Handles transparent token refresh when access token is near expiry.
 impl FromRequestParts<AppState> for Session {
     type Rejection = axum::response::Redirect;
 
@@ -84,7 +70,6 @@ impl FromRequestParts<AppState> for Session {
             .flatten()
             .ok_or(redirect.clone())?;
 
-        // Transparent token refresh
         if session_data.needs_refresh() {
             match state
                 .forest_client
@@ -98,14 +83,11 @@ impl FromRequestParts<AppState> for Session {
                         chrono::Utc::now() + chrono::Duration::seconds(cap_token_expiry(tokens.expires_in_seconds));
                     session_data.last_seen_at = chrono::Utc::now();
 
-                    // Refresh the user cache too
                     if let Ok(user) = state
                         .forest_client
                         .get_user(&session_data.access_token)
                         .await
                     {
-                        // Preserve existing orgs on failure — a transient gRPC error
-                        // should not wipe the cached org list.
                         let previous_orgs = session_data
                             .user
                             .as_ref()
@@ -138,14 +120,11 @@ impl FromRequestParts<AppState> for Session {
                     let _ = state.sessions.update(&session_id, session_data.clone()).await;
                 }
                 Err(_) => {
-                    // Refresh token rejected - session is dead
                     let _ = state.sessions.delete(&session_id).await;
                     return Err(axum::response::Redirect::to("/login"));
                 }
             }
         } else {
-            // Refresh orgs if they're empty OR if the session hasn't been seen
-            // for a while (e.g. after server restart, PG session loaded with stale orgs).
             let now = chrono::Utc::now();
             let orgs_empty = session_data
                 .user
@@ -182,7 +161,6 @@ impl FromRequestParts<AppState> for Session {
                     }
                 }
             } else {
-                // Throttle last_seen_at writes: only update if older than 5 minutes
                 let now = chrono::Utc::now();
                 if now - session_data.last_seen_at > chrono::Duration::minutes(5) {
                     session_data.last_seen_at = now;
@@ -207,8 +185,6 @@ impl FromRequestParts<AppState> for Session {
     }
 }
 
-/// Extractor that optionally provides session info. Never rejects.
-/// Used for pages that behave differently when authenticated (e.g., login/signup redirect).
 pub struct MaybeSession {
     pub session: Option<Session>,
 }
@@ -225,8 +201,6 @@ impl FromRequestParts<AppState> for MaybeSession {
     }
 }
 
-/// Build a Set-Cookie header for the session.
-/// When `remember` is true, the cookie persists for 30 days; otherwise it is a session cookie.
 pub fn session_cookie(session_id: &SessionId, remember: bool) -> CookieJar {
     let mut builder = Cookie::build((SESSION_COOKIE, session_id.to_string()))
         .path("/")
@@ -241,12 +215,10 @@ pub fn session_cookie(session_id: &SessionId, remember: bool) -> CookieJar {
     CookieJar::new().add(builder.build())
 }
 
-/// Validate that a submitted CSRF token matches the session's token.
 pub fn validate_csrf(session: &Session, submitted: &str) -> bool {
     !session.csrf_token.is_empty() && session.csrf_token == submitted
 }
 
-/// Build a Set-Cookie header that clears the session cookie.
 pub fn clear_session_cookie() -> CookieJar {
     let mut cookie = Cookie::from(SESSION_COOKIE);
     cookie.set_path("/");
@@ -282,5 +254,8 @@ mod tests {
         assert_eq!(safe_return_to(Some("javascript:alert(1)")), None);
         assert_eq!(safe_return_to(Some("//evil.com/path")), None);
         assert_eq!(safe_return_to(Some("/\\evil.com")), None);
+        assert_eq!(safe_return_to(Some("/\t/evil.com")), None);
+        assert_eq!(safe_return_to(Some("/\r\n/evil.com")), None);
+        assert_eq!(safe_return_to(Some("/orgs\n/evil")), None);
     }
 }

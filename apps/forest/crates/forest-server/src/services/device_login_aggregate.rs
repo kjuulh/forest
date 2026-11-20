@@ -1,15 +1,3 @@
-//! Service layer for the device-login aggregate.
-//!
-//! Orchestrates the pure `DeviceGrantAggregate` (in `domains::device_login`)
-//! with the projection table `device_login_grants` and the surrounding
-//! effectful shell (RNG, clock, DB). See `apps/forest/TASKS/022-device-login.md`.
-//!
-//! Single-use enforcement: a successful `poll` marks the grant as
-//! `Consumed` atomically with the event store write. A second poll of
-//! the same `device_code` will see `Consumed` and report `Expired` to
-//! the caller — externally indistinguishable from a natural TTL expiry,
-//! so a replay attacker cannot learn that the code was already redeemed.
-
 use crate::event_store::EventStoreExt;
 use anyhow::Context;
 use chrono::{Duration, Utc};
@@ -21,24 +9,15 @@ use crate::domains::device_login::{
     self, DeviceGrantAggregate, InitiateDeviceGrantParams, PollStatus,
 };
 
-const DEFAULT_EXPIRES_IN_SECONDS: i64 = 900; // 15 min
+const DEFAULT_EXPIRES_IN_SECONDS: i64 = 900;
 const DEFAULT_INTERVAL_SECONDS: i32 = 5;
 
-/// Hard bounds on Initiate inputs. Inputs above these get rejected with
-/// `invalid_argument` rather than being silently truncated — clients
-/// should fit comfortably, and oversize payloads suggest abuse.
 const MAX_CLIENT_NAME_LEN: usize = 255;
 const MAX_CLIENT_VERSION_LEN: usize = 64;
 const MAX_SCOPES: usize = 16;
 const MAX_SCOPE_LEN: usize = 64;
-/// Hard upper bound on a submitted user_code (before normalisation).
-/// The legit form is "XXXX-XXXX" = 9 chars; we allow some slack for
-/// whitespace pasted from terminals but reject anything that looks like
-/// an attempt to overflow a column or LIKE-clause.
 const MAX_USER_CODE_INPUT_LEN: usize = 32;
 
-/// What a fresh `initiate` returns to the caller. The raw `device_code`
-/// only ever lives in memory and in the gRPC response.
 #[derive(Debug, Clone)]
 pub struct InitiatedDeviceGrant {
     pub grant_id: Uuid,
@@ -50,20 +29,19 @@ pub struct InitiatedDeviceGrant {
     pub interval_seconds: i32,
 }
 
-/// Outcome of a `poll` from the CLI's perspective. The handler maps this
-/// to the proto `PollDeviceLoginResponse`.
 #[derive(Debug, Clone)]
 pub enum DeviceLoginPollOutcome {
     Pending,
-    /// The grant was approved and is now consumed. The handler should
-    /// issue tokens for `user_id` and return them to the CLI.
-    Approved {
-        user_id: Uuid,
-    },
+    Approved { user_id: Uuid, scopes: Vec<String> },
     Denied,
     Expired,
-    /// The CLI polled faster than `interval_seconds`. RFC 8628 § 3.5.
     SlowDown,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingDeviceGrant {
+    pub app_id: Option<Uuid>,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -87,10 +65,8 @@ impl DeviceLoginAggregateService {
         client_name: &str,
         client_version: &str,
         scopes: Vec<String>,
+        app_id: Option<Uuid>,
     ) -> anyhow::Result<InitiatedDeviceGrant> {
-        // Bound caller-controlled inputs before they hit the DB. Each
-        // limit is generous for legitimate clients (the canonical
-        // client_name "forest-cli/0.3.2 darwin-arm64" is ~36 chars).
         if client_name.len() > MAX_CLIENT_NAME_LEN {
             anyhow::bail!("client_name too long");
         }
@@ -114,11 +90,6 @@ impl DeviceLoginAggregateService {
         let now = Utc::now();
         let expires_at = now + Duration::seconds(DEFAULT_EXPIRES_IN_SECONDS);
 
-        // Pre-generate code candidates up front so the (non-Send)
-        // ThreadRng never spans an await boundary. Five attempts is
-        // generous — collisions on `device_code_hash` (256-bit RNG output)
-        // are vanishingly unlikely; the practical cap is `user_code`
-        // collisions in the projection unique index.
         let mut candidates = Vec::with_capacity(5);
         {
             let mut rng = rand::rng();
@@ -133,9 +104,6 @@ impl DeviceLoginAggregateService {
 
         let mut last_err: Option<anyhow::Error> = None;
         for (device_code, device_code_hash, user_code_normalized) in candidates {
-            // Use the device_code_hash as the stream key — it's the
-            // identifier we look the grant up by during poll, and it's
-            // globally unique (256 bits of entropy).
             let stream_key = device_code_hash.clone();
             let mut root = self
                 .event_store
@@ -152,12 +120,11 @@ impl DeviceLoginAggregateService {
                     scopes: scopes.clone(),
                     expires_at,
                     interval_seconds: DEFAULT_INTERVAL_SECONDS,
+                    app_id,
                 },
             ) {
                 Ok(id) => id,
                 Err(e) => {
-                    // Should be unreachable — the stream is fresh per
-                    // device_code_hash. If it ever happens, propagate.
                     return Err(e);
                 }
             };
@@ -176,8 +143,8 @@ impl DeviceLoginAggregateService {
                             "INSERT INTO device_login_grants
                                 (id, device_code_hash, user_code, client_name,
                                  client_version, scopes, status, expires_at,
-                                 interval_seconds)
-                             VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)",
+                                 interval_seconds, app_id)
+                             VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)",
                         )
                         .bind(grant_id)
                         .bind(&device_code_hash_for_insert)
@@ -187,6 +154,7 @@ impl DeviceLoginAggregateService {
                         .bind(&scopes_json)
                         .bind(expires_at)
                         .bind(DEFAULT_INTERVAL_SECONDS)
+                        .bind(app_id)
                         .execute(&mut **tx)
                         .await
                         .context("insert device_login_grants projection")?;
@@ -210,8 +178,6 @@ impl DeviceLoginAggregateService {
                     });
                 }
                 Err(e) => {
-                    // The most common cause is a `user_code` index
-                    // collision — retry with fresh codes.
                     last_err = Some(e);
                     continue;
                 }
@@ -222,18 +188,14 @@ impl DeviceLoginAggregateService {
             .unwrap_or_else(|| anyhow::anyhow!("device login: failed to allocate unique code")))
     }
 
-    /// Poll a device grant. If approved within TTL, atomically marks it
-    /// consumed and returns the `user_id` so the handler can issue tokens.
-    pub async fn poll(&self, device_code: &str) -> anyhow::Result<DeviceLoginPollOutcome> {
-        // Bound the input length so an attacker can't ship megabytes
-        // hoping to slow the hasher. The legitimate device_code is 43
-        // ASCII chars; we accept up to 128 to leave headroom for future
-        // changes.
+    pub async fn poll(
+        &self,
+        device_code: &str,
+        app: Option<Uuid>,
+    ) -> anyhow::Result<DeviceLoginPollOutcome> {
         if device_code.len() > 128 {
             return Ok(DeviceLoginPollOutcome::Expired);
         }
-        // Unknown / malformed codes are masked as Expired (same as the
-        // anti-enumeration treatment of an unknown but well-formed code).
         if device_code.is_empty() {
             return Ok(DeviceLoginPollOutcome::Expired);
         }
@@ -245,16 +207,14 @@ impl DeviceLoginAggregateService {
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
 
+        if root.state.app_id != app {
+            return Ok(DeviceLoginPollOutcome::Expired);
+        }
+
         let external = root.state.poll_status(now);
 
-        // Slow-down only applies to *pending* grants. Terminal states
-        // (denied / expired / consumed-masked-as-expired) must be
-        // returned regardless of polling cadence — otherwise a replay
-        // attacker can distinguish "code was redeemed" from "code never
-        // existed" by triggering a SlowDown only on known codes.
         match external {
             PollStatus::Pending => {
-                // Read the projection to enforce interval_seconds.
                 let row = sqlx::query!(
                     r#"SELECT interval_seconds, last_polled_at
                        FROM device_login_grants
@@ -289,11 +249,11 @@ impl DeviceLoginAggregateService {
             PollStatus::Denied => Ok(DeviceLoginPollOutcome::Denied),
             PollStatus::Expired => Ok(DeviceLoginPollOutcome::Expired),
             PollStatus::Approved => {
-                // Atomically consume + update projection.
                 let user_id = root
                     .state
                     .approved_user_id
                     .context("approved grant missing user_id")?;
+                let scopes = root.state.scopes.clone();
 
                 DeviceGrantAggregate::consume(&mut root, now)?;
 
@@ -318,9 +278,32 @@ impl DeviceLoginAggregateService {
                     })
                     .await?;
 
-                Ok(DeviceLoginPollOutcome::Approved { user_id })
+                Ok(DeviceLoginPollOutcome::Approved { user_id, scopes })
             }
         }
+    }
+
+    pub async fn pending(&self, user_code: &str) -> anyhow::Result<Option<PendingDeviceGrant>> {
+        if user_code.len() > MAX_USER_CODE_INPUT_LEN {
+            return Ok(None);
+        }
+        let normalized = device_login::normalize_user_code(user_code);
+        let row = sqlx::query!(
+            r#"SELECT app_id, scopes
+               FROM device_login_grants
+               WHERE user_code = $1 AND status = 'pending' AND expires_at > now()"#,
+            normalized,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("lookup pending device_login_grants by user_code")?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(PendingDeviceGrant {
+            app_id: row.app_id,
+            scopes: serde_json::from_value(row.scopes).context("device grant scopes")?,
+        }))
     }
 
     pub async fn approve(
@@ -329,6 +312,7 @@ impl DeviceLoginAggregateService {
         user_id: Uuid,
         approving_ip: &str,
         approving_user_agent: &str,
+        app: Option<Uuid>,
     ) -> anyhow::Result<()> {
         if user_code.len() > MAX_USER_CODE_INPUT_LEN {
             anyhow::bail!("user_code too long");
@@ -336,23 +320,20 @@ impl DeviceLoginAggregateService {
         let normalized = device_login::normalize_user_code(user_code);
         let now = Utc::now();
 
-        // Resolve user_code → device_code_hash via the projection.
         let row = sqlx::query!(
-            r#"SELECT device_code_hash, status, expires_at
+            r#"SELECT device_code_hash, status, expires_at, app_id
                FROM device_login_grants
                WHERE user_code = $1"#,
             normalized,
         )
         .fetch_optional(&self.db)
         .await
-        .context("lookup device_login_grants by user_code")?;
+        .context("lookup device_login_grants by user_code")?
+        .filter(|r| r.app_id == app);
 
         let row = match row {
             Some(r) => r,
             None => {
-                // Audit the failed lookup. Do NOT echo the submitted
-                // user_code to logs — log only a short prefix so brute
-                // forcers can't seed a search of operator-side logs.
                 let prefix: String = normalized.chars().take(2).collect();
                 tracing::warn!(
                     approving_user_id = %user_id,
@@ -375,11 +356,10 @@ impl DeviceLoginAggregateService {
             .event_store
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
+        if root.state.app_id != app {
+            anyhow::bail!("no device grant matching that code");
+        }
 
-        // Truncate IP/UA before persistence — they're caller-supplied
-        // (forage forwards them on the user's behalf) so we treat them
-        // as untrusted strings even though the calling forage backend is
-        // trusted. Length caps prevent log/row bloat.
         let approving_ip_clean: String = approving_ip.chars().take(45).collect();
         let approving_ua_clean: String = approving_user_agent.chars().take(255).collect();
 
@@ -391,8 +371,6 @@ impl DeviceLoginAggregateService {
             now,
         )?;
 
-        // Audit log — captures who approved, from where, what code prefix
-        // matched. The full user_code and the device_code never appear.
         let user_code_prefix: String = normalized.chars().take(2).collect();
         tracing::info!(
             approving_user_id = %user_id,
@@ -434,7 +412,12 @@ impl DeviceLoginAggregateService {
         Ok(())
     }
 
-    pub async fn deny(&self, user_code: &str, user_id: Uuid) -> anyhow::Result<()> {
+    pub async fn deny(
+        &self,
+        user_code: &str,
+        user_id: Uuid,
+        app: Option<Uuid>,
+    ) -> anyhow::Result<()> {
         if user_code.len() > MAX_USER_CODE_INPUT_LEN {
             anyhow::bail!("user_code too long");
         }
@@ -442,14 +425,15 @@ impl DeviceLoginAggregateService {
         let now = Utc::now();
 
         let row = sqlx::query!(
-            r#"SELECT device_code_hash, status, expires_at
+            r#"SELECT device_code_hash, status, expires_at, app_id
                FROM device_login_grants
                WHERE user_code = $1"#,
             normalized,
         )
         .fetch_optional(&self.db)
         .await
-        .context("lookup device_login_grants by user_code")?;
+        .context("lookup device_login_grants by user_code")?
+        .filter(|r| r.app_id == app);
 
         let row = match row {
             Some(r) => r,
@@ -476,6 +460,9 @@ impl DeviceLoginAggregateService {
             .event_store
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
+        if root.state.app_id != app {
+            anyhow::bail!("no device grant matching that code");
+        }
 
         DeviceGrantAggregate::deny(&mut root, user_id, now)?;
 
@@ -512,8 +499,6 @@ impl DeviceLoginAggregateService {
     }
 }
 
-/// Format a normalized 8-char user code as `XXXX-XXXX`. Inverse of
-/// `normalize_user_code` for the display side.
 fn format_user_code(normalized: &str) -> String {
     if normalized.len() == 8 {
         format!("{}-{}", &normalized[..4], &normalized[4..])

@@ -8,7 +8,6 @@ use crate::auth::UserEmail;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Opaque session identifier. 32 bytes of cryptographic randomness, base64url-encoded.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionId(String);
 
@@ -20,7 +19,7 @@ impl SessionId {
         Self(base64url_encode(&bytes))
     }
 
-    /// Construct from a raw cookie value. No validation - it's just a lookup key.
+    /// No validation: the value is only a lookup key.
     pub fn from_raw(s: String) -> Self {
         Self(s)
     }
@@ -59,7 +58,6 @@ fn base64url_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Cached user info stored in the session to avoid repeated gRPC calls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedUser {
     pub user_id: String,
@@ -71,7 +69,6 @@ pub struct CachedUser {
     pub orgs: Vec<CachedOrg>,
 }
 
-/// Cached organisation membership.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedOrg {
     #[serde(default)]
@@ -80,7 +77,6 @@ pub struct CachedOrg {
     pub role: String,
 }
 
-/// Generate a CSRF token (16 bytes of randomness, base64url-encoded).
 pub fn generate_csrf_token() -> String {
     use rand::Rng;
     let mut bytes = [0u8; 16];
@@ -88,7 +84,6 @@ pub fn generate_csrf_token() -> String {
     base64url_encode(&bytes)
 }
 
-/// Server-side session data. Never exposed to the browser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
     pub access_token: String,
@@ -98,18 +93,15 @@ pub struct SessionData {
     pub csrf_token: String,
     pub created_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
-    /// True when a user signed up via OAuth and still needs to pick a username.
     #[serde(default)]
     pub needs_username: bool,
 }
 
 impl SessionData {
-    /// Whether the access token is expired or will expire within the given margin.
     pub fn is_access_expired(&self, margin: chrono::Duration) -> bool {
         Utc::now() + margin >= self.access_expires_at
     }
 
-    /// Whether the access token needs refreshing (expired or within 60s of expiry).
     pub fn needs_refresh(&self) -> bool {
         self.is_access_expired(chrono::Duration::seconds(60))
     }
@@ -121,7 +113,6 @@ pub enum SessionError {
     Store(String),
 }
 
-/// Trait for session persistence. Swappable between in-memory, Redis, Postgres.
 #[async_trait::async_trait]
 pub trait SessionStore: Send + Sync {
     async fn create(&self, data: SessionData) -> Result<SessionId, SessionError>;
@@ -156,7 +147,6 @@ mod tests {
 
     #[test]
     fn session_id_has_sufficient_length() {
-        // 32 bytes -> ~43 base64url chars
         let id = SessionId::generate();
         assert!(id.as_str().len() >= 42, "session id too short: {}", id.as_str().len());
     }
@@ -205,7 +195,6 @@ mod tests {
             created_at: Utc::now(),
             last_seen_at: Utc::now(),
         };
-        // Not expired yet, but within 60s margin
         assert!(!data.is_access_expired(chrono::Duration::zero()));
         assert!(data.needs_refresh());
     }
@@ -254,7 +243,6 @@ mod tests {
     async fn in_memory_store_delete_nonexistent_is_ok() {
         let store = InMemorySessionStore::new();
         let id = SessionId::generate();
-        // Should not error
         store.delete(&id).await.unwrap();
     }
 

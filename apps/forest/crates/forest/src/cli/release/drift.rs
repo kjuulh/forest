@@ -1,5 +1,5 @@
 use anyhow::Context;
-use forest_grpc_interface::DriftStatus;
+use forest_grpc_interface::{DestinationDrift, DriftStatus};
 
 use crate::{grpc::GrpcClientState, state::State};
 
@@ -14,8 +14,8 @@ use crate::{grpc::GrpcClientState, state::State};
 ///   forest release drift --environment dev
 ///   forest release drift -e prod -d prod/eu-west-1/core
 ///
-/// Exit status: 0 in sync, 2 drift somewhere, 1 the check could not run — so
-/// a scheduled job can alert on 2 without parsing anything.
+/// Exit status: 0 every destination checked and in sync, 2 drift with no failed
+/// checks, 1 an incomplete/unsupported/failed check (including an empty result).
 #[derive(clap::Parser)]
 pub struct DriftCommand {
     /// Environment to check.
@@ -63,32 +63,81 @@ impl DriftCommand {
             )
             .await?;
 
-        let mut worst = 0;
-        for d in &resp.destinations {
-            let (label, code) = match DriftStatus::try_from(d.status) {
-                Ok(DriftStatus::InSync) => ("in sync", 0),
-                Ok(DriftStatus::Drifted) => ("DRIFTED", 2),
-                Ok(DriftStatus::Unsupported) => ("no drift check for this destination type", 0),
-                _ => ("check failed", 1),
-            };
-            println!("{}: {label}", d.destination_name);
-            if !self.quiet && !d.output.is_empty() && code == 2 {
-                println!("{}\n", d.output);
-            }
-            if !d.error.is_empty() {
-                println!("  {}", d.error);
-            }
-            // Drift outranks a failure elsewhere: it is the finding.
-            worst = match (worst, code) {
-                (2, _) | (_, 2) => 2,
-                (1, _) | (_, 1) => 1,
-                _ => 0,
-            };
-        }
-
-        if worst != 0 {
-            std::process::exit(worst);
+        let code = report_drift(&resp.destinations, self.quiet);
+        if code != 0 {
+            std::process::exit(code);
         }
         Ok(())
+    }
+}
+
+fn report_drift(destinations: &[DestinationDrift], quiet: bool) -> i32 {
+    let mut worst = if destinations.is_empty() {
+        eprintln!("drift check returned no destinations");
+        1
+    } else {
+        0
+    };
+    for d in destinations {
+        let (label, code) = match DriftStatus::try_from(d.status) {
+            Ok(DriftStatus::InSync) => ("in sync", 0),
+            Ok(DriftStatus::Drifted) => ("DRIFTED", 2),
+            Ok(DriftStatus::Unsupported) => ("no drift check for this destination type", 1),
+            _ => ("check failed", 1),
+        };
+        println!("{}: {label}", d.destination_name);
+        if !quiet && !d.output.is_empty() && code == 2 {
+            println!("{}\n", d.output);
+        }
+        if !d.error.is_empty() {
+            println!("  {}", d.error);
+        }
+        // A partial result cannot certify that the requested scope was checked.
+        worst = match (worst, code) {
+            (1, _) | (_, 1) => 1,
+            (2, _) | (_, 2) => 2,
+            _ => 0,
+        };
+    }
+    worst
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(statuses: &[i32]) -> i32 {
+        let destinations: Vec<_> = statuses
+            .iter()
+            .map(|&status| DestinationDrift {
+                destination_name: "isolated".into(),
+                status,
+                ..Default::default()
+            })
+            .collect();
+        report_drift(&destinations, true)
+    }
+
+    #[test]
+    fn only_a_completed_in_sync_check_succeeds() {
+        assert_eq!(check(&[DriftStatus::InSync as i32]), 0);
+        assert_eq!(check(&[DriftStatus::Drifted as i32]), 2);
+        assert_eq!(check(&[]), 1);
+        for status in [
+            DriftStatus::Unsupported as i32,
+            DriftStatus::Error as i32,
+            DriftStatus::Unspecified as i32,
+            999,
+        ] {
+            assert_eq!(check(&[DriftStatus::InSync as i32, status]), 1);
+        }
+    }
+
+    #[test]
+    fn an_incomplete_scope_is_a_failure_even_when_another_destination_drifted() {
+        for status in [DriftStatus::Unsupported as i32, DriftStatus::Error as i32] {
+            assert_eq!(check(&[DriftStatus::Drifted as i32, status]), 1);
+            assert_eq!(check(&[status, DriftStatus::Drifted as i32]), 1);
+        }
     }
 }

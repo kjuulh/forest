@@ -1,14 +1,3 @@
-//! End-to-end smoke for the build path (DATA-312).
-//!
-//! Drives the real `run_build` against a throwaway cargo project with a
-//! self-contained CUE manifest (no registry import), so it runs fully offline
-//! — proving target resolution, manifest reading, the actual `cargo` invocation,
-//! and the summary all hang together. The same code path the `build-rust`
-//! component runs in production.
-//!
-//! Skips gracefully when `cargo +nightly` or `cue` aren't available, matching
-//! the repo's convention for tool-dependent tests.
-
 use std::path::Path;
 use std::process::Command;
 
@@ -24,8 +13,6 @@ fn have(bin: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// Map the host to forest's (os, arch) naming so the build is native (no
-/// cross-compile toolchain required).
 fn host_os_arch() -> (&'static str, &'static str) {
     let os = match std::env::consts::OS {
         "macos" => "macos",
@@ -57,7 +44,6 @@ async fn run_build_compiles_a_rust_component() {
     let root = dir.path();
     let name = "forest-smoke";
 
-    // A minimal, dependency-free cargo binary whose name matches the component.
     std::fs::write(
         root.join("Cargo.toml"),
         format!(
@@ -67,8 +53,6 @@ async fn run_build_compiles_a_rust_component() {
     .unwrap();
     std::fs::write(root.join("main.rs"), "fn main() { println!(\"hi\"); }\n").unwrap();
 
-    // Self-contained CUE manifest — no `forest.sh/...` import, so `cue export`
-    // needs no registry. Mirrors the shape run_build reads.
     std::fs::write(
         root.join("forest.cue"),
         format!(
@@ -92,7 +76,6 @@ async fn run_build_compiles_a_rust_component() {
         "artifact must exist on disk: {}",
         artifact.path.display()
     );
-    // checksums.sha256 is written alongside the output tree.
     assert!(
         root.join(".forest/component/output/checksums.sha256")
             .is_file(),
@@ -108,7 +91,6 @@ async fn run_build_rejects_mismatched_toolchain() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
-    // Declares a go upload, but we drive the Rust toolchain → should refuse.
     std::fs::write(
         root.join("forest.cue"),
         "forest: component: {\n\tname: \"x\"\n\tversion: \"0.1.0\"\n\tupload: {\n\t\ttype: \"go\"\n\t\tsource: \".\"\n\t\tarchitectures: { linux: { amd64: {} } }\n\t}\n}\n",

@@ -13,14 +13,13 @@ use tokio_util::sync::CancellationToken;
 use crate::forest_client::GrpcForestClient;
 use crate::notification_worker::NotificationDispatcher;
 
-/// Background component that pulls notification events from NATS JetStream
-/// and dispatches webhooks to matching integrations.
 pub struct NotificationConsumer {
     pub jetstream: jetstream::Context,
     pub store: Arc<dyn IntegrationStore>,
     pub forage_url: String,
     pub grpc: Arc<GrpcForestClient>,
     pub service_token: String,
+    pub slack: crate::providers::SlackApi,
 }
 
 impl Component for NotificationConsumer {
@@ -31,7 +30,8 @@ impl Component for NotificationConsumer {
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
         let dispatcher = Arc::new(
             NotificationDispatcher::new(self.store.clone(), self.forage_url.clone())
-                .with_grpc(self.grpc.clone(), self.service_token.clone()),
+                .with_grpc(self.grpc.clone(), self.service_token.clone())
+                .with_slack_api(self.slack.clone()),
         );
 
         let mut backoff = 1u64;
@@ -113,7 +113,7 @@ impl NotificationConsumer {
                 }
                 msg = messages.next() => {
                     let Some(msg) = msg else {
-                        return Ok(()); // Stream closed
+                        return Ok(());
                     };
                     let msg = msg.map_err(|e| format!("message error: {e}"))?;
 
@@ -140,13 +140,25 @@ impl NotificationConsumer {
         msg: &async_nats::jetstream::Message,
         dispatcher: &Arc<NotificationDispatcher>,
     ) -> Result<(), String> {
-        Self::process_payload(&msg.payload, self.store.as_ref(), dispatcher).await
+        let recipients = crate::recipients::ForestRecipients {
+            grpc: self.grpc.clone(),
+            service_token: self.service_token.clone(),
+        };
+        Self::process_payload(
+            &msg.payload,
+            self.store.as_ref(),
+            Some(&recipients),
+            Some(&self.slack),
+            dispatcher,
+        )
+        .await
     }
 
-    /// Process a raw notification payload. Extracted for testability without NATS.
     pub async fn process_payload(
         payload: &[u8],
         store: &dyn IntegrationStore,
+        recipients: Option<&dyn forage_core::integrations::direct::RecipientDirectory>,
+        slack: Option<&dyn forage_core::integrations::direct::SlackDirectory>,
         dispatcher: &NotificationDispatcher,
     ) -> Result<(), String> {
         let envelope: NotificationEnvelope = serde_json::from_slice(payload)
@@ -161,11 +173,8 @@ impl NotificationConsumer {
             "processing notification from JetStream"
         );
 
-        let tasks = forage_core::integrations::router::route_notification_for_org(
-            store,
-            &event,
-        )
-        .await;
+        let tasks =
+            forage_core::integrations::router::route_all(store, recipients, slack, &event).await;
 
         if tasks.is_empty() {
             tracing::debug!(
@@ -175,8 +184,6 @@ impl NotificationConsumer {
             return Ok(());
         }
 
-        // Dispatch all tasks sequentially within this message.
-        // JetStream provides parallelism across messages.
         for task in &tasks {
             dispatcher.dispatch(task).await;
         }

@@ -29,31 +29,26 @@ pub struct ProjectParser {
 }
 
 impl ProjectParser {
+    pub async fn get_project_specs(&self) -> anyhow::Result<Project> {
+        self.parse_project_file().await
+    }
+
     pub async fn get_project(&self) -> anyhow::Result<Project> {
         tracing::trace!("getting project");
         let mut project = self.parse_project_file().await?;
+        self.component_service
+            .pin_version_specs(&mut project)
+            .await?;
 
         let components = self.get_project_components(&project).await?;
+        let mut lockfile = crate::lockfile::LockFile::load(&project.path).await?;
+        let mut lock_changed = false;
+        let (os, arch) = component_binary::current_platform();
 
         for component in components {
-            // Only expose CLI commands for components with a usage block in the project config.
-            // Peer dependencies (used only via inter-component calls) don't surface their commands.
-            if !project.has_component_usage(&component.organisation, &component.name) {
-                tracing::trace!(
-                    "skipping CLI command registration for {}/{} (no usage block)",
-                    component.organisation,
-                    component.name,
-                );
-                continue;
-            }
+            let has_component_usage =
+                project.has_component_usage(&component.organisation, &component.name);
 
-            // Check if this is a v2 component (has forest.component.cue).
-            // Both local path deps and downloaded *versioned* deps materialise a
-            // component dir (forest.component.cue marker + .forest/component/
-            // meta.json); register `commands/*` for either. Before DATA-312 only
-            // local deps were handled, so a versioned binary component (e.g.
-            // fungus → forest-contrib/build-rust@x) exposed no `forest run`
-            // commands.
             let v2_component: Option<(std::path::PathBuf, CommandSource)> = match &component.source
             {
                 CacheComponentSource::Local(path) => Some((
@@ -74,7 +69,6 @@ impl ProjectParser {
             if let Some((v2_dir, v2_source)) = &v2_component {
                 let path = v2_dir;
                 if component_binary::is_v2_component(path) {
-                    // v2 component — check for binary (optional for template-only components)
                     let binary_path = component_binary::resolve_binary_with_meta(
                         path,
                         &component.name,
@@ -84,7 +78,41 @@ impl ProjectParser {
                     );
 
                     if let Some(ref binary_path) = binary_path {
-                        // v2 component: try cached descriptor first, then _meta/describe
+                        if let CacheComponentSource::Versioned(version) = &component.source {
+                            let version = version.to_string();
+                            let hash = binary_path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .context("resolved binary has no cache digest")?;
+                            let sha256 = format!("sha256:{hash}");
+                            lockfile.verify(
+                                &component.organisation,
+                                &component.name,
+                                &version,
+                                os,
+                                arch,
+                                &sha256,
+                            )?;
+                            if lockfile
+                                .get(&component.organisation, &component.name, &version, os, arch)
+                                .is_none()
+                            {
+                                lockfile.insert(crate::lockfile::LockEntry {
+                                    organisation: component.organisation.clone(),
+                                    name: component.name.clone(),
+                                    version,
+                                    source: crate::lockfile::LockSource::Registry {
+                                        os: os.to_string(),
+                                        arch: arch.to_string(),
+                                        sha256,
+                                    },
+                                });
+                                lock_changed = true;
+                            }
+                        }
+                        if !has_component_usage {
+                            continue;
+                        }
                         let descriptor_result = if let Some(cached) =
                             component_binary::load_cached_descriptor_with_meta(
                                 path,
@@ -106,13 +134,10 @@ impl ProjectParser {
                                 let source = v2_source.clone();
                                 let mut registered = 0;
                                 for method in &descriptor.methods {
-                                    // Only register "commands/*" for `forest run`.
-                                    // Hooks are invoked by forest release prepare, not `forest run`.
                                     if !method.name.starts_with("commands/") {
                                         continue;
                                     }
 
-                                    // Strip "commands/" prefix for the CLI name
                                     let short_name = method
                                         .name
                                         .strip_prefix("commands/")
@@ -129,10 +154,6 @@ impl ProjectParser {
                                             binary_path: binary_path.clone(),
                                             method: method.name.clone(),
                                             description: method.description.clone(),
-                                            // DATA-312: carry the streaming flag (per-method)
-                                            // and tool requirements (component-level) so the
-                                            // dispatcher can pick passthrough mode and verify
-                                            // tools up front.
                                             streaming: method.streaming,
                                             requires: descriptor.requires.clone(),
                                         },
@@ -161,7 +182,9 @@ impl ProjectParser {
                         Some(&component.name),
                         Some(&component.version.to_string()),
                     ) {
-                        // Deno/TypeScript component
+                        if !has_component_usage {
+                            continue;
+                        }
                         if let Some(entrypoint) = component_deno::resolve_entrypoint_with_meta(
                             path,
                             Some(&component.organisation),
@@ -233,19 +256,38 @@ impl ProjectParser {
                             }
                         }
                     } else {
-                        // Template-only component (no binary, no deno) — participates in
-                        // release prepare via templates, but has no `forest run` commands.
+                        if let CacheComponentSource::Versioned(version) = &component.source
+                            && lockfile
+                                .get(
+                                    &component.organisation,
+                                    &component.name,
+                                    &version.to_string(),
+                                    os,
+                                    arch,
+                                )
+                                .is_some()
+                        {
+                            anyhow::bail!(
+                                "locked binary for {}/{}@{} ({os}/{arch}) is missing or corrupt",
+                                component.organisation,
+                                component.name,
+                                version,
+                            );
+                        }
                         tracing::debug!(
                             "template-only component {}/{} (no binary, templates only)",
                             component.organisation,
                             component.name,
                         );
                     }
-                    continue; // v2 component handled — don't fall through to v1
+                    continue;
                 }
             }
 
-            // v1/legacy: register commands from forest.component.toml (if any)
+            if !has_component_usage {
+                continue;
+            }
+
             tracing::trace!("found commands: {}", component.commands.len());
 
             for (command_name, command) in component.commands {
@@ -274,6 +316,10 @@ impl ProjectParser {
                     },
                 );
             }
+        }
+
+        if lock_changed {
+            lockfile.save(&project.path).await?;
         }
 
         Ok(project)
@@ -319,7 +365,6 @@ impl ProjectParser {
                             project_components.push(component.clone())
                         }
 
-                        // Ignoring items that don't match projects
                         DependencyType::Versioned(_) => continue,
                         DependencyType::Local(_) => continue,
                     }
@@ -362,7 +407,9 @@ impl ProjectParser {
                 Some(output) => return Ok(output),
                 None => {
                     if !dir_path.pop() {
-                        anyhow::bail!("failed to find forest.toml in project");
+                        anyhow::bail!(
+                            "no forest.cue in this directory or any parent: run this from a forest project"
+                        );
                     }
                 }
             }
@@ -373,14 +420,12 @@ impl ProjectParser {
     async fn get_project_file(&self, dir: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
         let file_path = dir.join(FOREST_PROJECT_CUE_FILE);
         if file_path.exists() {
-            // 1. Transform cue into toml
             let output = export_project_cue(dir).await?;
 
             return Ok(Some((file_path, output)));
         }
         let file_path = dir.join(FOREST_PROJECT_NICKEL_FILE);
         if file_path.exists() {
-            // 1. Transform cue into toml
             let output = tokio::process::Command::new("nickel")
                 .arg("export")
                 .arg(&file_path)
@@ -400,7 +445,6 @@ impl ProjectParser {
         }
         let file_path = dir.join(FOREST_PROJECT_YAML_FILE);
         if file_path.exists() {
-            // 1. Transform cue into toml
             let output = crate::tools::cue::output(|| {
                 let mut cmd = tokio::process::Command::new("cue");
                 cmd.arg("export").arg(&file_path).arg("--out").arg("toml");
@@ -432,20 +476,6 @@ impl ProjectParser {
     }
 }
 
-/// `cue export` a project's forest.cue to TOML, evaluated from inside the
-/// project.
-///
-/// The working directory is the whole point. `cue` locates the module root by
-/// walking up from where it runs, not from the file it was handed, so handing
-/// it an absolute path from somewhere else evaluates the project against
-/// whatever module the caller happens to be standing in — or, far more often,
-/// against no module at all. Any import in the project's forest.cue then fails
-/// with "imports are unavailable because there is no cue.mod/module.cue file",
-/// naming the very file sitting next to it.
-///
-/// `forest` walks up from the current directory to find the project, so the two
-/// are equal exactly when it is run from the project root and differ every
-/// other time.
 async fn export_project_cue(dir: &Path) -> anyhow::Result<String> {
     let output = crate::tools::cue::output(|| {
         let mut cmd = tokio::process::Command::new("cue");
@@ -455,7 +485,6 @@ async fn export_project_cue(dir: &Path) -> anyhow::Result<String> {
             .arg("--out")
             .arg("toml");
 
-        // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
         if let Ok(registry) = std::env::var("CUE_REGISTRY") {
             cmd.env("CUE_REGISTRY", registry);
         }
@@ -593,9 +622,6 @@ impl TryFrom<toml::Value> for ProjectValue {
 mod project_cue_module_test {
     use super::*;
 
-    /// Lay out a project the way a real one is laid out once it depends on
-    /// anything published: a `cue.mod/module.cue`, a package inside the module,
-    /// and a `forest.cue` that imports it.
     fn write_project_importing_its_own_module(root: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(root.join("cue.mod"))?;
         std::fs::create_dir_all(root.join("shared"))?;
@@ -619,15 +645,6 @@ mod project_cue_module_test {
         Ok(())
     }
 
-    /// The property: which directory `forest` was run from must not change
-    /// whether the project parses.
-    ///
-    /// It did. `forest` walks *up* from the current directory to find the
-    /// project, so the project root and the working directory are the same
-    /// exactly when you happen to be standing at the top of the repo — and
-    /// differ every other time. `cue`, meanwhile, finds its module root by
-    /// walking up from where it runs rather than from the file it was given.
-    /// Run from a subdirectory, a project that imported anything at all failed.
     #[tokio::test]
     async fn a_project_is_evaluated_against_its_own_module_from_any_directory() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -635,8 +652,6 @@ mod project_cue_module_test {
         std::fs::create_dir_all(root.join("crates/deep/nested")).expect("create project tree");
         write_project_importing_its_own_module(&root).expect("write project");
 
-        // The path forest resolves is the project root, whatever directory the
-        // user is standing in — so that is what gets evaluated.
         let toml = export_project_cue(&root)
             .await
             .expect("a project with a cue.mod parses regardless of working directory");
@@ -648,8 +663,6 @@ mod project_cue_module_test {
         );
     }
 
-    /// The overwhelmingly common case, and the one that hid the bug for so
-    /// long: no cue.mod, no imports. It worked before and must keep working.
     #[tokio::test]
     async fn a_project_with_no_module_still_parses() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -671,9 +684,6 @@ mod project_cue_module_test {
         );
     }
 
-    /// A broken project must still fail, and the failure must name the file and
-    /// carry cue's own diagnostic — running from a different directory changed
-    /// what gets reported, so it is worth pinning.
     #[tokio::test]
     async fn a_broken_project_fails_with_cues_own_diagnostic() {
         let dir = tempfile::tempdir().expect("tempdir");

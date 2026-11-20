@@ -1,0 +1,33 @@
+---
+source: crates/forage-server/src/tests/project_pages_tests.rs
+expression: main_snapshot(&html)
+---
+<main class="flex-1 pb-16">
+<section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
+<div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
+<div class="flex items-start justify-between mb-6 gap-4">
+<div class="min-w-0">
+<h1 class="font-mono text-3xl tracking-tight leading-tight">
+<span class="text-gray-500">testorg</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">my-api</span>
+</h1>
+
+
+</div>
+
+</div>
+<div class="max-w-md mx-auto text-center border border-gray-200 rounded-lg p-8 mt-6">
+<h2 class="text-lg font-bold mb-2">Publish your first version</h2>
+<p class="text-sm text-gray-600 mb-4">Run <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">forest publish</code> from the project directory to ship the first release.</p>
+<div class="text-left">
+<div class="relative group bg-[#0a0a0a] rounded-md text-sm font-mono text-[#d1d5db] text-xs">
+<div class="overflow-x-auto p-3 pr-12">
+<pre id="get-started-cmd" class="whitespace-pre">forest publish</pre>
+</div>
+<button type="button" data-copy="get-started-cmd" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-[#1f2937] text-[#9ca3af] rounded hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">Copy</button>
+</div>
+</div>
+</div>
+</div>
+
+</section>
+</main>

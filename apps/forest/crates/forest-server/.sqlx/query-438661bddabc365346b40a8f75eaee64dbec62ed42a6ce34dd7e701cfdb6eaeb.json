@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_access_tokens t\n            SET last_used_at = now()\n            FROM oauth_apps a, users u\n            WHERE t.token_hash = $1\n              AND t.app_id = a.id\n              AND t.user_id = u.id\n              AND t.revoked_at IS NULL\n              AND t.expires_at > now()\n            RETURNING t.app_id, a.organisation_id, t.user_id, u.username, t.scopes\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_access_tokens",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "organisation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_access_tokens",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "scopes",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oauth_access_tokens",
+            "name": "scopes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "438661bddabc365346b40a8f75eaee64dbec62ed42a6ce34dd7e701cfdb6eaeb"
+}

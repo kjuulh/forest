@@ -12,14 +12,10 @@ pub struct DestinationServices {
 }
 
 impl DestinationServices {
-    /// Returns lightweight identity records used for internal lookups.
     pub fn list_indexes(&self) -> Vec<DestinationIndex> {
         self.services.iter().map(|s| s.name()).collect()
     }
 
-    /// Returns the full domain model for every registered destination type,
-    /// including description and metadata field schemas. Used by the gRPC
-    /// `ListDestinationTypes` handler.
     pub fn list_types(&self) -> Vec<forest_models::DestinationType> {
         self.services
             .iter()
@@ -63,9 +59,6 @@ impl DestinationServicesState for State {
                 DestinationService::new_flux_v1(self, release_logs_registry.clone()),
                 DestinationService::new_kubernetes_v1(release_logs_registry.clone()),
                 DestinationService::new_forage_v1(release_logs_registry.clone()),
-                // Announce-only. Runs in-process, deploys nothing, and exists so
-                // a service forest does not deploy can still have forest's
-                // release lifecycle and notifications (DATA-637).
                 DestinationService::new_generic_v1(self, release_logs_registry.clone()),
                 DestinationService::new_noop_v1(release_logs_registry.clone()),
                 DestinationService::new_terraform_v1(self, release_logs_registry),

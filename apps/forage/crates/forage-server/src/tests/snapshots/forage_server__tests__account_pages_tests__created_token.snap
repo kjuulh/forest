@@ -1,0 +1,52 @@
+---
+source: crates/forage-server/src/tests/account_pages_tests.rs
+expression: masked_main(&created.html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<div class="mb-8">
+<h1 class="text-2xl font-bold">Personal Access Tokens</h1>
+</div>
+<div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
+<p class="text-sm font-medium text-green-800 mb-2">Token created successfully. Copy it now - it won't be shown again.</p>
+<div class="flex items-center gap-2">
+<code class="flex-1 px-3 py-2 bg-white border border-green-300 rounded text-sm font-mono break-all">forg_abcdef1234567890</code>
+</div>
+</div>
+<div class="mb-8 p-6 border border-gray-200 rounded-lg">
+<h2 class="font-bold mb-4">Create new token</h2>
+<form method="POST" action="/settings/tokens" class="flex gap-3">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="text" name="name" required placeholder="Token name (e.g. CI/CD)" aria-label="Token name" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+<button type="submit" class="px-4 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">Create</button>
+</form>
+</div>
+<div class="border border-gray-200 rounded-lg overflow-hidden">
+<table class="w-full text-sm">
+<thead class="bg-gray-50">
+<tr>
+<th class="text-left px-6 py-3 font-medium">Name</th>
+<th class="text-left px-6 py-3 font-medium">Created</th>
+<th class="text-left px-6 py-3 font-medium">Last used</th>
+<th class="text-left px-6 py-3 font-medium">Expires</th>
+<th class="px-6 py-3"></th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-200">
+<tr>
+<td class="px-6 py-3 font-medium">CI &lt;deploy&gt;</td>
+<td class="px-6 py-3 text-gray-600"><time datetime="2026-01-01T00:00:00Z" class="">01 Jan 2026</time></td>
+<td class="px-6 py-3 text-gray-600">Never</td>
+<td class="px-6 py-3 text-gray-600">Never</td>
+<td class="px-6 py-3 text-right">
+<form method="POST" action="/settings/tokens/tok-1/delete">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="text-red-600 hover:text-red-800 text-sm">Revoke</button>
+</form>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</main>

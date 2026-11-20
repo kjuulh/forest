@@ -63,22 +63,8 @@ fn init_logs() -> SdkLoggerProvider {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let logger_provider = init_logs();
 
-    // Create a new OpenTelemetryTracingBridge using the above LoggerProvider.
     let otel_layer = OpenTelemetryTracingBridge::new(&logger_provider);
 
-    // To prevent a telemetry-induced-telemetry loop, OpenTelemetry's own internal
-    // logging is properly suppressed. However, logs emitted by external components
-    // (such as reqwest, tonic, etc.) are not suppressed as they do not propagate
-    // OpenTelemetry context. Until this issue is addressed
-    // (https://github.com/open-telemetry/opentelemetry-rust/issues/2877),
-    // filtering like this is the best way to suppress such logs.
-    //
-    // The filter levels are set as follows:
-    // - Allow `info` level and above by default.
-    // - Completely restrict logs from `hyper`, `tonic`, `h2`, and `reqwest`.
-    //
-    // Note: This filtering will also drop logs from these components even when
-    // they are used outside of the OTLP Exporter.
     let filter_otel = EnvFilter::new("info")
         .add_directive("hyper=off".parse().unwrap())
         .add_directive("tonic=off".parse().unwrap())
@@ -86,40 +72,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .add_directive("reqwest=off".parse().unwrap());
     let otel_layer = otel_layer.with_filter(filter_otel);
 
-    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
-    // default filter of `info` level and above, and `debug` and above for logs
-    // from OpenTelemetry crates. The filter levels can be customized as needed.
     let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
 
-    // Initialize the tracing subscriber with the OpenTelemetry layer and the
-    // Fmt layer.
     tracing_subscriber::registry()
         .with(otel_layer)
         .with(fmt_layer)
         .init();
 
-    // At this point Logs (OTel Logs and Fmt Logs) are initialized, which will
-    // allow internal-logs from Tracing/Metrics initializer to be captured.
-
     let tracer_provider = init_traces();
-    // Set the global tracer provider using a clone of the tracer_provider.
-    // Setting global tracer provider is required if other parts of the application
-    // uses global::tracer() or global::tracer_with_version() to get a tracer.
-    // Cloning simply creates a new reference to the same tracer provider. It is
-    // important to hold on to the tracer_provider here, so as to invoke
-    // shutdown on it when application ends.
     global::set_tracer_provider(tracer_provider.clone());
 
     let meter_provider = init_metrics();
-    // Set the global meter provider using a clone of the meter_provider.
-    // Setting global meter provider is required if other parts of the application
-    // uses global::meter() or global::meter_with_version() to get a meter.
-    // Cloning simply creates a new reference to the same meter provider. It is
-    // important to hold on to the meter_provider here, so as to invoke
-    // shutdown on it when application ends.
     global::set_meter_provider(meter_provider.clone());
 
     let common_scope_attributes = vec![KeyValue::new("scope-key", "scope-value")];
@@ -159,7 +125,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
-    // Collect all shutdown errors
     let mut shutdown_errors = Vec::new();
     if let Err(e) = tracer_provider.shutdown() {
         shutdown_errors.push(format!("tracer provider: {e}"));
@@ -173,7 +138,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         shutdown_errors.push(format!("logger provider: {e}"));
     }
 
-    // Return an error if any shutdown failed
     if !shutdown_errors.is_empty() {
         return Err(format!(
             "Failed to shutdown providers:{}",

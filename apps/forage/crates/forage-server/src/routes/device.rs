@@ -1,23 +1,13 @@
-//! `/device` — browser side of the forest CLI device-login flow
-//! (TASKS/022-device-login.md §1.5).
-//!
-//! The CLI calls forest-server's `InitiateDeviceLogin` directly, then
-//! sends the user here with `?user_code=ABCD-EFGH`. We render an
-//! approval form; the POST handler calls `ApproveDeviceLogin` (or
-//! `DenyDeviceLogin`) on forest-server using forage's service-account
-//! credential — same trust pattern as `OAuthLogin`.
-//!
-//! Authentication: the GET handler requires a logged-in session. If the
-//! user isn't logged in the `Session` extractor redirects to
-//! `/login?return_to=/device?user_code=…` and brings them back.
+#![allow(clippy::result_large_err)]
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use minijinja::context;
 use serde::Deserialize;
+
+use forage_core::platform::PendingOAuthDeviceAuthorization;
 
 use super::{error_page, internal_error};
 use crate::auth::{self, Session};
@@ -44,14 +34,40 @@ async fn device_page(
         return render_device(&state, &session, "", None, Some("unconfigured"));
     }
     let user_code_prefill = params.user_code.unwrap_or_default();
-    render_device(&state, &session, &user_code_prefill, None, None)
+    let app = app_grant(&state, &user_code_prefill).await?;
+    render_device_for(
+        &state,
+        &session,
+        &user_code_prefill,
+        app.as_ref(),
+        None,
+        None,
+    )
+}
+
+async fn app_grant(
+    state: &AppState,
+    user_code: &str,
+) -> Result<Option<PendingOAuthDeviceAuthorization>, Response> {
+    let (Some(client), false) = (
+        state.oauth_apps_client.as_ref(),
+        user_code.trim().is_empty(),
+    ) else {
+        return Ok(None);
+    };
+    client
+        .lookup_oauth_device_authorization(user_code.trim())
+        .await
+        .map_err(|e| internal_error(state, "lookup device authorization", &e))
 }
 
 #[derive(Deserialize)]
 struct DeviceForm {
     user_code: String,
-    action: String, // "approve" or "deny"
+    action: String,
     _csrf: String,
+    #[serde(default)]
+    client_id: String,
 }
 
 async fn device_submit(
@@ -61,10 +77,6 @@ async fn device_submit(
     Form(form): Form<DeviceForm>,
 ) -> Result<Response, Response> {
     if state.service_account_key.is_none() {
-        // Defence in depth — the GET handler already shunts users to
-        // the "unconfigured" page, but a stale form post must not slip
-        // through to forest_client and mint a misleading
-        // "code wasn't recognised" error.
         return render_device(&state, &session, "", None, Some("unconfigured"));
     }
     if !auth::validate_csrf(&session, &form._csrf) {
@@ -87,11 +99,6 @@ async fn device_submit(
         );
     }
 
-    // Forward the approver's apparent IP + UA so forest-server's audit
-    // log captures who confirmed from where. The ALB sets
-    // X-Forwarded-For; if it's absent (local dev) we leave the IP empty
-    // rather than wire up `ConnectInfo` (which would need a different
-    // axum::serve setup).
     let approving_ip = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
@@ -106,31 +113,35 @@ async fn device_submit(
 
     let user_id = &session.user.user_id;
 
+    if let Some(app) = app_grant(&state, user_code).await? {
+        return decide_app_grant(
+            &state,
+            &session,
+            user_code,
+            &app,
+            &form,
+            &approving_ip,
+            &approving_user_agent,
+        )
+        .await;
+    }
+
     match form.action.as_str() {
         "approve" => match state
             .forest_client
-            .approve_device_login(
-                user_code,
-                user_id,
-                &approving_ip,
-                &approving_user_agent,
-            )
+            .approve_device_login(user_code, user_id, &approving_ip, &approving_user_agent)
             .await
         {
-            Ok(()) => render_device(
-                &state,
-                &session,
-                user_code,
-                None,
-                Some("approved"),
-            ),
+            Ok(()) => render_device(&state, &session, user_code, None, Some("approved")),
             Err(e) => {
                 tracing::warn!(error = %e, "device login approval failed");
                 render_device(
                     &state,
                     &session,
                     user_code,
-                    Some("That code wasn't recognised, or has already expired. Start a new login from your terminal."),
+                    Some(
+                        "That code wasn't recognised, or has already expired. Start a new login from your terminal.",
+                    ),
                     None,
                 )
             }
@@ -140,13 +151,7 @@ async fn device_submit(
             .deny_device_login(user_code, user_id)
             .await
         {
-            Ok(()) => render_device(
-                &state,
-                &session,
-                user_code,
-                None,
-                Some("denied"),
-            ),
+            Ok(()) => render_device(&state, &session, user_code, None, Some("denied")),
             Err(e) => {
                 tracing::warn!(error = %e, "device login denial failed");
                 render_device(
@@ -158,14 +163,78 @@ async fn device_submit(
                 )
             }
         },
-        // Anything other than approve/deny is a probable bot or tampered
-        // form. Treat as a hard 400 to avoid silent acceptance.
         _ => Err(error_page(
             &state,
             StatusCode::BAD_REQUEST,
             "Invalid action",
             "Use the Approve or Deny buttons.",
         )),
+    }
+}
+
+async fn decide_app_grant(
+    state: &AppState,
+    session: &Session,
+    user_code: &str,
+    app: &PendingOAuthDeviceAuthorization,
+    form: &DeviceForm,
+    approving_ip: &str,
+    approving_user_agent: &str,
+) -> Result<Response, Response> {
+    if !matches!(form.action.as_str(), "approve" | "deny") {
+        return Err(error_page(
+            state,
+            StatusCode::BAD_REQUEST,
+            "Invalid action",
+            "Use the Approve or Deny buttons.",
+        ));
+    }
+    if form.client_id != app.client_id {
+        return render_device_for(
+            state,
+            session,
+            user_code,
+            Some(app),
+            Some("Check what this code is for before you approve it."),
+            None,
+        );
+    }
+    let client = state
+        .oauth_apps_client
+        .as_ref()
+        .expect("an app grant was found through the OAuth client");
+    let user_id = &session.user.user_id;
+    let outcome = if form.action == "approve" {
+        client
+            .approve_oauth_device_authorization(
+                user_code,
+                user_id,
+                approving_ip,
+                approving_user_agent,
+            )
+            .await
+            .map(|()| "approved")
+    } else {
+        client
+            .deny_oauth_device_authorization(user_code, user_id)
+            .await
+            .map(|()| "denied")
+    };
+    match outcome {
+        Ok(result) => render_device_for(state, session, user_code, Some(app), None, Some(result)),
+        Err(e) => {
+            tracing::warn!(error = %e, "app device authorization decision failed");
+            render_device_for(
+                state,
+                session,
+                user_code,
+                None,
+                Some(
+                    "That code wasn't recognised, or has already expired. Start a new login from your terminal.",
+                ),
+                None,
+            )
+        }
     }
 }
 
@@ -176,27 +245,24 @@ fn render_device(
     error: Option<&str>,
     result: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/device.html.jinja",
-            context! {
-                title => "Authorise Forest CLI",
-                description => "Approve a device login for the Forest CLI",
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! {
-                    name => &o.name,
-                    role => &o.role,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                user_code => user_code,
-                error => error,
-                // "approved" | "denied" | None — the template uses this
-                // to swap the form for a success/cancelled banner.
-                result => result,
-            },
-        )
-        .map_err(|e| internal_error(state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    render_device_for(state, session, user_code, None, error, result)
+}
+
+fn render_device_for(
+    state: &AppState,
+    session: &Session,
+    user_code: &str,
+    app: Option<&PendingOAuthDeviceAuthorization>,
+    error: Option<&str>,
+    result: Option<&str>,
+) -> Result<Response, Response> {
+    let page = crate::views::auth::DevicePage::new(
+        state,
+        session,
+        user_code,
+        app,
+        error,
+        crate::views::auth::DeviceOutcome::from_result(result),
+    );
+    Ok(Html(crate::views::pages::device::render(&page)).into_response())
 }

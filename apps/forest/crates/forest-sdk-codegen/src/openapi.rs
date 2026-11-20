@@ -5,7 +5,6 @@ pub mod models {
 
     use serde::{Deserialize, Serialize};
 
-    /// Root OpenAPI 3.x document.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Document {
         pub openapi: String,
@@ -204,9 +203,6 @@ pub mod models {
         pub headers: Option<BTreeMap<String, HeaderOrRef>>,
     }
 
-    /// Either an inline schema or a `$ref` reference.
-    /// `Ref` is tried first so that `{"$ref": "..."}` objects are correctly
-    /// distinguished from plain schemas (where all fields are optional).
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(untagged)]
     pub enum SchemaOrRef {

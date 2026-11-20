@@ -1,0 +1,67 @@
+use forage_ui::components::CsrfField;
+use forage_ui::layouts::Shell;
+use crate::views::catalogue::{integration_href, CoverageState};
+component Pill(classes: &str, children: Html) {
+<span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium {classes}">{children}</span>
+}
+props crate::views::catalogue::IntegrationCoveragePage { chrome, org, csrf_token, integration_id, name, enabled, directory_mapping, reachable, truncated, max_members, rows };
+
+<Shell chrome={chrome}>
+  {let href = integration_href(org, integration_id);}
+  <section class="app-container py-12">
+    <div class="mb-8">
+      <a href={href} class="text-sm text-gray-500 hover:text-gray-700">&larr; {name}</a>
+    </div>
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold">Member coverage</h1>
+        <p class="text-sm text-gray-500 mt-1">Who in {org} would receive individual Slack messages about their own releases. Only Forest members are listed; nothing else from the Slack directory is shown or stored.</p>
+      </div>
+      <form method="POST" action="{href}/coverage" class="shrink-0">
+        <CsrfField token={csrf_token} name="_csrf" />
+        <button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Check again with Slack</button>
+      </form>
+    </div>
+    {if !*enabled {
+      <div class="mb-6 px-4 py-3 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg">This integration is paused or was revoked in Slack, so nobody is messaged until it is resumed or reinstalled.</div>
+    }}
+    {if !*directory_mapping {
+      <div class="mb-6 px-4 py-3 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg">Directory mapping is off: only members who linked Slack themselves are reached. Turn on "Reach members without a personal Slack link" on the integration to cover everyone else.</div>
+    }}
+    <div class="grid grid-cols-2 gap-4 mb-6 max-w-md">
+      <div class="border border-gray-200 rounded-lg p-4">
+        <div class="text-2xl font-bold" data-testid="coverage-reachable">{*reachable}</div>
+        <div class="text-sm text-gray-500">reachable</div>
+      </div>
+      <div class="border border-gray-200 rounded-lg p-4">
+        <div class="text-2xl font-bold" data-testid="coverage-gaps">{props.not_reached()}</div>
+        <div class="text-sm text-gray-500">not reached</div>
+      </div>
+    </div>
+    {if *truncated {
+      <p class="text-sm text-gray-500 mb-4">Only the first {*max_members} members are shown.</p>
+    }}
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+      {for r in rows.iter() {
+        <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+          <div class="sm:w-48 shrink-0">
+            <span class="text-sm font-medium text-gray-900">{r.username}</span>
+            <span class="text-xs text-gray-400 ml-1">{r.role}</span>
+          </div>
+          <div class="flex items-start gap-2 min-w-0">
+            {match r.state {
+              CoverageState::Reachable => { <Pill classes="bg-green-50 text-green-700">Reached</Pill> }
+              CoverageState::Gap => { <Pill classes="bg-yellow-50 text-yellow-800">Setup gap</Pill> }
+              CoverageState::Off => { <Pill classes="bg-gray-100 text-gray-600">Not reached</Pill> }
+              CoverageState::Unknown => { <Pill classes="bg-gray-100 text-gray-600">Unknown</Pill> }
+            }}
+            <span class="text-sm text-gray-600 break-words">{r.detail}</span>
+          </div>
+        </div>
+      }}
+      {if rows.is_empty() {
+        <div class="px-4 py-6 text-sm text-gray-500 text-center">No members.</div>
+      }}
+    </div>
+  </section>
+</Shell>

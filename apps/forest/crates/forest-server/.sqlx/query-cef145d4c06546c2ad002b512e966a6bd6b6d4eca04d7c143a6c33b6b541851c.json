@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT app_id, scopes\n               FROM device_login_grants\n               WHERE user_code = $1 AND status = 'pending' AND expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "device_login_grants",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scopes",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "device_login_grants",
+            "name": "scopes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "cef145d4c06546c2ad002b512e966a6bd6b6d4eca04d7c143a6c33b6b541851c"
+}

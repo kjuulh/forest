@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_states (\n                   release_id, release_intent_id, project_id, destination_id,\n                   artifact_id, status, mode, queued_at, completed_at, updated_at\n               ) VALUES (\n                   $1, $2, $3, $4, $5, 'SUCCEEDED', $6,\n                   now() - ($7 || ' hours')::interval,\n                   now() - ($7 || ' hours')::interval,\n                   now() - ($7 || ' hours')::interval\n               )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "10967e2260585d4e6cdcc23a90e8f5985d654f85bfe483065b5caa1805e7d53b"
+}

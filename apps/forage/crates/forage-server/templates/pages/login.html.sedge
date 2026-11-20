@@ -1,0 +1,52 @@
+use forage_ui::components::{Alert, AuthProviders};
+use forage_ui::layouts::Shell;
+props crate::views::auth::LoginPage { chrome, identifier, error, return_to, providers };
+
+<Shell chrome={chrome}>
+  <section class="max-w-md mx-auto px-4 pt-24">
+    <h1 class="text-2xl font-bold text-center mb-8">Sign in to Forest</h1>
+
+    {if let Some(error) = error {
+      <Alert>{error}</Alert>
+    }}
+
+    <form method="POST" action="/login" class="space-y-4">
+      {if let Some(return_to) = return_to {
+        <input type="hidden" name="return_to" value={return_to}>
+      }}
+      <div>
+        <label for="identifier" class="block text-sm font-medium mb-1">Username or email</label>
+        <input type="text" id="identifier" name="identifier" value={identifier} required
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="alice or alice@example.com">
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium mb-1">Password</label>
+        <input type="password" id="password" name="password" required
+          class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          placeholder="Your password">
+      </div>
+
+      <div class="flex items-center">
+        <input type="checkbox" id="remember_me" name="remember_me" value="on" checked
+          class="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+        <label for="remember_me" class="ml-2 text-sm text-gray-600">Remember me</label>
+      </div>
+
+      <button type="submit" class="w-full py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+        Sign in
+      </button>
+    </form>
+
+    <AuthProviders
+      google_href={providers.google.then(|| providers.href("/auth/google")).as_deref()}
+      github_href={providers.github.then(|| providers.href("/auth/github")).as_deref()}
+      magic_link_href={providers.magic_link.then(|| providers.href("/auth/magic-link")).as_deref()}
+      magic_link_label="Sign in with email link" />
+
+    <p class="mt-6 text-center text-sm text-gray-600">
+      Don't have an account? <a href={providers.href("/signup")} class="font-medium text-gray-900 hover:underline">Create one</a>
+    </p>
+  </section>
+</Shell>

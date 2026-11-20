@@ -1,37 +1,5 @@
 name: publish build component
 
-# Release a `forest-contrib/build-*` component (DATA-583).
-#
-# ── Why this cannot use forest-publish.yml ─────────────────────────────
-#
-# The normal component release path is `forest run build` → `forest publish`,
-# where the build is done by a depended-on build component (DATA-312). That is
-# circular here: these *are* the build components. A build component cannot
-# build itself, and the published `build-rust` predates the `forest-build-core`
-# that understands `FOREST_BUILD_TARGETS`, so it cannot be split across native
-# runners either — it would try the whole architecture matrix on every runner
-# and fail on the cross targets.
-#
-# So this workflow bootstraps: plain `cargo build` per native runner, assembling
-# the same `.forest/component/output/<os>/<arch>/<name>` tree the build
-# components would have written. `forest publish` reads that layout directly and
-# neither knows nor cares what produced it.
-#
-# Cross-compilation is the whole reason for the matrix. Linux→macOS needs a
-# toolchain we do not have, so each platform is built where it is native —
-# except macOS amd64, which Apple's linker can target from arm64.
-#
-# ── Safety ────────────────────────────────────────────────────────────
-#
-# Publishing a new version of a build component is inert for existing
-# consumers: dependents pin an exact version (`"forest-contrib/build-go":
-# version: "0.1.3"`), so nothing picks it up until a repo deliberately bumps.
-#
-# Manual dispatch only. These are released rarely and deliberately, and the
-# in-repo version has drifted from the registry before (forest.cue said 0.1.1
-# while 0.1.3 was published) precisely because it was done by hand off-repo.
-# The version still comes from the component's own forest.cue.
-
 on:
   workflow_dispatch:
     inputs:
@@ -59,12 +27,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Shell out to `git` for fetches so cargo picks up the SSH agent and the
-  # insteadOf rule below — same convention as ci.yaml and release.yml. Without
-  # it cargo uses libgit2 and cannot reach the workspace's private git deps.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  # The forest CLI does not use sqlx, but other workspace members do; set this
-  # so resolving the workspace never needs a live database.
   SQLX_OFFLINE: "true"
 
 jobs:
@@ -87,8 +50,6 @@ jobs:
             target: aarch64-apple-darwin
             os: macos
             arch: arm64
-          # Apple's clang targets x86_64 from an arm64 host, so this one cross
-          # is safe. Every other pairing needs a toolchain we cannot assume.
           - runner: macos-latest
             target: x86_64-apple-darwin
             os: macos
@@ -110,7 +71,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Native targets need no `rustup target add`; the one cross does.
       - name: Add the cross target
         if: matrix.target == 'x86_64-apple-darwin'
         run: rustup target add x86_64-apple-darwin
@@ -119,9 +79,6 @@ jobs:
         working-directory: apps/forest
         run: cargo build --release --target ${{ matrix.target }} -p ${{ inputs.component }}
 
-      # Assemble the layout `forest publish` discovers. This is the whole trick:
-      # the output tree is a plain filesystem contract, so a plain cargo build
-      # can stand in for the build component that cannot build itself.
       - name: Stage the artifact
         working-directory: apps/forest
         run: |
@@ -149,9 +106,6 @@ jobs:
   publish:
     name: publish
     needs: build
-    # linux/amd64 is in the matrix above, which matters: `forest publish` runs
-    # the freshly built binary for the runner's own platform to derive the
-    # manifest from its `_meta/describe` response.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -160,24 +114,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # cue is installed as a plain binary here rather than through mise, and
-      # that is load-bearing.
-      #
-      # `apps/forest/mise.toml` sets, for local development:
-      #
-      #   CUE_REGISTRY = "forest.sh=registry.api.forest.development.understory.sh,…"
-      #
-      # Build components live under `apps/forest/`, so a mise-shimmed `cue`
-      # invoked from this directory picks that up — and mise's `[env]`
-      # *overrides* an explicitly exported value, so setting CUE_REGISTRY in the
-      # step is not enough. The dev registry does not serve the prod modules
-      # (`forest.sh/forest/sdk@v0.7.0` is HTTP 404 there, 200 on prod), which
-      # surfaces as a bare "module not found" pointing at the import line.
-      #
-      # A plain binary is outside mise's shim, so it sees the environment this
-      # workflow actually sets. The step below asserts that, because silently
-      # resolving against the wrong registry is exactly the failure this
-      # replaces — and publishing against the wrong one would be worse.
       - name: Install cue
         env:
           CUE_VERSION: v0.17.1
@@ -194,20 +130,17 @@ jobs:
           FOREST_NO_SHELL_INTEGRATION: "1"
         run: |
           set -euo pipefail
-          # See forest-publish.yml for the reasoning: forest releases on every
-          # merge and attaches install.sh only once all platform builds finish,
-          # so "latest" can briefly be an assetless release. install.sh is
-          # uploaded by a job that needs the builds, so the newest release
-          # carrying it is the newest fully-published one.
           tag=""
-          for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+          candidates="$(gh api --paginate 'repos/understory-io/forest/releases?per_page=100' \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+[.][0-9]+[.][0-9]+$"))')"
+          for candidate in $candidates; do
             if gh release view "$candidate" --repo understory-io/forest --json assets \
                  --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
               tag="$candidate"; break
             fi
           done
           if [ -z "$tag" ]; then
-            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            echo "::error::No stable forest release with install.sh found." >&2
             exit 1
           fi
           echo "installing forest $tag"
@@ -236,23 +169,6 @@ jobs:
           echo "Platforms:"
           find .forest/component/output -mindepth 2 -maxdepth 2 -type d | sort
 
-      # The version comes from the component's own forest.cue, same as every
-      # other publish. Re-publishing an existing version fails cleanly with
-      # "already published", so a forgotten bump is caught here rather than
-      # silently overwriting.
-      # CUE_REGISTRY is set explicitly rather than left to forest's derivation
-      # from the active context. forest only derives it when it can resolve an
-      # active context, and in a token-authenticated CI run with no local user
-      # state that resolution is not dependable — the first attempt at this
-      # publish provisioned the context successfully and still fell through to
-      # cue's default central registry, where `forest.sh/forest/sdk` does not
-      # exist. Setting it up front is unambiguous, and forest honours an
-      # existing value rather than overwriting it.
-      # Diagnostics for the module resolution that has failed here and only
-      # here. pgjump resolves the identical `forest.sh/forest/sdk@v0.7.0` pin
-      # from an identical GitHub-hosted runner minutes apart, and this
-      # directory resolves cleanly on a laptop with a cold cache and no
-      # credentials. Never blocks — it exists to make the next failure legible.
       - name: Diagnose cue module resolution
         working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
         env:

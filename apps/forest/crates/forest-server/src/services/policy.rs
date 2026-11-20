@@ -11,8 +11,6 @@ pub struct PolicyRegistry {
     db: PgPool,
 }
 
-// ── Database record ─────────────────────────────────────────────────
-
 pub struct PolicyRecord {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -24,15 +22,11 @@ pub struct PolicyRecord {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ── Domain types ────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyType {
     SoakTime,
     BranchRestriction,
     Approval,
-    /// Collapse a queue of pending releases for one target to the newest.
-    /// A *selection* policy, not a gate — see design/SKIP-TO-LATEST.md §6.
     SupersedePending,
 }
 
@@ -80,23 +74,13 @@ pub struct ApprovalConfig {
     pub required_approvals: i32,
 }
 
-/// Deploy the newest pending release for a target and mark the ones it
-/// overtook SUPERSEDED, instead of grinding through every queued one.
-///
-/// Default off, and there is no default-on path: a project with no such policy
-/// behaves exactly as it does today. See design/SKIP-TO-LATEST.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupersedePendingConfig {
     pub target_environment: String,
 
-    /// Only supersede a pending release when the newer one names the same
-    /// branch — the nearest guard against skipping a genuinely divergent
-    /// release that forest can enforce from what it records.
     #[serde(default)]
     pub same_branch_only: bool,
 
-    /// Not implemented; `validate_config` rejects `true`. Carried so the
-    /// contract is settled before anything can set it. See §3 of the design.
     #[serde(default)]
     pub cancel_in_progress: bool,
 }
@@ -163,8 +147,6 @@ impl PolicyConfig {
     }
 }
 
-// ── Evaluation result ───────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct ApprovalStateInfo {
     pub required_approvals: i32,
@@ -190,8 +172,6 @@ pub struct PolicyEvaluation {
     pub approval_state: Option<ApprovalStateInfo>,
 }
 
-// ── CRUD params ─────────────────────────────────────────────────────
-
 pub struct CreatePolicyParams {
     pub project_id: Uuid,
     pub name: String,
@@ -203,11 +183,8 @@ pub struct UpdatePolicyParams {
     pub config: Option<PolicyConfig>,
 }
 
-// ── Implementation ──────────────────────────────────────────────────
-
 impl PolicyRegistry {
     pub async fn create(&self, params: CreatePolicyParams) -> anyhow::Result<PolicyRecord> {
-        // Validate config
         self.validate_config(&params.config)?;
 
         let policy_type = params.config.policy_type().as_str().to_string();
@@ -304,14 +281,13 @@ impl PolicyRegistry {
         Ok(recs)
     }
 
-    /// Evaluate all enabled policies for a project against a target environment.
-    /// Returns evaluation results for each relevant policy.
     pub async fn evaluate_for_environment(
         &self,
         project_id: &Uuid,
         target_environment: &str,
         branch: Option<&str>,
         release_intent_id: Option<&Uuid>,
+        artifact_id: Option<&Uuid>,
     ) -> anyhow::Result<Vec<PolicyEvaluation>> {
         let policies = sqlx::query_as!(
             PolicyRecord,
@@ -335,7 +311,9 @@ impl PolicyRegistry {
                     if c.target_environment != target_environment {
                         continue;
                     }
-                    let eval = self.check_soak_time(project_id, c, &policy.name).await?;
+                    let eval = self
+                        .check_soak_time(project_id, c, &policy.name, artifact_id)
+                        .await?;
                     evaluations.push(eval);
                 }
                 PolicyConfig::BranchRestriction(ref c) => {
@@ -358,11 +336,6 @@ impl PolicyRegistry {
                     if c.target_environment != target_environment {
                         continue;
                     }
-                    // A selection policy, not a gate: it chooses which pending
-                    // release is the candidate and never blocks one. Reported
-                    // as passed so it is visible in `policy evaluate` without
-                    // ever flipping `all_passed` — the collapse itself is
-                    // driven from services/supersede.rs, not from here.
                     evaluations.push(PolicyEvaluation {
                         policy_name: policy.name.clone(),
                         policy_type: PolicyType::SupersedePending,
@@ -381,13 +354,6 @@ impl PolicyRegistry {
         Ok(evaluations)
     }
 
-    /// The enabled supersede-pending policy for this project+environment, if
-    /// there is one, with the name the reason text will quote.
-    ///
-    /// Read directly rather than through `evaluate_for_environment`, because
-    /// this policy is not a gate: there is no pass/fail to report, only a
-    /// configuration to act on. Returns `None` — meaning "behave exactly as
-    /// forest does today" — for every project that has not opted in.
     pub async fn supersede_pending_for_environment(
         &self,
         project_id: &Uuid,
@@ -408,8 +374,6 @@ impl PolicyRegistry {
             let config: SupersedePendingConfig = match serde_json::from_value(policy.config) {
                 Ok(c) => c,
                 Err(e) => {
-                    // A policy we cannot parse must not silently start
-                    // superseding deploys on a default config.
                     tracing::warn!(
                         policy = %policy.name,
                         "skipping unparseable supersede_pending config: {e}"
@@ -424,8 +388,6 @@ impl PolicyRegistry {
 
         Ok(None)
     }
-
-    // ── Internal helpers ────────────────────────────────────────────
 
     fn validate_config(&self, config: &PolicyConfig) -> anyhow::Result<()> {
         match config {
@@ -475,73 +437,56 @@ impl PolicyRegistry {
         Ok(())
     }
 
+    pub async fn environments_of_destinations(
+        &self,
+        project_id: &Uuid,
+        destination_names: &[String],
+    ) -> anyhow::Result<Vec<String>> {
+        if destination_names.is_empty() {
+            return Ok(Vec::new());
+        }
+        let environments = sqlx::query_scalar!(
+            r#"SELECT DISTINCT d.environment as "environment!"
+            FROM destinations d
+            JOIN projects p ON p.organisation = d.organisation
+            WHERE p.id = $1 AND d.name = ANY($2)"#,
+            project_id,
+            destination_names,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("environments of destinations")?;
+        Ok(environments)
+    }
+
     async fn check_soak_time(
         &self,
         project_id: &Uuid,
         config: &SoakTimeConfig,
         policy_name: &str,
+        artifact_id: Option<&Uuid>,
     ) -> anyhow::Result<PolicyEvaluation> {
-        // Find the most recent successful release to the source environment
-        let last_success = sqlx::query_scalar!(
-            r#"SELECT MAX(rs.updated_at) as "max_updated_at"
-            FROM release_states rs
-            JOIN destinations d ON rs.destination_id = d.id
-            WHERE rs.project_id = $1
-              AND d.environment = $2
-              AND rs.status = 'SUCCEEDED'"#,
+        let mut conn = self.db.acquire().await.context("check soak time")?;
+        let last_deploy = last_source_deploy(
+            &mut conn,
             project_id,
-            config.source_environment,
+            artifact_id,
+            &config.source_environment,
         )
-        .fetch_one(&self.db)
-        .await
-        .context("check soak time")?;
-
-        match last_success {
-            Some(ts) => {
-                let elapsed = chrono::Utc::now() - ts;
-                let required = chrono::Duration::seconds(config.duration_seconds);
-
-                if elapsed >= required {
-                    Ok(PolicyEvaluation {
-                        policy_name: policy_name.to_string(),
-                        policy_type: PolicyType::SoakTime,
-                        passed: true,
-                        reason: format!(
-                            "soak time satisfied: {}s elapsed since last {} deploy (required: {}s)",
-                            elapsed.num_seconds(),
-                            config.source_environment,
-                            config.duration_seconds,
-                        ),
-                        approval_state: None,
-                    })
-                } else {
-                    let remaining = (required - elapsed).num_seconds();
-                    Ok(PolicyEvaluation {
-                        policy_name: policy_name.to_string(),
-                        policy_type: PolicyType::SoakTime,
-                        passed: false,
-                        reason: format!(
-                            "soak time not met: {}s remaining ({}s elapsed, {}s required after {} deploy)",
-                            remaining,
-                            elapsed.num_seconds(),
-                            config.duration_seconds,
-                            config.source_environment,
-                        ),
-                        approval_state: None,
-                    })
-                }
-            }
-            None => Ok(PolicyEvaluation {
-                policy_name: policy_name.to_string(),
-                policy_type: PolicyType::SoakTime,
-                passed: true,
-                reason: format!(
-                    "no successful deploy to {} found yet — soak time not applicable",
-                    config.source_environment,
-                ),
-                approval_state: None,
-            }),
-        }
+        .await?;
+        let (passed, reason) = soak_verdict(
+            last_deploy,
+            chrono::Utc::now(),
+            config,
+            artifact_id.is_some(),
+        );
+        Ok(PolicyEvaluation {
+            policy_name: policy_name.to_string(),
+            policy_type: PolicyType::SoakTime,
+            passed,
+            reason,
+            approval_state: None,
+        })
     }
 
     fn check_branch_restriction(
@@ -550,58 +495,7 @@ impl PolicyRegistry {
         branch: Option<&str>,
         policy_name: &str,
     ) -> PolicyEvaluation {
-        match branch {
-            Some(b) => match Regex::new(&config.branch_pattern) {
-                Ok(re) => {
-                    if re.is_match(b) {
-                        PolicyEvaluation {
-                            policy_name: policy_name.to_string(),
-                            policy_type: PolicyType::BranchRestriction,
-                            passed: true,
-                            reason: format!(
-                                "branch '{}' matches pattern '{}'",
-                                b, config.branch_pattern
-                            ),
-                            approval_state: None,
-                        }
-                    } else {
-                        PolicyEvaluation {
-                            policy_name: policy_name.to_string(),
-                            policy_type: PolicyType::BranchRestriction,
-                            passed: false,
-                            reason: format!(
-                                "branch '{}' does not match required pattern '{}' for {}",
-                                b, config.branch_pattern, config.target_environment
-                            ),
-                            approval_state: None,
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        pattern = config.branch_pattern,
-                        "invalid regex in branch restriction policy: {e}"
-                    );
-                    PolicyEvaluation {
-                        policy_name: policy_name.to_string(),
-                        policy_type: PolicyType::BranchRestriction,
-                        passed: false,
-                        reason: format!("invalid branch pattern: {e}"),
-                        approval_state: None,
-                    }
-                }
-            },
-            None => PolicyEvaluation {
-                policy_name: policy_name.to_string(),
-                policy_type: PolicyType::BranchRestriction,
-                passed: true,
-                reason: format!(
-                    "no branch information available — skipping branch restriction for {}",
-                    config.target_environment
-                ),
-                approval_state: None,
-            },
-        }
+        branch_restriction_verdict(config, branch, policy_name)
     }
 
     async fn check_approval(
@@ -791,5 +685,172 @@ impl PolicyRegistryState for State {
         PolicyRegistry {
             db: self.db.clone(),
         }
+    }
+}
+
+pub async fn last_source_deploy(
+    conn: &mut sqlx::PgConnection,
+    project_id: &Uuid,
+    artifact_id: Option<&Uuid>,
+    source_environment: &str,
+) -> anyhow::Result<Option<chrono::DateTime<chrono::Utc>>> {
+    sqlx::query_scalar!(
+        r#"SELECT MAX(rs.updated_at) as "max_updated_at"
+        FROM release_states rs
+        JOIN destinations d ON rs.destination_id = d.id
+        WHERE rs.project_id = $1
+          AND ($2::uuid IS NULL OR rs.artifact_id = $2)
+          AND d.environment = $3
+          AND rs.mode = 'deploy'
+          AND rs.status = 'SUCCEEDED'"#,
+        project_id,
+        artifact_id,
+        source_environment,
+    )
+    .fetch_one(conn)
+    .await
+    .context("find the last successful deploy to the soak source environment")
+}
+
+pub fn soak_verdict(
+    last_deploy: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+    config: &SoakTimeConfig,
+    for_artifact: bool,
+) -> (bool, String) {
+    let subject = if for_artifact {
+        "this artifact"
+    } else {
+        "any artifact"
+    };
+    let Some(deployed_at) = last_deploy else {
+        return (
+            false,
+            format!(
+                "soak time not met: {subject} has no successful deploy to {} yet ({}s soak required before {})",
+                config.source_environment, config.duration_seconds, config.target_environment,
+            ),
+        );
+    };
+    let elapsed = now - deployed_at;
+    let required = chrono::Duration::seconds(config.duration_seconds);
+    if elapsed >= required {
+        (
+            true,
+            format!(
+                "soak time satisfied: {}s since {subject} deployed to {} (required: {}s)",
+                elapsed.num_seconds(),
+                config.source_environment,
+                config.duration_seconds,
+            ),
+        )
+    } else {
+        (
+            false,
+            format!(
+                "soak time not met: {}s remaining ({}s since {subject} deployed to {}, {}s required)",
+                (required - elapsed).num_seconds(),
+                elapsed.num_seconds(),
+                config.source_environment,
+                config.duration_seconds,
+            ),
+        )
+    }
+}
+
+pub fn branch_restriction_verdict(
+    config: &BranchRestrictionConfig,
+    branch: Option<&str>,
+    policy_name: &str,
+) -> PolicyEvaluation {
+    match branch.filter(|branch| !branch.trim().is_empty()) {
+        Some(b) => match Regex::new(&config.branch_pattern) {
+            Ok(re) => {
+                if re.is_match(b) {
+                    PolicyEvaluation {
+                        policy_name: policy_name.to_string(),
+                        policy_type: PolicyType::BranchRestriction,
+                        passed: true,
+                        reason: format!(
+                            "branch '{}' matches pattern '{}'",
+                            b, config.branch_pattern
+                        ),
+                        approval_state: None,
+                    }
+                } else {
+                    PolicyEvaluation {
+                        policy_name: policy_name.to_string(),
+                        policy_type: PolicyType::BranchRestriction,
+                        passed: false,
+                        reason: format!(
+                            "branch '{}' does not match required pattern '{}' for {}",
+                            b, config.branch_pattern, config.target_environment
+                        ),
+                        approval_state: None,
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    pattern = config.branch_pattern,
+                    "invalid regex in branch restriction policy: {e}"
+                );
+                PolicyEvaluation {
+                    policy_name: policy_name.to_string(),
+                    policy_type: PolicyType::BranchRestriction,
+                    passed: false,
+                    reason: format!("invalid branch pattern: {e}"),
+                    approval_state: None,
+                }
+            }
+        },
+        None => PolicyEvaluation {
+            policy_name: policy_name.to_string(),
+            policy_type: PolicyType::BranchRestriction,
+            passed: false,
+            reason: format!(
+                "branch metadata is absent or empty; required pattern '{}' for {}",
+                config.branch_pattern, config.target_environment
+            ),
+            approval_state: None,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_artifact_is_soaked_at_the_exact_elapsed_boundary() {
+        let deployed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let config = SoakTimeConfig {
+            source_environment: "dev".into(),
+            target_environment: "prod".into(),
+            duration_seconds: 60,
+        };
+        let boundary = deployed_at + chrono::Duration::seconds(60);
+        assert!(
+            !soak_verdict(
+                Some(deployed_at),
+                boundary - chrono::Duration::nanoseconds(1),
+                &config,
+                true,
+            )
+            .0
+        );
+        assert!(soak_verdict(Some(deployed_at), boundary, &config, true).0);
+    }
+
+    #[test]
+    fn missing_branch_metadata_cannot_satisfy_even_a_permissive_restriction() {
+        let config = BranchRestrictionConfig {
+            target_environment: "prod".into(),
+            branch_pattern: ".*".into(),
+        };
+        for branch in [None, Some(""), Some(" \t\n")] {
+            assert!(!branch_restriction_verdict(&config, branch, "restricted").passed);
+        }
+        assert!(branch_restriction_verdict(&config, Some("feature/real"), "restricted").passed);
     }
 }

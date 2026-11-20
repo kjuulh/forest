@@ -1,25 +1,10 @@
 #!/usr/bin/env zsh
-#
-# Simulates realistic production release traffic against the service-example project.
-# Assumes bootstrap.sh has already been run.
-#
-# Each run annotates a fresh artifact with random realistic metadata.
-# The trigger (main + github_actions → pipeline) handles auto-releasing
-# matching annotations. Non-matching ones sit as annotated artifacts.
-#
-# Usage:
-#   ./simulate-releases.sh          # annotate one random release
-#   ./simulate-releases.sh 10       # annotate 10 random releases
-#   ./simulate-releases.sh loop     # annotate continuously with random delays
-#
 set -e
 
 forest() { mise run forest "$@"; }
 
 ORG=rawpotion
 PROJECT=service-example
-
-# ── Data pools ─────────────────────────────────────────────────────────
 
 AUTHORS=(
   "kjuulh:contact@kasperhermansen.com"
@@ -95,11 +80,7 @@ BRANCHES=(
 
 SOURCE_TYPES=(github_actions github_actions github_actions gitlab_ci manual)
 
-# ── Helpers ────────────────────────────────────────────────────────────
-
-# Use /dev/urandom for randomness to avoid $RANDOM subshell seed issues.
 rand_int() {
-  # Returns a random integer in [0, $1)
   local max=$1
   local val
   val=$(od -An -tu4 -N4 /dev/urandom | tr -d ' ')
@@ -108,7 +89,7 @@ rand_int() {
 
 rand_element() {
   local -a arr=("${@}")
-  local idx=$(( $(rand_int ${#arr[@]}) + 1 ))  # zsh 1-based
+  local idx=$(( $(rand_int ${#arr[@]}) + 1 ))
   echo "${arr[$idx]}"
 }
 
@@ -135,8 +116,6 @@ pick_commit() {
   fi
 }
 
-# ── Annotate a random release ─────────────────────────────────────────
-
 annotate_random() {
   local msg=$(pick_commit)
   local branch=$(rand_element "${BRANCHES[@]}")
@@ -148,7 +127,6 @@ annotate_random() {
   local pr_num=$(rand_range 60 999)
   local run_id=$(rand_range 8800000000 9999999999)
 
-  # Suffix for non-main branches
   local version_suffix=""
   if [[ "$branch" != "main" ]]; then
     version_suffix="-${branch##*/}"
@@ -176,8 +154,6 @@ annotate_random() {
     --metadata "image=ghcr.io/rawpotion/service-example:${version}${version_suffix}" \
     --metadata "chart_version=1.$(rand_range 0 5).$(rand_range 0 10)"
 }
-
-# ── Main ──────────────────────────────────────────────────────────────
 
 case "${1:-1}" in
   loop)

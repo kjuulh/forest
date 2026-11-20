@@ -1,0 +1,35 @@
+use crate::ButtonVariant;
+component CsrfField(token: &str, name: &str = "csrf_token") {
+<input type="hidden" name={name} value={token}>
+}
+component TextField(label: &str, name: &str, value: &str, id: &str = "", placeholder: &str = "", mono: bool = false, hint: &str = "") {
+{let id = if id.is_empty() { format!("field-{name}") } else { id.to_string() };}
+<div>
+  <label for={id} class="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+  <input type="text" id={id} name={name} value={value} placeholder={placeholder}
+    class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm{if *mono { " font-mono" } else { "" }} focus:outline-none focus:ring-2 focus:ring-gray-900">
+  {if !hint.is_empty() { <p class="text-xs text-gray-500 mt-1">{hint}</p> }}
+</div>
+}
+component ChoiceChip(name: &str, value: &str, checked: bool, children: Html) {
+<label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+  <input type="checkbox" name={name} value={value} checked={*checked} class="rounded border-gray-300 text-blue-600">
+  {children}
+</label>
+}
+component Checkbox(id: &str, name: &str, label: &str, checked: bool, value: &str = "true", strong: bool = false) {
+<div class="flex items-center gap-2">
+  <input type="checkbox" id={id} name={name} value={value} checked={*checked} class="rounded border-gray-300">
+  <label for={id} class="text-sm{if *strong { " font-medium" } else { "" }} text-gray-700">{label}</label>
+</div>
+}
+component Button(label: &str, variant: ButtonVariant = ButtonVariant::Primary, href: Option<&str>, kind: &str = "submit") {
+{if let Some(href) = href {
+  <a href={href} class={variant.classes()}>{label}</a>
+} else {
+  <button type={kind} class={variant.classes()}>{label}</button>
+}}
+}
+component FieldLabel(children: Html) {
+<label class="block text-sm font-medium text-gray-700 mb-2">{children}</label>
+}

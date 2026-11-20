@@ -1,0 +1,25 @@
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+props crate::views::org_settings::OrgSettingsPage { chrome, org, role };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::General}>
+    <div class="space-y-8">
+      <div>
+        <h2 class="text-lg font-bold mb-4">Organisation</h2>
+        <div class="p-4 border border-gray-200 rounded-lg">
+          <dl class="text-sm space-y-3">
+            <div class="flex items-center justify-between">
+              <dt class="text-gray-500">Name</dt>
+              <dd class="font-medium">{org}</dd>
+            </div>
+            <div class="flex items-center justify-between">
+              <dt class="text-gray-500">Role</dt>
+              <dd class="font-medium">{role}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </OrgSettings>
+</Shell>

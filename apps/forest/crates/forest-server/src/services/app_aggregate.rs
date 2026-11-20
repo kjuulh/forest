@@ -8,10 +8,6 @@ use uuid::Uuid;
 use crate::domains::app::{self, AppAggregate, CreateAppParams};
 use crate::services::apps::{AppInfo, AppTokenInfo, CreatedAppToken};
 
-// ============================================================
-// Service — orchestrates aggregate + projection for writes
-// ============================================================
-
 #[derive(Clone)]
 pub struct AppAggregateService {
     event_store: EventStore,
@@ -22,10 +18,6 @@ impl AppAggregateService {
     pub fn new(event_store: EventStore, db: PgPool) -> Self {
         Self { event_store, db }
     }
-
-    // ----------------------------------------------------------
-    // Commands
-    // ----------------------------------------------------------
 
     pub async fn create_app(
         &self,
@@ -123,7 +115,7 @@ impl AppAggregateService {
         }
 
         if !root.has_pending() {
-            return Ok(()); // idempotent, no change
+            return Ok(());
         }
 
         self.event_store
@@ -158,7 +150,6 @@ impl AppAggregateService {
 
         let token_id = AppAggregate::create_token(&mut root, name.to_string(), expires_at)?;
 
-        // Generate raw token and hash — hash goes in projection, raw is returned once
         let mut raw_bytes = [0u8; 32];
         rand::fill(&mut raw_bytes[..]);
         let raw_token = hex::encode(raw_bytes);
@@ -196,7 +187,6 @@ impl AppAggregateService {
     }
 
     pub async fn revoke_token(&self, token_id: Uuid) -> anyhow::Result<()> {
-        // Look up app_id from the token
         let app_id: Uuid =
             sqlx::query_scalar!("SELECT app_id FROM app_tokens WHERE id = $1", token_id,)
                 .fetch_optional(&self.db)
@@ -228,10 +218,6 @@ impl AppAggregateService {
 
         Ok(())
     }
-
-    // ----------------------------------------------------------
-    // Queries (read from projections — kept here for convenience)
-    // ----------------------------------------------------------
 
     pub async fn get_app(&self, app_id: Uuid) -> anyhow::Result<Option<AppInfo>> {
         let rec = sqlx::query!(
@@ -298,10 +284,6 @@ impl AppAggregateService {
             .collect())
     }
 }
-
-// ============================================================
-// State integration
-// ============================================================
 
 pub trait AppAggregateServiceState {
     fn app_aggregate_service(&self) -> AppAggregateService;

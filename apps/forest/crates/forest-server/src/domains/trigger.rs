@@ -4,10 +4,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Helper types
-// ============================================================
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TriggerPatterns {
     pub branch: Option<String>,
@@ -22,10 +18,6 @@ pub struct TriggerTargets {
     pub environments: Vec<String>,
     pub destinations: Vec<String>,
 }
-
-// ============================================================
-// Events
-// ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -61,10 +53,6 @@ impl EventData for TriggerEvent {
         }
     }
 }
-
-// ============================================================
-// Aggregate state
-// ============================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TriggerStatus {
@@ -158,10 +146,6 @@ impl Aggregate for TriggerAggregate {
         }
     }
 }
-
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
 
 pub struct CreateTriggerParams {
     pub project_id: Uuid,
@@ -269,11 +253,6 @@ impl TriggerAggregate {
     }
 }
 
-// ============================================================
-// Pattern matching (pure domain logic)
-// ============================================================
-
-/// Data extracted from an annotation, used to evaluate triggers.
 pub struct AnnotationMatchData {
     pub branch: Option<String>,
     pub title: String,
@@ -298,7 +277,6 @@ impl AnnotationMatchData {
     }
 }
 
-/// Result of evaluating triggers — which triggers matched and what to release to.
 pub struct TriggerMatch {
     pub trigger_name: String,
     pub target_environments: Vec<String>,
@@ -345,14 +323,9 @@ fn validate_patterns(patterns: &TriggerPatterns) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Stream key for a trigger aggregate: `{project_id}/{name}`
 pub fn stream_key(project_id: &Uuid, name: &str) -> String {
     format!("{project_id}/{name}")
 }
-
-// ============================================================
-// Unit tests — pure aggregate logic, no database
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -382,10 +355,6 @@ mod tests {
             use_pipeline: false,
         }
     }
-
-    // ----------------------------------------------------------
-    // Create
-    // ----------------------------------------------------------
 
     #[test]
     fn create_trigger_records_event_and_returns_id() {
@@ -466,10 +435,6 @@ mod tests {
         };
         assert!(TriggerAggregate::create(&mut root, params).is_ok());
     }
-
-    // ----------------------------------------------------------
-    // Update
-    // ----------------------------------------------------------
 
     #[test]
     fn update_changes_patterns() {
@@ -556,10 +521,6 @@ mod tests {
         assert!(err.is_err());
     }
 
-    // ----------------------------------------------------------
-    // Toggle enabled
-    // ----------------------------------------------------------
-
     #[test]
     fn toggle_enabled_disables_trigger() {
         let mut root = new_root();
@@ -579,10 +540,6 @@ mod tests {
         let err = TriggerAggregate::toggle_enabled(&mut root, false);
         assert!(err.is_err());
     }
-
-    // ----------------------------------------------------------
-    // Delete
-    // ----------------------------------------------------------
 
     #[test]
     fn delete_transitions_to_deleted() {
@@ -623,10 +580,6 @@ mod tests {
         assert_eq!(root.state.name, "my-trigger");
         assert_eq!(root.state.patterns.branch.as_deref(), Some("^main$"));
     }
-
-    // ----------------------------------------------------------
-    // Event replay / hydration
-    // ----------------------------------------------------------
 
     #[test]
     fn hydrate_replays_full_lifecycle() {
@@ -690,10 +643,6 @@ mod tests {
         assert_eq!(root.state.status, TriggerStatus::NonExistent);
     }
 
-    // ----------------------------------------------------------
-    // Serde roundtrip
-    // ----------------------------------------------------------
-
     #[test]
     fn event_data_serde_roundtrip() {
         let events = vec![
@@ -728,10 +677,6 @@ mod tests {
             assert_eq!(event.event_type(), back.event_type());
         }
     }
-
-    // ----------------------------------------------------------
-    // Pattern matching
-    // ----------------------------------------------------------
 
     #[test]
     fn matches_trigger_all_none_patterns_matches_everything() {
@@ -788,19 +733,11 @@ mod tests {
         assert!(!matches_trigger(&patterns, &data));
     }
 
-    // ----------------------------------------------------------
-    // Stream key
-    // ----------------------------------------------------------
-
     #[test]
     fn stream_key_format() {
         let id = Uuid::nil();
         assert_eq!(stream_key(&id, "my-trigger"), format!("{id}/my-trigger"));
     }
-
-    // ----------------------------------------------------------
-    // Default state
-    // ----------------------------------------------------------
 
     #[test]
     fn default_aggregate_is_non_existent() {

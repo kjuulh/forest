@@ -1,40 +1,12 @@
-//! Hidden dev command: publish all in-repo workspace components, in dependency
-//! order, to the configured registry/server (DATA-312).
-//!
-//! Bringing tests up against a fresh local server otherwise means republishing
-//! every component by hand. This iterates a fixed, ordered list and runs the
-//! normal `forest components publish` flow in each directory.
-//!
-//! The order matters: the SDK module (`forest/sdk`) must land first because
-//! every other component imports it, then the deployment contract, then the
-//! leaf components. It's a hardcoded list for now — add entries as components
-//! are added.
-//!
-//! Binary components (Rust/Go/Docker) must already be built; this command only
-//! publishes. Run `cargo build` (or `forest run build` per component) first.
-
 use crate::cli::components::publish::PublishCommand;
 use crate::state::State;
 
-/// Component directories to publish, relative to the current working directory
-/// (run from the `apps/forest` workspace root), in dependency order.
 const COMPONENT_ORDER: &[&str] = &[
-    // Foundation — everything imports the SDK; the deployment contract next.
     "components/forest/sdk",
     "components/forest/deployment",
-    // Build components (DATA-312).
     "components/forest-contrib/build-rust",
     "components/forest-contrib/build-go",
     "components/forest-contrib/build-docker",
-    // Other v2 contrib components.
-    // "components/forest-contrib/init",
-    // "components/forest-contrib/git-init",
-    // "components/forest-contrib/checkout",
-    // "components/forest-contrib/git-commit-push",
-    // "components/forest-contrib/gitea-create-repo",
-    // "components/forest-contrib/render-template",
-    // "components/forest-contrib/terraform-service",
-    // "components/forest-contrib/ecs-service",
 ];
 
 #[derive(clap::Parser)]
@@ -70,9 +42,6 @@ impl BootstrapCommand {
             }
 
             tracing::info!("publishing {rel}");
-            // Switch cwd so the publish flow (which keys off the current
-            // directory) targets this component. Restored after each so a
-            // failure can't strand us in a child directory.
             std::env::set_current_dir(&dir)?;
             let result = PublishCommand::for_bootstrap().execute(state).await;
             std::env::set_current_dir(&start)?;

@@ -57,6 +57,7 @@ pub(crate) mod prompts;
 #[command(
     author,
     version,
+    long_version = self_cmd::long_version(),
     about,
     long_about,
     subcommand_required = true,
@@ -77,9 +78,6 @@ enum Commands {
     /// Add a component dependency to the project
     Add(add::AddCommand),
 
-    // ── Component lifecycle (like cargo build/publish) ──
-    // `forest build` was removed in DATA-312: building is now a depended-on
-    // component (`forest-contrib/build-*`) invoked via `forest run build`.
     /// Generate type-safe code from CUE component spec (forest.component.cue)
     Generate(GenerateCommand),
     /// Publish component to the registry (binary + CUE spec + manifest)
@@ -89,14 +87,12 @@ enum Commands {
     /// Update dependencies to the latest versions matching the spec
     Update(update::UpdateCommand),
 
-    // ── Project commands ──
     /// Run a project or component command (e.g., forest run status)
     #[command(aliases = ["r"])]
     Run(RunCommand),
     /// Prepare, annotate, and execute releases
     Release(Box<ReleaseCommand>),
 
-    // ── Resource management ──
     /// Manage projects
     #[command(visible_aliases = ["projects", "proj"], aliases = ["p"])]
     Project(ProjectCommand),
@@ -115,7 +111,6 @@ enum Commands {
     #[command(visible_aliases = ["notification", "notif"], aliases = ["n"])]
     Notifications(NotificationsCommand),
 
-    // ── Component registry ──
     /// Browse and manage components (list, init)
     #[command(visible_aliases = ["component", "comp"], aliases = ["c"])]
     Components(ComponentsCommand),
@@ -123,7 +118,6 @@ enum Commands {
     /// Show comprehensive documentation and manpages
     Docs(docs::DocsCommand),
 
-    // ── System (hidden from default help) ──
     /// Admin operations (server status, diagnostics)
     #[command(hide = true)]
     Admin(AdminCommand),
@@ -158,22 +152,8 @@ enum Commands {
 pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
 
-    // Initialise tracing now that args are parsed — honours `--verbose` and
-    // the interactive-vs-CI audience (warn-only at a TTY, info otherwise).
     crate::ui::init_logging(cli.config.verbose);
 
-    // Resolve the active context once, up front. Two outcomes ride
-    // on this:
-    //   1. CUE_REGISTRY gets derived from the context's server if
-    //      it's not already set in the parent shell, so users don't
-    //      have to remember to export it after switching contexts.
-    //   2. We print a kubectl-style banner so the active context is
-    //      always visible at command start.
-    //
-    // The resolve is best-effort — a broken or missing context store
-    // shouldn't prevent the command from running (in particular
-    // `forest context provision …` itself runs before any context
-    // exists). On failure we just skip both banner and overlay.
     apply_context_env_overlay(&cli);
     maybe_print_context_banner(&cli);
 
@@ -189,17 +169,7 @@ pub async fn execute() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve the active context and set `CUE_REGISTRY` in the process
-/// environment if it's not already there. Pure side-effect; silent
-/// on failure.
-///
-/// Uses `try_resolve` (not `resolve`) so we never trigger the
-/// first-run bootstrap as a side effect — that would race with
-/// `forest context provision`, which expects the contexts file to
-/// be absent.
 fn apply_context_env_overlay(cli: &Command) {
-    // Skip when the user has already set CUE_REGISTRY explicitly —
-    // they're overriding the derived value on purpose.
     if std::env::var_os("CUE_REGISTRY").is_some() {
         return;
     }
@@ -222,17 +192,6 @@ fn apply_context_env_overlay(cli: &Command) {
     }
 }
 
-/// Print a kubectl-style one-line banner identifying the active
-/// context. The banner is a guardrail against accidentally pushing
-/// to the wrong server, so we only print it when *both* conditions
-/// hold:
-///   - The active context is not the local `default` (the assumption
-///     is that `default` is dev-localhost; non-default = shared/prod).
-///   - The command is about to perform a server-side mutation
-///     (upload an artifact, release, write a resource…). Read-only
-///     commands and purely local commands don't warrant the warning.
-///
-/// Also skipped for the always-noisy cases: stderr not a TTY.
 fn maybe_print_context_banner(cli: &Command) {
     use std::io::IsTerminal;
     let Some(command) = cli.command.as_ref() else {
@@ -247,13 +206,9 @@ fn maybe_print_context_banner(cli: &Command) {
     let Ok(store) = crate::contexts::ContextStore::from_env() else {
         return;
     };
-    // Same `try_resolve` rule as the env overlay: never bootstrap a
-    // default context just to print a banner. If the file doesn't
-    // exist (very first install before provision), silently skip.
     let Ok(Some(entry)) = store.try_resolve(cli.config.context.as_deref()) else {
         return;
     };
-    // The whole point is to flag non-default contexts.
     if entry.name == "default" {
         return;
     }
@@ -261,22 +216,13 @@ fn maybe_print_context_banner(cli: &Command) {
     if std::env::var_os("NO_COLOR").is_some() {
         eprintln!("◆ {}", entry.name);
     } else {
-        // Dim diamond + cyan bold name. Bright enough to be obvious
-        // without overwhelming the actual command output.
         eprintln!("\x1b[2m◆\x1b[0m \x1b[1;36m{}\x1b[0m", entry.name);
     }
 }
 
-/// True if `command` is about to mutate state on the forest server
-/// (upload, create, update, delete, release…). Used to gate the
-/// non-default-context banner so read-only and purely local commands
-/// stay quiet.
 fn is_server_mutation(command: &Commands) -> bool {
     match command {
-        // Always mutates: pushes an artifact, drives a release, publishes
-        // every workspace component.
         Commands::Publish(_) | Commands::Release(_) | Commands::Bootstrap(_) => true,
-        // Subcommand-mixed: drill in to skip read-only variants.
         Commands::Auth(cmd) => cmd.is_mutation(),
         Commands::Project(cmd) => cmd.is_mutation(),
         Commands::Destination(cmd) => cmd.is_mutation(),
@@ -284,14 +230,13 @@ fn is_server_mutation(command: &Commands) -> bool {
         Commands::Environment(cmd) => cmd.is_mutation(),
         Commands::Organisation(cmd) => cmd.is_mutation(),
         Commands::Notifications(cmd) => cmd.is_mutation(),
-        // Local-only or read-only.
+        Commands::Components(cmd) => cmd.is_mutation(),
         Commands::Init(_)
         | Commands::Add(_)
         | Commands::Generate(_)
         | Commands::Validate(_)
         | Commands::Update(_)
         | Commands::Run(_)
-        | Commands::Components(_)
         | Commands::Docs(_)
         | Commands::Admin(_)
         | Commands::Context(_)
@@ -357,12 +302,6 @@ impl CommandHandler {
             .as_ref()
             .expect("commands are required should've been caught by clap");
 
-        // Skip the auto-nag for `forest self …` — the user is already
-        // engaging with the update flow, no need to prompt them again,
-        // and `self update` would print the nag while the binary is
-        // mid-replacement. Also skip it for invocations that have declared
-        // themselves silent (`forest global warm --background`, called from
-        // shell rc files): see `GlobalCommand::is_silent`.
         let print_nag = match command {
             Commands::Self_(_) => false,
             Commands::Global(cmd) => !cmd.is_silent(),
@@ -398,9 +337,6 @@ impl CommandHandler {
             Commands::Self_(cmd) => cmd.execute(state).await,
         };
 
-        // Only nag on success — if the user's command already failed
-        // we shouldn't add noise. The nag itself is best-effort and
-        // silent on its own failures.
         if print_nag && result.is_ok() {
             self_cmd::maybe_print_update_nag().await;
         }
@@ -430,9 +366,6 @@ impl Component for CommandHandler {
 mod global_flag_tests {
     use super::*;
 
-    /// `--context` was global and `--forest-server` was not, so
-    /// `forest publish --forest-server <url>` failed with "unexpected argument"
-    /// and only the before-the-subcommand spelling worked (#298).
     #[test]
     fn forest_server_is_accepted_after_the_subcommand() {
         let cmd = Command::try_parse_from([
@@ -453,5 +386,30 @@ mod global_flag_tests {
     fn context_is_accepted_after_the_subcommand() {
         let cmd = Command::try_parse_from(["forest", "publish", "--context", "work"]).unwrap();
         assert_eq!(cmd.config.context.as_deref(), Some("work"));
+    }
+}
+
+#[cfg(test)]
+mod release_parser_tests {
+    use super::*;
+
+    #[test]
+    fn release_rejects_ref_instead_of_ignoring_it() {
+        for subcommand in [None, Some("release")] {
+            for slug in [None, Some("prepared-slug")] {
+                for option in ["--ref", "-r"] {
+                    let error = Command::try_parse_from(
+                        ["forest", "release"]
+                            .into_iter()
+                            .chain(subcommand)
+                            .chain(slug)
+                            .chain([option, "main", "-e", "dev"]),
+                    )
+                    .err()
+                    .expect("release must reject a ref argument");
+                    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+                }
+            }
+        }
     }
 }

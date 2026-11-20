@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                last_seen_at,\n                stopped_at,\n                last_seen_at > now() - make_interval(secs => $2::double precision) AS \"alive!\",\n                last_seen_at > now() - make_interval(secs => $3::double precision) AS \"heard!\"\n            FROM forest_replicas\n            WHERE name = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "forest_replicas",
+            "name": "last_seen_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "stopped_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "forest_replicas",
+            "name": "stopped_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "alive!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "heard!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "5435f272762c2c32677611a7e3d179f49b4c717e8a71a6c11808120f7444cd5e"
+}

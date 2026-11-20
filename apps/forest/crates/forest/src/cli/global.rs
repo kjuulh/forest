@@ -1,5 +1,3 @@
-//! `forest global …` — user-global tool management. See TASKS/018-global-tools.md.
-
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 
@@ -26,7 +24,8 @@ enum Commands {
     Scaffold(global_init::GlobalInitCommand),
     /// Set a user-config kv pair (forest global set <key> <value>).
     Set(global_set::GlobalSetCommand),
-    /// Add a per-tool dependency: `<org>/<name>[@<version>]`.
+    /// Add a per-tool dependency: `<org>/<name>[@<version>]`, or follow its
+    /// prereleases with `--prerelease`.
     Add(AddCommand),
     /// Remove a per-tool dependency and its shim.
     Remove(RemoveCommand),
@@ -82,14 +81,6 @@ impl GlobalCommand {
         }
     }
 
-    /// Whether this invocation must stay completely silent, suppressing the
-    /// end-of-command "a newer forest exists" nag.
-    ///
-    /// `forest global warm --background|--quiet` is called from shell rc files,
-    /// where stderr *is* an interactive TTY — so the nag's own TTY check won't
-    /// save us. Worse, a stale nag cache makes it `await` a `gh` release
-    /// lookup, which is exactly the shell-startup stall this command exists to
-    /// remove.
     pub fn is_silent(&self) -> bool {
         match &self.commands {
             Commands::Warm(cmd) => cmd.background || cmd.quiet,
@@ -97,8 +88,6 @@ impl GlobalCommand {
         }
     }
 }
-
-// --- warm -----------------------------------------------------------------
 
 #[derive(Args)]
 pub struct WarmCommand {
@@ -126,9 +115,6 @@ impl WarmCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
 
-        // `--background`: claim the throttle slot, hand the work to a detached
-        // child, return. This branch does no I/O beyond a stat and a spawn, so
-        // it is safe on the shell-startup path.
         if self.background {
             if warm::disabled() {
                 return Ok(());
@@ -141,17 +127,10 @@ impl WarmCommand {
             return Ok(());
         }
 
-        // `--quiet` has to reach the download layer, not just this command's
-        // own summary: fetching a tool asks for a progress bar, which degrades
-        // to a `→ Downloading …` line when stderr isn't a TTY. Muting `ui`
-        // globally is what makes the promise of silence actually hold.
         if self.quiet {
             crate::ui::set_quiet(true);
         }
 
-        // Foreground. Hold the single-instance lock so an explicit warm and a
-        // background one can't fight over the same downloads; if a warm is
-        // already running, the work is already happening — say so and leave.
         let Some(_lock) = warm::WarmLock::acquire(&svc.paths) else {
             if !self.quiet {
                 eprintln!("a warm is already running; nothing to do");
@@ -238,8 +217,6 @@ impl UpdateCommand {
         let svc = GlobalService::from_state(state)?;
 
         if self.background {
-            // Best-effort: the foreground tool the user actually launched
-            // must never be affected by an update failure here.
             let _ = svc.update_all().await;
             return Ok(());
         }
@@ -254,6 +231,12 @@ impl UpdateCommand {
         }
         if out.held > 0 {
             eprintln!("held {} pinned tool(s) at their pinned version", out.held);
+        }
+        for s in &out.without_stable {
+            eprintln!(
+                "  {} : kept {}; {} is a prerelease (follow prereleases with `forest global add {} --prerelease`)",
+                s.qualified, s.from, s.to, s.qualified
+            );
         }
         eprintln!(
             "sync: {} shim(s) created, {} deleted",
@@ -295,10 +278,6 @@ impl UnbanCommand {
             "unbanned {} from {} catalogue",
             self.tool, self.organisation
         );
-        // Reconcile so the shim comes back immediately — the user shouldn't
-        // have to remember a follow-up `sync`. Best-effort: a sync failure
-        // (e.g. registry offline) is a warning, not a hard error, since the
-        // unban itself already succeeded.
         match svc.sync_shims().await {
             Ok(out) => {
                 for line in format_reconcile_lines(&out, "after unban") {
@@ -357,8 +336,6 @@ fn parse_org_tool(raw: &str) -> anyhow::Result<(String, String)> {
     Ok((org.to_string(), tool.to_string()))
 }
 
-// --- add ------------------------------------------------------------------
-
 #[derive(Args)]
 pub struct AddCommand {
     /// `<org>/<name>[@<ver>]` for per-tool, or bare `<org>` to subscribe to
@@ -383,6 +360,13 @@ pub struct AddCommand {
     #[arg(long = "alias")]
     alias: Vec<String>,
 
+    /// Follow this tool's prereleases: install the highest SemVer version,
+    /// prerelease or stable, and keep `forest global update` doing so. Re-run
+    /// `forest global add <org>/<name>` without this flag to return to stable.
+    /// `FOREST_PRERELEASE=1` does this for every unpinned tool without a flag.
+    #[arg(long = "prerelease")]
+    prerelease: bool,
+
     /// Skip the implicit `forest global sync` step after writing the
     /// dependency. Useful in scripts / CI that don't want extra network
     /// calls during `add`.
@@ -394,8 +378,13 @@ impl AddCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
 
-        // Bare `<org>` → catalogue subscription mode.
         if !self.component.contains('/') && !self.component.contains('@') {
+            if self.prerelease {
+                anyhow::bail!(
+                    "--prerelease applies to a single tool: `forest global add {}/<name> --prerelease`",
+                    self.component
+                );
+            }
             let pins = parse_kv_list(&self.pin, "--pin")?;
             let aliases = parse_kv_list(&self.alias, "--alias")?;
             let outcome = svc
@@ -422,14 +411,27 @@ impl AddCommand {
             return Ok(());
         }
 
-        // Per-tool path.
         let (org, name, version) = parse_component_ref(&self.component)?;
         let outcome = svc
-            .add_dependency(&org, &name, version.as_deref(), self.as_shim.as_deref())
+            .add_dependency(
+                &org,
+                &name,
+                version.as_deref(),
+                self.as_shim.as_deref(),
+                self.prerelease,
+            )
             .await?;
         eprintln!(
-            "added {}/{}@{} (shape={:?})",
-            org, name, outcome.resolved_version, outcome.shape
+            "added {}/{}@{} (shape={:?}){}",
+            org,
+            name,
+            outcome.resolved_version,
+            outcome.shape,
+            if self.prerelease {
+                ", following prereleases"
+            } else {
+                ""
+            }
         );
         if let Some(shim) = outcome.shim_name {
             eprintln!("shim created: {}", svc.shim_path(&shim).display());
@@ -440,9 +442,6 @@ impl AddCommand {
         Ok(())
     }
 
-    /// Reconcile shims with `forest.cue` after a successful add. The
-    /// dependency has already been persisted, so a sync failure here is
-    /// surfaced as a warning — the user can re-run `forest global sync`.
     async fn run_post_add_sync(&self, svc: &GlobalService) {
         if self.no_sync {
             return;
@@ -462,10 +461,6 @@ impl AddCommand {
     }
 }
 
-/// Render the stderr lines for an implicit reconcile step (after add, after
-/// unban, …). `context` labels which command triggered it. Returns an empty
-/// vec when there is nothing to report (no shims created or deleted) so
-/// callers can stay quiet in the common case.
 fn format_reconcile_lines(out: &SyncOutcome, context: &str) -> Vec<String> {
     if out.created.is_empty() && out.deleted.is_empty() {
         return Vec::new();
@@ -497,8 +492,6 @@ fn parse_kv_list(items: &[String], flag: &str) -> anyhow::Result<Vec<(String, St
         .collect()
 }
 
-// --- remove ---------------------------------------------------------------
-
 #[derive(Args)]
 pub struct RemoveCommand {
     /// `<org>/<name>`.
@@ -514,8 +507,6 @@ impl RemoveCommand {
         Ok(())
     }
 }
-
-// --- list -----------------------------------------------------------------
 
 #[derive(Args)]
 pub struct ListCommand {}
@@ -539,7 +530,6 @@ impl ListCommand {
         let svc = GlobalService::from_state(state)?;
         let items = svc.list().await?;
         if items.is_empty() {
-            // Pretty / Text → friendly notice; Name / Json → empty output.
             use crate::cli::output::OutputFormat;
             match state.config.format {
                 OutputFormat::Pretty | OutputFormat::Text => {
@@ -563,6 +553,7 @@ impl ListCommand {
                 source: match t.source {
                     ToolSource::Pin => "[pinned]".to_string(),
                     ToolSource::Latest => "[latest]".to_string(),
+                    ToolSource::Prerelease => "[prerelease]".to_string(),
                     ToolSource::Catalog { org } => format!("[catalog:{org}]"),
                     ToolSource::CatalogBanned { org } => format!("[catalog:{org} banned]"),
                     ToolSource::CatalogShadowed { org } => {
@@ -578,8 +569,6 @@ impl ListCommand {
         Ok(())
     }
 }
-
-// --- run ------------------------------------------------------------------
 
 #[derive(Args)]
 pub struct RunCommand {
@@ -611,7 +600,6 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
-    /// `--no-fetch`, or `FOREST_GLOBAL_NO_FETCH` set in the environment.
     fn no_fetch(&self) -> bool {
         self.no_fetch || std::env::var_os(warm::NO_FETCH_ENV).is_some()
     }
@@ -620,20 +608,11 @@ impl RunCommand {
         let svc = GlobalService::from_state(state)?;
         let no_fetch = self.no_fetch();
 
-        // A global tool is being invoked — a natural, frequent signal that
-        // the user is actively using their toolset. Kick off a throttled,
-        // detached `forest global update` in the background. This is the
-        // hook that makes `update` automatic and `sync` invisible. Fully
-        // best-effort; it must not delay the exec below.
         crate::global::autoupdate::maybe_spawn(&svc.paths);
 
         let resolved = resolve_tool_ref(&svc, &self.tool).await;
         let (qref, version) = match resolved {
             Ok(ResolvedRef::Qualified { qref, version }) => (qref, version),
-            // Under --no-fetch the caller is a shell rc file that wants an
-            // answer, not a diagnostic. A version we can't resolve (offline
-            // during a catalogue lookup, a tool mid-removal) is the same
-            // answer as a missing binary: not available yet, try later.
             Err(e) if no_fetch => {
                 tracing::debug!(tool = %self.tool, "no-fetch: cannot resolve: {e:#}");
                 skip_uncached(&svc);
@@ -650,9 +629,6 @@ impl RunCommand {
             svc.resolve_to_cached_path(&qref, &version).await?
         };
 
-        // Resolve the default env to inject (TASKS/023): component-declared
-        // defaults (cached beside the binary) < per-tool local override
-        // (forest.cue) < ambient shell env (always wins).
         let component_env = svc
             .load_tool_include_env(&qref, &version)
             .await
@@ -670,20 +646,6 @@ impl RunCommand {
             .collect();
         let injected = crate::global::env::resolve_injection(&component_env, &local_env, &ambient);
 
-        // Exec. We inherit the parent environment and only *add* the keys not
-        // already present, so an exported ambient value is never overwritten.
-        //
-        // argv[0] is set explicitly (DATA-510). The cached path already ends
-        // in `<hash>/<name>`, so its basename is right on its own — but tools
-        // that inspect `$0` are exactly the ones that suffer when it's wrong,
-        // so we don't leave it to the layout alone. Without this, `$0` was the
-        // bare sha256 and multi-call dispatch, usage text, and self-re-exec
-        // all saw a hash.
-        //
-        // A shim forwards the name it was invoked as, which is what the user
-        // typed; it differs from the component name only for an alias. A
-        // malformed `--as` (a path, say) is ignored rather than handed to the
-        // child as its identity.
         let arg0 = self
             .invoked_as
             .as_deref()
@@ -700,23 +662,10 @@ impl RunCommand {
     }
 }
 
-/// Bail out of a `--no-fetch` run: kick off a throttled background warm and
-/// exit [`warm::EXIT_NOT_CACHED`] without touching stdout.
-///
-/// Silence is the contract. The caller is `$(gitnow init zsh)` inside a shell
-/// rc file: anything on stdout would be `eval`'d as shell code, and anything on
-/// stderr would appear as garbage above a fresh prompt. The exit code carries
-/// the whole message, and `forest-init` knows how to read it.
-///
-/// Exits the process rather than returning an error because an error would be
-/// printed and reported as exit 1 — indistinguishable, to the shell helper,
-/// from the tool genuinely being broken.
 fn skip_uncached(svc: &GlobalService) -> ! {
     warm::maybe_spawn(&svc.paths);
     std::process::exit(warm::EXIT_NOT_CACHED)
 }
-
-// --- which ----------------------------------------------------------------
 
 #[derive(Args)]
 pub struct WhichCommand {
@@ -738,10 +687,8 @@ impl WhichCommand {
         let p = svc.resolve_to_cached_path(&qref, &version).await?;
 
         if self.script {
-            // Script mode: bare path on stdout, nothing else.
             println!("{}", p.display());
         } else {
-            // Rich mode: name@version → path, plus shim line for context.
             println!(
                 "{}/{}@{} → {}",
                 qref.organisation,
@@ -749,9 +696,6 @@ impl WhichCommand {
                 version,
                 p.display()
             );
-            // Best-effort: show the shim path if we can guess it from
-            // the requested tool name (which is also the shim name for
-            // the common case where the user invoked the shim by name).
             let shim_path = svc.shim_path(&self.tool);
             if shim_path.exists() {
                 println!("  shim:     {}", shim_path.display());
@@ -761,17 +705,12 @@ impl WhichCommand {
     }
 }
 
-// --- verify ---------------------------------------------------------------
-
 #[derive(Args)]
 pub struct VerifyCommand {}
 
 impl VerifyCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
-        // Fold any pre-DATA-510 `bin/<sha>` files into `bin/<sha>/<name>`
-        // first, so a verify right after an upgrade reports on the current
-        // layout rather than on entries it is about to migrate anyway.
         if let Err(e) = svc.migrate_binary_store().await {
             tracing::debug!("binary-store migration skipped: {e:#}");
         }
@@ -788,17 +727,11 @@ impl VerifyCommand {
     }
 }
 
-// --- helpers --------------------------------------------------------------
-
 enum ResolvedRef {
     Qualified { qref: QualifiedRef, version: String },
 }
 
 async fn resolve_tool_ref(svc: &GlobalService, raw: &str) -> anyhow::Result<ResolvedRef> {
-    // Cases:
-    //   "<org>/<name>@<ver>"      — explicit, no lookup needed
-    //   "<org>/<name>"            — version from forest.cue (pin OR catalogue)
-    //   "<bare-name>"             — qualified via shim dir, then version from forest.cue
     if raw.contains('/') {
         let (org, name, ver) = parse_component_ref(raw)?;
         let version = match ver {
@@ -816,29 +749,17 @@ async fn resolve_tool_ref(svc: &GlobalService, raw: &str) -> anyhow::Result<Reso
     }
 }
 
-/// Find the version pin for `<org>/<name>` by looking in (in order):
-///   1. `config.dependencies` (explicit per-tool pin)
-///   2. `config.org_catalog.<org>.pins.<upstream_name>` (catalogue pin)
-///   3. Live `ListOrgTools(<org>)` if the org is subscribed (catalogue latest)
 async fn resolve_version(svc: &GlobalService, org: &str, name: &str) -> anyhow::Result<String> {
     let cfg = svc.load_user_config().await?;
     let key = format!("{org}/{name}");
 
-    // 1. Explicit pin.
     if let Some(dep) = cfg.dependencies.get(&key) {
         return Ok(dep.version.clone());
     }
 
-    // 2. Catalogue subscription for this org? (Aliases don't matter here —
-    //    the qualified ref already names the upstream component.)
     if let Some(cat) = cfg.org_catalog.get(org)
         && cat.enabled
     {
-        // 2a. Per-tool pin inside the catalogue, keyed by upstream tool.name.
-        //     We don't know the tool.name from `<org>/<name>` directly (the
-        //     `name` field is the component name; tool.name may differ via
-        //     alias), so fall through to ListOrgTools to learn it.
-        // 2b. Live lookup for the latest_version + tool.name.
         let entries = svc
             .grpc
             .list_org_tools(org)
@@ -854,12 +775,14 @@ async fn resolve_version(svc: &GlobalService, org: &str, name: &str) -> anyhow::
                 if cat.banned.iter().any(|b| b == tool_name) {
                     anyhow::bail!("{key} is banned in catalogue subscription {org}");
                 }
-                let v = cat
-                    .pins
-                    .get(tool_name)
-                    .cloned()
-                    .unwrap_or(entry.latest_version);
-                return Ok(v);
+                return Ok(svc
+                    .catalogue_version(
+                        &entry.organisation,
+                        &entry.name,
+                        cat.pins.get(tool_name),
+                        &entry.latest_version,
+                    )
+                    .await);
             }
         }
     }
@@ -925,8 +848,6 @@ mod tests {
 
     #[test]
     fn no_sync_is_a_flag_not_a_value_arg() {
-        // `--no-sync=true` should NOT be accepted because the field is a
-        // bool flag (SetTrue), not a value-taking argument.
         let res = AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg", "--no-sync=true"]);
         assert!(res.is_err(), "expected clap error, got Ok");
     }
@@ -977,8 +898,6 @@ mod tests {
         );
     }
 
-    // --- warm / no-fetch (DATA-588) --------------------------------------
-
     #[derive(Parser)]
     struct WarmHarness {
         #[command(flatten)]
@@ -1002,8 +921,6 @@ mod tests {
 
     #[test]
     fn warm_accepts_the_rc_file_invocation() {
-        // The exact form documented for ~/.zshrc — if this stops parsing,
-        // every user's shell startup prints a clap error.
         let h =
             WarmHarness::try_parse_from(["forest-global-warm", "--background", "--quiet"]).unwrap();
         assert!(h.warm.background);
@@ -1031,9 +948,6 @@ mod tests {
 
     #[test]
     fn background_or_quiet_warm_suppresses_the_update_nag() {
-        // Shell rc files run with stderr on a TTY, so the nag's own TTY check
-        // won't stop it — and a stale nag cache makes it await a `gh` lookup,
-        // the exact stall this command exists to remove.
         for args in [
             vec!["forest-global", "warm", "--background"],
             vec!["forest-global", "warm", "--quiet"],
@@ -1064,8 +978,6 @@ mod tests {
 
     #[test]
     fn run_accepts_no_fetch_before_the_argv_separator() {
-        // `--no-fetch` is forest's flag, so it has to land on forest's side of
-        // `--`; past the separator it would reach the tool as an argument.
         let h = RunHarness::try_parse_from([
             "forest-global-run",
             "cuteorg/rg",
@@ -1080,8 +992,6 @@ mod tests {
 
     #[test]
     fn no_fetch_env_var_alone_enables_the_guard() {
-        // The shim gives us no forest command line to add a flag to, so the
-        // env var is the only lever `forest-init` has.
         let h = RunHarness::try_parse_from(["forest-global-run", "cuteorg/rg"]).unwrap();
         unsafe { std::env::set_var(crate::global::warm::NO_FETCH_ENV, "1") };
         let guarded = h.run.no_fetch();

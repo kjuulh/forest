@@ -1,0 +1,89 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: posts
+---
+[
+  {
+    "key": "changes",
+    "text": ":scroll: *3 changes since the previous release* (<https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/slug-art-0|slug-art-0>)\n• <https://github.com/o/r/commit/art-3|`art-300`> feat(tasks): default a task — kjuulh\n• <https://github.com/o/r/commit/art-2|`art-200`> feat: task caps — kjuulh (<https://github.com/o/r/pull/151|PR>)\n• <https://github.com/o/r/commit/art-1|`art-100`> fix: retry on 503 — kjuulh",
+    "blocks": [
+      {
+        "text": {
+          "text": ":scroll: *3 changes since the previous release* (<https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/slug-art-0|slug-art-0>)\n• <https://github.com/o/r/commit/art-3|`art-300`> feat(tasks): default a task — kjuulh\n• <https://github.com/o/r/commit/art-2|`art-200`> feat: task caps — kjuulh (<https://github.com/o/r/pull/151|PR>)\n• <https://github.com/o/r/commit/art-1|`art-100`> fix: retry on 503 — kjuulh",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      }
+    ]
+  },
+  {
+    "key": "plan:plan-prod",
+    "text": ":clipboard: *Plan for <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod|prod>*\n• `prod-k8s`: +1 ~0 -2  :rotating_light: *destroys 2 resources*",
+    "blocks": [
+      {
+        "accessory": {
+          "action_id": "view_plan",
+          "text": {
+            "text": "Full plan",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#plan-plan-prod"
+        },
+        "text": {
+          "text": ":clipboard: *Plan for <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod|prod>*\n• `prod-k8s`: +1 ~0 -2  :rotating_light: *destroys 2 resources*",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      }
+    ]
+  },
+  {
+    "key": "approval:plan-prod:approved",
+    "text": ":white_check_mark: Plan for <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod|prod> was approved.",
+    "blocks": [
+      {
+        "text": {
+          "text": ":white_check_mark: Plan for <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-plan-prod|prod> was approved.",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      }
+    ]
+  },
+  {
+    "key": "deploy:dev-k8s",
+    "text": ":white_check_mark: Deployed <https://forest.understory.sh/orgs/understory/destinations/detail?name=dev-k8s|dev-k8s> (dev) in 1m 5s  ·  <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs|logs>",
+    "blocks": [
+      {
+        "text": {
+          "text": ":white_check_mark: Deployed <https://forest.understory.sh/orgs/understory/destinations/detail?name=dev-k8s|dev-k8s> (dev) in 1m 5s  ·  <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs|logs>",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      }
+    ]
+  },
+  {
+    "key": "failure:prod-k8s",
+    "text": ":x: *Deploy to <https://forest.understory.sh/orgs/understory/destinations/detail?name=prod-k8s|prod-k8s> (prod) failed*\n```Error: rollout of deployment/agent-gateway timed out```",
+    "blocks": [
+      {
+        "accessory": {
+          "action_id": "view_logs",
+          "text": {
+            "text": "Full logs",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs"
+        },
+        "text": {
+          "text": ":x: *Deploy to <https://forest.understory.sh/orgs/understory/destinations/detail?name=prod-k8s|prod-k8s> (prod) failed*\n```Error: rollout of deployment/agent-gateway timed out```",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      }
+    ]
+  }
+]

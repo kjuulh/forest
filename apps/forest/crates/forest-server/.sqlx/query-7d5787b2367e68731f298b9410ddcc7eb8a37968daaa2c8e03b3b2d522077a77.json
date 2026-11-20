@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT release_id, release_intent_id, stage_id, mode, status, queued_at\n         FROM release_states\n         WHERE release_intent_id = ANY($1) AND destination_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_intent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "stage_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "stage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "queued_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "queued_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7d5787b2367e68731f298b9410ddcc7eb8a37968daaa2c8e03b3b2d522077a77"
+}

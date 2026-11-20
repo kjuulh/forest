@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM forest_replicas\n            WHERE last_seen_at < now() - make_interval(secs => $1::double precision)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5ca1c472553a4d8e96345028a122985dff731edcf39805d193d554dd505c5724"
+}

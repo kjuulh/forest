@@ -34,6 +34,8 @@ This automatically:
 3. **Releases** to all destinations in the target environment
 4. **Streams** progress until the release completes or fails
 
+This is a direct dev release, not the normal pipeline-first flow. For the project's configured rollout, use `prepare` then `annotate --source-type ci` and let its trigger run the pipeline. Inspect all stages first: `--pipeline`, or `--skip-commit` on v0.3.17 and newer, can reach prod even with `-e dev`.
+
 ## Step by Step
 
 For more control, run each step separately.
@@ -54,6 +56,7 @@ Create a release annotation — an immutable record of what you're deploying and
 
 ```bash
 forest release annotate \
+  --annotation-only \
   --organisation my-org \
   --project-name my-service \
   --context-title "Deploy v1.2.3" \
@@ -68,14 +71,14 @@ The annotation captures:
 - **Context**: human-readable title, description, links to PR/web
 - **Reference**: commit SHA, branch, version, commit message
 
-Annotations can also trigger automatic releases if [triggers](../concepts/triggers.md) are configured.
+This explicit-release recipe uses `--annotation-only` to avoid also firing [triggers](../concepts/triggers.md). For the normal trigger-to-pipeline flow, omit that flag and do not make the separate release call below; a matching trigger may deploy through prod.
 
 ### 3. Release
 
 Execute the deployment:
 
 ```bash
-forest release release \
+forest release release <slug> \
   --organisation my-org \
   --project my-service \
   --environment dev
@@ -95,7 +98,7 @@ Optional flags:
 Stream release progress:
 
 ```bash
-forest release wait <release-intent-id>
+forest release show <slug> --follow
 ```
 
 This shows real-time logs, status transitions, and pipeline stage progress.

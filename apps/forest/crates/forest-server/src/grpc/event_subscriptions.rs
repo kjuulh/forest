@@ -54,10 +54,7 @@ impl EventSubscriptionService for EventSubscriptionsServer {
                 scopes: _,
             } => (Some(*app_id), None),
             Actor::User { user_id } => (None, Some(*user_id)),
-            Actor::ServiceAccount { service_account_id } => {
-                // Service accounts are tracked via their id in the app_id column
-                (Some(*service_account_id), None)
-            }
+            Actor::ServiceAccount { service_account_id } => (Some(*service_account_id), None),
         };
 
         let rec = self

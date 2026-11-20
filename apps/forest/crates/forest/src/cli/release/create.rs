@@ -21,13 +21,13 @@ use super::{
 /// only prepares and publishes the annotated artifact, leaving the
 /// server-side triggers/pipeline to pick it up and fire the release.
 #[derive(clap::Parser)]
+#[command(group = clap::ArgGroup::new("release_target").args(["environment", "destination"]).multiple(true))]
 pub struct CreateCommand {
-    // ── Required ─────────────────────────────────────────────────────
-    /// Target environment to release to.
+    /// Release to this environment directly, bypassing the project's triggers.
+    /// Omit it to enable triggers, which may deploy through the whole pipeline, including prod.
     #[arg(long, short = 'e', alias = "env")]
-    environment: String,
+    environment: Option<String>,
 
-    // ── Optional overrides ───────────────────────────────────────────
     /// Release title. Defaults to the latest git commit subject.
     #[arg(long)]
     title: Option<String>,
@@ -113,7 +113,7 @@ pub struct CreateCommand {
     #[arg(long = "include-file")]
     include_files: Vec<String>,
 
-    /// Target destination(s). If omitted, the server decides.
+    /// Release to these destinations directly, bypassing the project's triggers.
     #[arg(long, short = 'd')]
     destination: Option<Vec<String>>,
 
@@ -126,31 +126,46 @@ pub struct CreateCommand {
     overrides: Vec<String>,
 
     /// Skip waiting for the release to complete.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     no_wait: bool,
 
     /// Skip health monitoring after release.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     no_health: bool,
 
     /// Force release: cancel queued releases and jump to front of queue.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     force: bool,
 
     /// Use the project's release pipeline instead of deploying directly.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     pipeline: bool,
 
-    /// Only prepare and annotate; skip the final release step. The
-    /// published annotation is left for the server-side triggers/pipeline
-    /// to pick up and release automatically.
+    /// Enable triggers instead of a direct release, even when a target is given.
+    /// Matching triggers may deploy through the whole pipeline, including prod.
     #[arg(long = "skip-commit")]
     skip_commit: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    AnnotateForTriggers,
+    Release,
+}
+
+impl CreateCommand {
+    fn plan(&self) -> Plan {
+        let has_target = self.environment.is_some() || self.destination.is_some();
+        if has_target && !self.skip_commit {
+            Plan::Release
+        } else {
+            Plan::AnnotateForTriggers
+        }
+    }
+}
+
 impl CreateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // ── Resolve project identity from forest.cue ─────────────────
         let (detected_org, detected_project) = super::detect::project(state).await;
 
         let organisation = self.organisation.clone().or(detected_org).context(
@@ -162,10 +177,6 @@ impl CreateCommand {
                 "project name not found: set project.name in forest.cue or pass --project",
             )?;
 
-        // ── Resolve source context ───────────────────────────────────
-        // Explicit flags win. CI providers win over local git because CI
-        // checkouts are often detached and may not have the same remote
-        // metadata as the canonical source repository.
         let ci = CiInfo::detect();
         let git = GitInfo::detect().await;
 
@@ -205,11 +216,13 @@ impl CreateCommand {
             .or(ci.repo_url.clone())
             .or(git.remote_url.clone());
 
-        // ── Build annotation context from CI/git if not provided ──────
         let title = self.title.clone().or(ci.title.clone()).unwrap_or_else(|| {
             git.subject
                 .clone()
-                .unwrap_or_else(|| format!("release to {}", self.environment))
+                .unwrap_or_else(|| match &self.environment {
+                    Some(env) => format!("release to {env}"),
+                    None => format!("annotate {project_name}"),
+                })
         });
         let description = self
             .description
@@ -227,12 +240,6 @@ impl CreateCommand {
         let context_pr = self.context_pr.clone().or(ci.context_pr.clone());
         let version = self.version.clone().or(ci.version.clone());
 
-        // ── Resolve author info ──────────────────────────────────────
-        //
-        // `--detect` asks "who wrote this"; in Woodpecker/Drone that can be
-        // answered directly from the CI env, and in GitHub Actions `annotate`
-        // resolves it from the event payload. With the flag off, preserve the
-        // old local fallback chain.
         let (source_username, source_email) = if self.detect {
             (
                 self.source_username.clone().or(ci.author_name.clone()),
@@ -253,19 +260,17 @@ impl CreateCommand {
             )
         };
 
-        let total_steps = if self.skip_commit { 2 } else { 3 };
+        let plan = self.plan();
+        let total_steps = if plan == Plan::Release { 3 } else { 2 };
 
-        // ── 1. Prepare ───────────────────────────────────────────────
         tracing::info!("step 1/{total_steps}: prepare");
         let prepare = PrepareCommand {
             overrides: self.overrides.clone(),
         };
         prepare.execute(state).await.context("prepare")?;
 
-        // ── 2. Annotate (annotation_only — no auto-release) ─────────
         tracing::info!("step 2/{total_steps}: annotate");
 
-        // Include --set overrides in annotation metadata for traceability
         let mut metadata = self.metadata.clone();
         for (i, kv) in self.overrides.iter().enumerate() {
             metadata.push(format!("override.{i}={kv}"));
@@ -294,7 +299,7 @@ impl CreateCommand {
                 spec_file: self.spec_file.clone(),
                 no_spec: self.no_spec,
                 include_files: self.include_files.clone(),
-                annotation_only: true,
+                annotation_only: plan == Plan::Release,
             },
         )
         .await
@@ -303,9 +308,10 @@ impl CreateCommand {
         let slug = annotated.slug;
         eprintln!("published artifact: {slug}");
 
-        if self.skip_commit {
-            tracing::info!(
-                "skipping release step (--skip-commit); annotation left for server-side pickup"
+        if plan == Plan::AnnotateForTriggers {
+            eprintln!(
+                "annotation published with triggers enabled; matching triggers may deploy, including prod. \
+                 Inspect the outcome with `forest release show {slug}`."
             );
             return Ok(());
         }
@@ -325,7 +331,7 @@ impl CreateCommand {
         let commit = CommitCommand {
             slug: Some(slug),
             organisation: Some(organisation),
-            environment: Some(self.environment.clone()),
+            environment: self.environment.clone(),
             destination: self.destination.clone(),
             no_wait: self.no_wait,
             no_health: self.no_health,
@@ -339,9 +345,6 @@ impl CreateCommand {
     }
 }
 
-/// Reads organisation and project name from the forest.cue/toml project file.
-/// Reads author identity from the local forest auth state.
-/// Falls back gracefully — returns (None, None) if not logged in.
 async fn detect_author(state: &State) -> (Option<String>, Option<String>) {
     match state.user_state().get_state().await {
         Ok(Some(user)) => {
@@ -359,7 +362,6 @@ async fn detect_author(state: &State) -> (Option<String>, Option<String>) {
     }
 }
 
-/// Best-effort source information collected from CI environment variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CiInfo {
     source_type: Option<String>,
@@ -572,32 +574,23 @@ fn pull_request_url(repo_url: Option<&str>, number: Option<&str>, segment: &str)
     Some(format!("{repo_url}/{segment}/{number}"))
 }
 
-/// Best-effort git information collected from the local repository.
 struct GitInfo {
     sha: Option<String>,
     branch: Option<String>,
-    /// Full commit message (subject + body).
     message: Option<String>,
-    /// First line of the commit message.
     subject: Option<String>,
-    /// Remaining lines after the subject (if any).
     body: Option<String>,
     remote_url: Option<String>,
-    /// Whether the working tree has uncommitted changes.
     dirty: bool,
-    /// Git user.name from config.
     author_name: Option<String>,
-    /// Git user.email from config.
     author_email: Option<String>,
 }
 
 impl GitInfo {
-    /// Collect git info from the working directory. Never fails — missing
-    /// values are simply `None`.
     async fn detect() -> Self {
         let (sha, branch, message, remote_url, dirty, author_name, author_email) = tokio::join!(
             git_output(&["rev-parse", "HEAD"]),
-            git_output(&["rev-parse", "--abbrev-ref", "HEAD"]),
+            git_output(&["branch", "--show-current"]),
             git_output(&["log", "-1", "--format=%B"]),
             git_output(&["remote", "get-url", "origin"]),
             git_is_dirty(),
@@ -607,8 +600,6 @@ impl GitInfo {
 
         let (subject, body) = split_message(message.as_deref());
 
-        // When dirty, append -dirty to the SHA so it's clear the commit
-        // doesn't fully represent what was released.
         let sha = match (sha, dirty) {
             (Some(s), true) => Some(format!("{s}-dirty")),
             (sha, _) => sha,
@@ -628,10 +619,7 @@ impl GitInfo {
     }
 }
 
-/// Returns true if the git working tree has uncommitted changes
-/// (staged or unstaged, including untracked files).
 async fn git_is_dirty() -> bool {
-    // `git status --porcelain` outputs nothing when clean.
     git_output(&["status", "--porcelain"])
         .await
         .is_some_and(|s| !s.is_empty())
@@ -645,6 +633,41 @@ mod tests {
     fn detect(vars: &[(&str, &str)]) -> CiInfo {
         let vars: HashMap<&str, &str> = vars.iter().copied().collect();
         CiInfo::detect_with(|key| vars.get(key).map(|value| (*value).to_string()))
+    }
+
+    fn parse(args: &[&str]) -> Result<CreateCommand, clap::Error> {
+        use clap::Parser;
+        CreateCommand::try_parse_from(std::iter::once("create").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn without_a_target_it_annotates_for_the_triggers() {
+        assert_eq!(parse(&[]).unwrap().plan(), Plan::AnnotateForTriggers);
+    }
+
+    #[test]
+    fn an_environment_or_destination_releases_directly() {
+        assert_eq!(parse(&["-e", "dev"]).unwrap().plan(), Plan::Release);
+        assert_eq!(parse(&["-d", "dev/eu"]).unwrap().plan(), Plan::Release);
+    }
+
+    #[test]
+    fn skip_commit_annotates_for_the_triggers_even_with_an_environment() {
+        assert_eq!(
+            parse(&["-e", "dev", "--skip-commit"]).unwrap().plan(),
+            Plan::AnnotateForTriggers
+        );
+    }
+
+    #[test]
+    fn release_only_flags_require_a_target() {
+        for flag in ["--pipeline", "--force", "--no-wait", "--no-health"] {
+            assert!(parse(&[flag]).is_err(), "{flag} accepted without a target");
+            assert!(
+                parse(&["-e", "dev", flag]).is_ok(),
+                "{flag} refused with -e"
+            );
+        }
     }
 
     #[test]

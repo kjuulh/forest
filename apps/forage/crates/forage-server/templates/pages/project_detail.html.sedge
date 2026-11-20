@@ -1,0 +1,151 @@
+use forage_ui::components::{AboutBlock, Badge, CodeBlock, Icon, TimelinePrefetch, Timeago, VisibilityBadge};
+use forage_ui::layouts::Shell;
+use forage_ui::Tone;
+use crate::views::projects::{component_ref, pinned_ref, project_href, shows_metadata, version_href};
+props crate::views::projects::ProjectDetailPage { chrome, org, project, csrf_token, username, role, description, summary, versions, readme, about, has_timeline, prefetch_js, highlight_js, is_tool, show_get_started };
+
+<Shell chrome={chrome}>
+  <section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
+    <div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
+      <div class="flex items-start justify-between mb-6 gap-4">
+        <div class="min-w-0">
+          <h1 class="font-mono text-3xl tracking-tight leading-tight">
+            <span class="text-gray-500">{org}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{project}</span>
+          </h1>
+          {if !description.is_empty() {
+            <p class="mt-1 text-gray-600">{description}</p>
+          }}
+          {if let Some(summary) = summary.as_ref().filter(|s| !s.visibility.is_empty()) {
+            <div class="mt-2 flex items-center gap-2 flex-wrap">
+              <a href="{project_href(org, project)}/settings/visibility" title="Who outside {org} can read this component" aria-label="Visibility: {summary.visibility}. Change who outside {org} can read this component" class="hover:opacity-80"><VisibilityBadge visibility={summary.visibility} /></a>
+            </div>
+          }}
+        </div>
+        {if let Some(summary) = summary {
+          <details class="relative shrink-0 group">
+            <summary class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 cursor-pointer list-none select-none">
+              <Icon name="terminal" class="w-4 h-4" />
+              {if *is_tool { Install } else { Add }}
+              <Icon name="chevron-down" class="w-3 h-3 ml-0.5" />
+            </summary>
+            <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-md shadow-lg z-10 p-4 space-y-3">
+              {if *is_tool {
+                <div>
+                  <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Install globally</p>
+                  <CodeBlock content={&format!("forest global add {}", component_ref(summary))} copyable={true} id="install-cmd-latest" />
+                </div>
+                {if !summary.latest_version.is_empty() {
+                  <div>
+                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Pin to a specific version</p>
+                    <CodeBlock content={&format!("forest global add {}", pinned_ref(summary))} copyable={true} id="install-cmd-pinned" />
+                  </div>
+                }}
+              } else {
+                <div>
+                  <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Add to a project</p>
+                  <CodeBlock content={&format!("forest components add {}", pinned_ref(summary))} copyable={true} id="add-cmd" />
+                </div>
+              }}
+            </div>
+          </details>
+        }}
+      </div>
+      {if *show_get_started {
+        <div class="max-w-md mx-auto text-center border border-gray-200 rounded-lg p-8 mt-6">
+          <h2 class="text-lg font-bold mb-2">Publish your first version</h2>
+          <p class="text-sm text-gray-600 mb-4">Run <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">forest publish</code> from the project directory to ship the first release.</p>
+          <div class="text-left">
+            <CodeBlock content="forest publish" copyable={true} id="get-started-cmd" class="text-xs" />
+          </div>
+        </div>
+      } else {
+        {if *has_timeline {
+          <div class="mb-10">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-bold">Recent releases</h2>
+              <a href="{project_href(org, project)}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
+            </div>
+            <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} />
+            <release-timeline id="rt-{org}-{project}-recent" sedx-preserve org={org} project={project} csrf={csrf_token} username={username} role={role} limit="3"></release-timeline>
+          </div>
+        }}
+        {if let Some(readme) = readme {
+          <div class="prose max-w-none">{readme}</div>
+        }}
+      }}
+    </div>
+    {if !*show_get_started {
+      <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
+        <div class="space-y-6">
+          <AboutBlock about={about} />
+          {if !versions.is_empty() {
+            <div>
+              <h3 class="text-sm font-bold mb-2 flex items-center gap-2">
+                <Icon name="cube" class="w-4 h-4 text-gray-400" />
+                Components
+              </h3>
+              <ul class="space-y-2 text-sm">
+                {for (i, v) in versions.iter().take(3).enumerate() {
+                  <li class="flex items-center justify-between gap-2">
+                    <a href={version_href(org, project, &v.version)} class="font-medium text-gray-700 hover:text-gray-900 hover:underline">v{v.version}</a>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                      {if i == 0 { <Badge label="latest" tone={Tone::Green} /> }}
+                    </div>
+                  </li>
+                }}
+              </ul>
+              {if versions.len() > 3 {
+                <a href="{project_href(org, project)}/releases" class="block mt-2 text-xs text-gray-500 hover:text-gray-900">
+                  + {versions.len() - 3} more &rarr;
+                </a>
+              }}
+            </div>
+          }}
+          {if let Some(summary) = summary.as_ref().filter(|s| shows_metadata(s)) {
+            <div>
+              <h3 class="text-sm font-bold mb-2">Metadata</h3>
+              <dl class="text-sm space-y-2">
+                {if !summary.created_at.is_empty() {
+                  <div>
+                    <dt class="text-gray-500">Created</dt>
+                    <dd><Timeago value={summary.created_at} /></dd>
+                  </div>
+                }}
+                {if !summary.updated_at.is_empty() {
+                  <div>
+                    <dt class="text-gray-500">Updated</dt>
+                    <dd><Timeago value={summary.updated_at} /></dd>
+                  </div>
+                }}
+                {if !summary.contracts.is_empty() {
+                  <div>
+                    <dt class="text-gray-500">Contracts</dt>
+                    <dd class="flex gap-1.5 flex-wrap mt-1">
+                      {for contract in summary.contracts.iter() { <Badge label={contract} /> }}
+                    </dd>
+                  </div>
+                }}
+              </dl>
+            </div>
+          }}
+        </div>
+      </aside>
+    }}
+  </section>
+  <:head>
+    {if readme.is_some() {
+      <link rel="stylesheet" href="/static/css/vendor/highlight-github.min.css" media="(prefers-color-scheme: light)">
+      <link rel="stylesheet" href="/static/css/vendor/highlight-github-dark.min.css" media="(prefers-color-scheme: dark)">
+    }}
+  </:head>
+  <:scripts>
+    {if *has_timeline && !*show_get_started {
+      <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+    }}
+    {if readme.is_some() {
+      <script src="/static/js/vendor/highlight.min.js" defer></script>
+      <script src="/static/js/vendor/highlight-cue.js" defer></script>
+      <script src={highlight_js} defer></script>
+    }}
+  </:scripts>
+</Shell>

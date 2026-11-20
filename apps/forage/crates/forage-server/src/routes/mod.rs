@@ -4,17 +4,19 @@ mod directory;
 mod device;
 mod events;
 mod integrations;
+mod introspect;
+mod org_connections;
 pub(crate) mod oauth;
 mod pages;
 mod platform;
 mod registry;
+mod visibility;
 
 use axum::Router;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use forage_core::platform::validate_slug;
 use forage_core::session::CachedOrg;
-use minijinja::context;
 
 use crate::state::AppState;
 
@@ -26,57 +28,113 @@ pub fn router() -> Router<AppState> {
         .merge(platform::router())
         .merge(events::router())
         .merge(integrations::router())
+        .merge(org_connections::router())
         .merge(developers::router())
+        .merge(visibility::router())
         .merge(directory::routes())
+        .merge(introspect::routes())
         .merge(oauth::router())
         .merge(registry::router())
 }
 
-/// Render an error page with the given status code, heading, and message.
 fn error_page(state: &AppState, status: StatusCode, heading: &str, message: &str) -> Response {
-    error_page_detail(state, status, heading, message, None)
+    let html =
+        crate::views::catalogue::error_page(&state.templates, status.as_u16(), heading, message);
+    (status, Html(html)).into_response()
 }
 
-/// Render an error page with optional error detail (shown in a collapsible section).
-fn error_page_detail(
-    state: &AppState,
-    status: StatusCode,
-    heading: &str,
-    message: &str,
-    detail: Option<&str>,
-) -> Response {
-    let html = state.templates.render(
-        "pages/error.html.jinja",
-        context! {
-            title => format!("{} - Forest", heading),
-            description => message,
-            status => status.as_u16(),
-            heading => heading,
-            message => message,
-            detail => detail,
-        },
-    );
-    match html {
-        Ok(body) => (status, Html(body)).into_response(),
-        Err(_) => status.into_response(),
-    }
+fn report_error(context: &str, err: &dyn std::fmt::Display) -> String {
+    generic_error_message(record_error(context, err))
 }
 
-/// Log an error and render a 500 page with the error detail.
+fn record_error(context: &str, err: &dyn std::fmt::Display) -> uuid::Uuid {
+    let error_id = uuid::Uuid::new_v4();
+    let diagnostic = redact_diagnostic(format!("{err:#}"));
+    tracing::error!(%error_id, context, error = %diagnostic, "browser operation failed");
+    error_id
+}
+
+fn generic_error_message(error_id: uuid::Uuid) -> String {
+    format!("An internal error occurred. Please try again. Reference: {error_id}")
+}
+
 fn internal_error(state: &AppState, context: &str, err: &dyn std::fmt::Display) -> Response {
-    let detail = format!("{err:#}");
-    tracing::error!("{context}: {detail}");
-    error_page_detail(
+    let error_id = record_error(context, err);
+    let message = generic_error_message(error_id);
+    let mut response = error_page(
         state,
         StatusCode::INTERNAL_SERVER_ERROR,
         "Something went wrong",
-        "An internal error occurred. Please try again.",
-        Some(&detail),
-    )
+        &message,
+    );
+    let mut encoded = uuid::Uuid::encode_buffer();
+    response.headers_mut().insert(
+        "x-error-id",
+        error_id
+            .hyphenated()
+            .encode_lower(&mut encoded)
+            .parse()
+            .expect("server-minted UUID header"),
+    );
+    response
 }
 
-/// Log a warning for a failed call and return the default value.
-/// Use for supplementary data where graceful degradation is acceptable.
+fn redact_diagnostic(mut diagnostic: String) -> String {
+    use regex::Regex;
+    use std::{borrow::Cow, sync::LazyLock};
+
+    static URL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)\b(?:https?|postgres(?:ql)?|mysql|rediss?|amqps?)://[^\s<>"']+"#)
+            .expect("URL redaction regex")
+    });
+    static CREDENTIALS: LazyLock<[(Regex, &'static str); 3]> = LazyLock::new(|| {
+        [
+            (
+                Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+")
+                    .expect("authorization redaction regex"),
+                "[REDACTED AUTH]",
+            ),
+            (
+                Regex::new(r#"(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|(?:api|access)[_-]?key(?:[_-]?id)?)|authorization|cookie|set-cookie)\b(?:\\?["'])?\s*[:=]\s*(?:\\"(?:\\.|[^"\\])*\\"|"(?:\\.|[^"\\])*"|'[^']*'|[^\s,;}\]]+)"#)
+                    .expect("credential redaction regex"),
+                "${1}=[REDACTED]",
+            ),
+            (
+                Regex::new(r"\b(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|(?:gh[pousr]_|github_pat_|forest_(?:pat|oat)_|xox[baprs]-)[A-Za-z0-9_-]+)")
+                    .expect("token redaction regex"),
+                "[REDACTED TOKEN]",
+            ),
+        ]
+    });
+    if let Cow::Owned(redacted) =
+        URL.replace_all(
+            &diagnostic,
+            |captures: &regex::Captures<'_>| match reqwest::Url::parse(&captures[0]) {
+                Ok(url) => match (url.host_str(), url.port()) {
+                    (Some(host), Some(port)) => {
+                        format!("{}://{host}:{port}/[REDACTED]", url.scheme())
+                    }
+                    (Some(host), None) => format!("{}://{host}/[REDACTED]", url.scheme()),
+                    _ => "[REDACTED URL]".into(),
+                },
+                Err(_) => "[REDACTED URL]".into(),
+            },
+        )
+    {
+        diagnostic = redacted;
+    }
+    for (pattern, replacement) in CREDENTIALS.iter() {
+        if let Cow::Owned(redacted) = pattern.replace_all(&diagnostic, *replacement) {
+            diagnostic = redacted;
+        }
+    }
+    diagnostic
+}
+
+#[cfg(test)]
+#[path = "../tests/error_diagnostic_tests.rs"]
+mod diagnostic_tests;
+
 fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Display>) -> T {
     match result {
         Ok(v) => v,
@@ -87,24 +145,28 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
     }
 }
 
-/// Render markdown → sanitised HTML. Shared by the registry and platform
-/// routes so the project Overview and the legacy component-detail page
-/// produce identical output for the same source markdown.
-///
-/// `class` is allowed on `<code>` and `<pre>` so the `language-<lang>`
-/// hint pulldown-cmark emits for fenced blocks survives sanitisation
-/// and reaches highlight.js on the client. The class values are
-/// further restricted to the `language-*` prefix so attackers can't
-/// inject arbitrary Tailwind utility classes (e.g. `hidden`) that
-/// would visually rewrite the document.
+/// Like [`warn_default`], but a `NotFound` is an expected absence (an old
+/// component version has no manifest) and logs at debug, not warn.
+fn default_unless_missing<T: Default>(
+    context: &str,
+    result: Result<T, forage_core::platform::PlatformError>,
+) -> T {
+    match result {
+        Err(forage_core::platform::PlatformError::NotFound(e)) => {
+            tracing::debug!("{context}: not found: {e}");
+            T::default()
+        }
+        other => warn_default(context, other),
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/log_level_tests.rs"]
+mod log_level_tests;
+
 pub(super) fn render_markdown(md: &str) -> String {
     use std::collections::{HashMap, HashSet};
 
-    // Enable GFM tables alongside the CommonMark baseline. Tables are
-    // ubiquitous in component / project READMEs (think "platforms" or
-    // "inputs" rows), and rendering them as plain `|--|` text in the
-    // sidebar looked unfinished. Other GFM extensions stay off by
-    // default — add them deliberately when there's a use case.
     let mut opts = pulldown_cmark::Options::empty();
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
 
@@ -119,8 +181,6 @@ pub(super) fn render_markdown(md: &str) -> String {
     ammonia::Builder::default()
         .tag_attributes(tag_attrs)
         .attribute_filter(|_element, attribute, value| {
-            // For `class`, only allow `language-*` tokens. Drop the
-            // attribute entirely if any token doesn't match.
             if attribute == "class" {
                 let all_lang = value
                     .split_ascii_whitespace()
@@ -132,12 +192,6 @@ pub(super) fn render_markdown(md: &str) -> String {
         })
         .clean(&html)
         .to_string()
-}
-
-fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
-    orgs.iter()
-        .map(|o| context! { name => o.name, role => o.role })
-        .collect()
 }
 
 #[allow(clippy::result_large_err)]
@@ -192,9 +246,6 @@ mod markdown_tests {
 
     #[test]
     fn arbitrary_class_token_dropped() {
-        // Inline HTML smuggling the `hidden` class shouldn't survive.
-        // pulldown-cmark passes raw HTML straight through, so this is
-        // the ammonia layer's job.
         let html = render_markdown(r#"<div class="hidden">x</div>"#);
         assert!(!html.contains("class=\"hidden\""), "{html}");
     }

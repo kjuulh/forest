@@ -1,0 +1,4 @@
+use crate::views::components::NotificationsList;
+props crate::views::account::NotificationsListPartial { releases };
+
+<NotificationsList releases={releases.as_slice()} />

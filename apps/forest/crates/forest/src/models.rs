@@ -128,11 +128,6 @@ impl Default for ProjectValue {
 }
 
 impl Project {
-    /// Check if a component has a usage block in the project config.
-    /// Components with usage blocks (e.g. `kjuulh: service: { env: {...} }`)
-    /// are "direct" dependencies whose commands are exposed in the CLI.
-    /// Components without usage blocks are "peer" dependencies — only
-    /// callable via inter-component calls.
     pub fn has_component_usage(&self, organisation: &str, name: &str) -> bool {
         let ProjectValue::Map(map) = &self.other else {
             return false;
@@ -207,8 +202,6 @@ impl CommandName {
         }
     }
 
-    /// Returns a qualified CLI name for use in `forest run`.
-    /// Format: `name:command` for component commands, or just `command` for project commands.
     pub fn to_qualified_cli_name(&self) -> String {
         match self {
             CommandName::Component {
@@ -380,30 +373,17 @@ pub enum CommandSource {
 pub enum Command {
     Script(String),
     Inline(Vec<String>),
-    /// A v2 component binary invocation.
     ComponentBinary {
-        /// Absolute path to the component binary.
         binary_path: PathBuf,
-        /// Method to invoke (e.g., "commands/prepare", "hooks/forest/deployment/release").
         method: String,
-        /// Human-readable description from the CUE spec.
         description: Option<String>,
-        /// Invoke in passthrough mode (live stdio, no timeout) — set for
-        /// streaming methods like a build component's `commands/build`. DATA-312.
         streaming: bool,
-        /// External binaries the component declared it needs on PATH; verified
-        /// before dispatch. DATA-312.
         requires: Vec<forest_sdk::RequiredTool>,
     },
-    /// A Deno/TypeScript component invocation.
     ComponentDeno {
-        /// Directory containing the Deno component source.
         component_dir: PathBuf,
-        /// Entrypoint file relative to component_dir (e.g., "src/main.ts").
         entrypoint: String,
-        /// Method to invoke.
         method: String,
-        /// Human-readable description.
         description: Option<String>,
     },
 }
@@ -474,7 +454,6 @@ impl Dependencies {
 
         for dep in &self.dependencies {
             references.push(
-                // TODO: slightly unoptimal, as we have a double loop here
                 self.get(&dep.organisation, &dep.name)
                     .expect("to find dependency we just got"),
             );
@@ -500,7 +479,6 @@ pub enum DependencyType {
 
 type DependencyName = String;
 type DependencyOrganisation = String;
-/// Version spec string — can be exact ("1.2.3"), partial ("1.2", "1"), or "latest".
 type DependencyVersion = String;
 type DependencyPath = PathBuf;
 

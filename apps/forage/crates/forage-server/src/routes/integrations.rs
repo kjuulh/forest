@@ -5,19 +5,24 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use forage_core::integrations::router::{NotificationEvent, ReleaseContext};
+use forage_core::integrations::slack_release::{EMOJI_SLOTS, SlackEmojiSet};
 use forage_core::integrations::{
     validate_integration_name, validate_webhook_url, CreateIntegrationInput, IntegrationConfig,
     IntegrationType,
 };
 use forage_core::platform::validate_slug;
 use forage_core::session::CachedOrg;
-use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error};
+use super::{error_page, internal_error, report_error};
 use crate::auth::Session;
 use crate::notification_worker::NotificationDispatcher;
 use crate::state::AppState;
+use crate::views::org_settings::{
+    BaselineView, ConfigView, EmojiField, InstallSlackPage, InstallWebhookPage,
+    IntegrationDetailPage, IntegrationInstalledPage, IntegrationRow, IntegrationsPage, RuleView,
+    SentBy, chrome as org_chrome,
+};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -42,6 +47,10 @@ pub fn router() -> Router<AppState> {
             post(update_rules),
         )
         .route(
+            "/orgs/{org}/settings/integrations/{id}/emoji",
+            post(update_emoji),
+        )
+        .route(
             "/orgs/{org}/settings/integrations/{id}/toggle",
             post(toggle_integration),
         )
@@ -62,6 +71,10 @@ pub fn router() -> Router<AppState> {
             post(create_slack),
         )
         .route(
+            "/orgs/{org}/settings/integrations/install/slack/start",
+            post(start_slack_install),
+        )
+        .route(
             "/orgs/{org}/settings/integrations/{id}/reinstall",
             post(reinstall_slack),
         )
@@ -71,7 +84,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-fn require_org_membership<'a>(
+pub(super) fn require_org_membership<'a>(
     state: &AppState,
     orgs: &'a [CachedOrg],
     org: &str,
@@ -94,7 +107,7 @@ fn require_org_membership<'a>(
     })
 }
 
-fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
+pub(super) fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     if org.role == "owner" || org.role == "admin" {
         Ok(())
     } else {
@@ -107,7 +120,7 @@ fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     }
 }
 
-fn require_integration_store(state: &AppState) -> Result<(), Response> {
+pub(super) fn require_integration_store(state: &AppState) -> Result<(), Response> {
     if state.integration_store.is_some() {
         Ok(())
     } else {
@@ -120,7 +133,7 @@ fn require_integration_store(state: &AppState) -> Result<(), Response> {
     }
 }
 
-fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
+pub(super) fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     if session.csrf_token == form_csrf {
         Ok(())
     } else {
@@ -132,8 +145,6 @@ fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     }
 }
 
-// ─── Query params ───────────────────────────────────────────────────
-
 #[derive(Deserialize, Default)]
 struct ListQuery {
     #[serde(default)]
@@ -144,9 +155,11 @@ struct ListQuery {
 struct DetailQuery {
     #[serde(default)]
     test: Option<String>,
+    #[serde(default)]
+    saved: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
 }
-
-// ─── List integrations ──────────────────────────────────────────────
 
 async fn list_integrations(
     State(state): State<AppState>,
@@ -164,52 +177,33 @@ async fn list_integrations(
         .await
         .map_err(|e| internal_error(&state, "list integrations", &e))?;
 
-    // Build summary for each integration (count of enabled rules)
-    let mut integration_summaries = Vec::new();
-    for integ in &integrations {
-        let rules = store
-            .list_rules(&integ.id)
-            .await
-            .unwrap_or_default();
-        let enabled_count = rules.iter().filter(|r| r.enabled).count();
-        let total_count = rules.len();
-        integration_summaries.push(context! {
-            id => &integ.id,
-            name => &integ.name,
-            integration_type => integ.integration_type.as_str(),
-            type_display => integ.integration_type.display_name(),
-            enabled => integ.enabled,
-            enabled_rules => enabled_count,
-            total_rules => total_count,
-            created_at => &integ.created_at,
+    let mut rows = Vec::new();
+    for integ in integrations {
+        let rules = store.list_rules(&integ.id).await.unwrap_or_default();
+        rows.push(IntegrationRow {
+            enabled_rules: rules.iter().filter(|r| r.enabled).count(),
+            total_rules: rules.len(),
+            id: integ.id,
+            name: integ.name,
+            kind: integ.integration_type,
+            enabled: integ.enabled,
         });
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/integrations.html.jinja",
-            context! {
-                title => format!("Integrations - {} - Forest", org),
-                description => "Manage notification integrations",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integrations => integration_summaries,
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = IntegrationsPage {
+        chrome: org_chrome(
+            &state,
+            &session,
+            &org,
+            format!("Integrations - {} - Forest", org),
+            "Manage notification integrations".into(),
+        ),
+        org: org.clone(),
+        error: query.error,
+        integrations: rows,
+    };
+    Ok(Html(crate::views::pages::integrations::render(&page)).into_response())
 }
-
-// ─── Install webhook page ───────────────────────────────────────────
 
 async fn install_webhook_page(
     State(state): State<AppState>,
@@ -221,30 +215,20 @@ async fn install_webhook_page(
     require_admin(&state, cached_org)?;
     require_integration_store(&state)?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/install_webhook.html.jinja",
-            context! {
-                title => format!("Install Webhook - {} - Forest", org),
-                description => "Set up a webhook integration",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                error => query.error,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = InstallWebhookPage {
+        chrome: org_chrome(
+            &state,
+            &session,
+            &org,
+            format!("Install Webhook - {} - Forest", org),
+            "Set up a webhook integration".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        error: query.error,
+    };
+    Ok(Html(crate::views::pages::install_webhook::render(&page)).into_response())
 }
-
-// ─── Create webhook ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct CreateWebhookForm {
@@ -306,37 +290,8 @@ async fn create_webhook(
         .await
         .map_err(|e| internal_error(&state, "create webhook", &e))?;
 
-    // Render the "installed" page directly (not a redirect) so we can show the API token once.
-    // The raw token only exists in the create response and is never stored in plaintext.
-    let html = state
-        .templates
-        .render(
-            "pages/integration_installed.html.jinja",
-            context! {
-                title => format!("{} installed - Forest", created.name),
-                description => "Integration installed successfully",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integration => context! {
-                    id => &created.id,
-                    name => &created.name,
-                    type_display => created.integration_type.display_name(),
-                },
-                api_token => created.api_token,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    Ok(installed_page(&state, &session, &org, created))
 }
-
-// ─── Integration detail ─────────────────────────────────────────────
 
 async fn integration_detail(
     State(state): State<AppState>,
@@ -349,106 +304,125 @@ async fn integration_detail(
     require_integration_store(&state)?;
 
     let store = state.integration_store.as_ref().unwrap();
-    let integration = store
-        .get_integration(&org, &id)
-        .await
-        .map_err(|e| {
-            error_page(
-                &state,
-                axum::http::StatusCode::NOT_FOUND,
-                "Not found",
-                &format!("Integration not found: {e}"),
-            )
-        })?;
+    let integration = store.get_integration(&org, &id).await.map_err(|e| {
+        error_page(
+            &state,
+            axum::http::StatusCode::NOT_FOUND,
+            "Not found",
+            &report_error("get integration", &e),
+        )
+    })?;
 
     let rules = store.list_rules(&id).await.unwrap_or_default();
     let deliveries = store.list_deliveries(&id, 20).await.unwrap_or_default();
 
-    let deliveries_ctx: Vec<_> = deliveries
+    let rules: Vec<RuleView> = rules
         .iter()
-        .map(|d| {
-            context! {
-                id => &d.id,
-                notification_id => &d.notification_id,
-                status => d.status.as_str(),
-                error_message => &d.error_message,
-                attempted_at => &d.attempted_at,
-            }
+        .map(|r| RuleView {
+            notification_type: r.notification_type.clone(),
+            label: notification_type_label(&r.notification_type).to_string(),
+            enabled: r.enabled,
         })
         .collect();
 
-    let rules_ctx: Vec<_> = rules
-        .iter()
-        .map(|r| {
-            context! {
-                notification_type => &r.notification_type,
-                label => notification_type_label(&r.notification_type),
-                enabled => r.enabled,
-            }
-        })
-        .collect();
-
-    // Redact sensitive config fields for display
-    let config_display = match &integration.config {
+    let config = match &integration.config {
         IntegrationConfig::Slack {
             team_name,
             channel_name,
             webhook_url,
             ..
-        } => {
-            let detail = if team_name.is_empty() {
+        } => ConfigView::Slack {
+            detail: if team_name.is_empty() {
                 format!("Webhook: {}", webhook_url)
             } else {
                 format!("{} · {}", team_name, channel_name)
-            };
-            context! {
-                type_name => "Slack",
-                detail => detail,
-            }
-        }
-        IntegrationConfig::Webhook { url, secret, .. } => context! {
-            type_name => "Webhook",
-            detail => url,
-            has_secret => secret.is_some(),
+            },
         },
+        IntegrationConfig::Webhook { url, secret, .. } => ConfigView::Webhook {
+            url: url.clone(),
+            has_secret: secret.is_some(),
+        },
+        IntegrationConfig::GitHub { .. } => {
+            return super::org_connections::github_connection_page(&state, &session, &org, &integration)
+                .await;
+        }
+    };
+    let sender = match &integration.config {
+        IntegrationConfig::Slack { team_id, .. } if !team_id.is_empty() => {
+            forage_core::integrations::direct::sending_integration(store.as_ref(), &org, team_id)
+                .await
+                .filter(|s| s.id != integration.id)
+        }
+        _ => None,
+    };
+    let is_slack = integration.integration_type == IntegrationType::Slack;
+    let baseline = if is_slack {
+        let b = forage_core::integrations::direct::load_baseline(store.as_ref(), &id).await;
+        Some(BaselineView {
+            sent_by: sender.map(|s| SentBy { id: s.id, name: s.name }),
+            directory_mapping: b.directory_mapping,
+            defaults: forage_core::integrations::baseline::DM_NOTIFICATION_TYPES
+                .iter()
+                .map(|nt| RuleView {
+                    notification_type: nt.to_string(),
+                    label: notification_type_label(nt).to_string(),
+                    enabled: b.org_default(nt),
+                })
+                .collect(),
+            updated_by: b.updated_by,
+            updated_at: b.updated_at,
+        })
+    } else {
+        None
     };
 
-    let html = state
-        .templates
-        .render(
-            "pages/integration_detail.html.jinja",
-            context! {
-                title => format!("{} - Integrations - Forest", integration.name),
-                description => "Integration settings",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integration => context! {
-                    id => &integration.id,
-                    name => &integration.name,
-                    integration_type => integration.integration_type.as_str(),
-                    type_display => integration.integration_type.display_name(),
-                    enabled => integration.enabled,
-                    created_at => &integration.created_at,
-                },
-                config => config_display,
-                has_slack_oauth => state.slack_config.is_some(),
-                rules => rules_ctx,
-                deliveries => deliveries_ctx,
-                test_sent => query.test.is_some(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
+    let emoji = if is_slack {
+        let set = store
+            .get_slack_emoji_set(&org)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        EMOJI_SLOTS
+            .iter()
+            .map(|(field, fallback, label)| EmojiField {
+                field,
+                fallback,
+                label,
+                value: set.configured(field).to_string(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-    Ok(Html(html).into_response())
+    let page = IntegrationDetailPage {
+        chrome: org_chrome(
+            &state,
+            &session,
+            &org,
+            format!("{} - Integrations - Forest", integration.name),
+            "Integration settings".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        can_reinstall: is_slack && state.slack_config.is_some(),
+        id: integration.id,
+        name: integration.name,
+        kind: integration.integration_type,
+        enabled: integration.enabled,
+        config,
+        rules,
+        deliveries,
+        test_sent: query.test.is_some(),
+        baseline,
+        emoji,
+        emoji_saved: query.saved.as_deref() == Some("emoji"),
+        saved: query.saved.as_deref().is_some_and(|s| s != "emoji"),
+        error: query.error,
+    };
+    Ok(Html(crate::views::pages::integration_detail::render(&page)).into_response())
 }
-
-// ─── Update notification rules ──────────────────────────────────────
 
 #[derive(Deserialize)]
 struct UpdateRuleForm {
@@ -471,7 +445,6 @@ async fn update_rules(
     let enabled = form.enabled == "true";
     let store = state.integration_store.as_ref().unwrap();
 
-    // Verify integration belongs to org
     store
         .get_integration(&org, &id)
         .await
@@ -489,7 +462,45 @@ async fn update_rules(
     .into_response())
 }
 
-// ─── Toggle integration ─────────────────────────────────────────────
+async fn update_emoji(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, id)): Path<(String, String)>,
+    Form(form): Form<std::collections::BTreeMap<String, String>>,
+) -> Result<Response, Response> {
+    let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
+    require_admin(&state, cached_org)?;
+    require_integration_store(&state)?;
+    validate_csrf(&session, form.get("_csrf").map(String::as_str).unwrap_or(""))?;
+
+    let store = state.integration_store.as_ref().unwrap();
+    let integration = store
+        .get_integration(&org, &id)
+        .await
+        .map_err(|e| internal_error(&state, "get integration", &e))?;
+    if integration.integration_type != IntegrationType::Slack {
+        return Err(error_page(
+            &state,
+            axum::http::StatusCode::BAD_REQUEST,
+            "Not available",
+            "Status emoji apply to Slack integrations only.",
+        ));
+    }
+
+    let Ok(set) = SlackEmojiSet::from_fields(&form) else {
+        return Ok(Redirect::to(&format!(
+            "/orgs/{org}/settings/integrations/{id}?error=Emoji+names+may+only+use+lowercase+letters%2C+digits+and+-+_+%2B+%27#emoji"
+        ))
+        .into_response());
+    };
+    store
+        .set_slack_emoji_set(&org, &set, &session.user.username)
+        .await
+        .map_err(|e| internal_error(&state, "save slack emoji", &e))?;
+    tracing::info!(org = %org, by = %session.user.user_id, "slack status emoji changed");
+
+    Ok(Redirect::to(&format!("/orgs/{org}/settings/integrations/{id}?saved=emoji#emoji")).into_response())
+}
 
 #[derive(Deserialize)]
 struct ToggleForm {
@@ -522,8 +533,6 @@ async fn toggle_integration(
     .into_response())
 }
 
-// ─── Delete integration ─────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct CsrfForm {
     _csrf: String,
@@ -549,8 +558,6 @@ async fn delete_integration(
     Ok(Redirect::to(&format!("/orgs/{}/settings/integrations", org)).into_response())
 }
 
-// ─── Test integration ───────────────────────────────────────────────
-
 async fn test_integration(
     State(state): State<AppState>,
     session: Session,
@@ -568,7 +575,6 @@ async fn test_integration(
         .await
         .map_err(|e| internal_error(&state, "get integration", &e))?;
 
-    // Build a test notification event
     let test_event = NotificationEvent {
         id: format!("test-{}", uuid::Uuid::new_v4()),
         notification_type: "release_succeeded".into(),
@@ -585,6 +591,7 @@ async fn test_integration(
             environment: "staging".into(),
             source_username: session.user.username.clone(),
             source_user_id: session.user.user_id.clone(),
+            source_attribution: "actor".into(),
             commit_sha: "abc1234".into(),
             commit_branch: "main".into(),
             context_title: "Test notification from Forest".into(),
@@ -607,8 +614,6 @@ async fn test_integration(
     .into_response())
 }
 
-// ─── Install Slack page ─────────────────────────────────────────────
-
 async fn install_slack_page(
     State(state): State<AppState>,
     session: Session,
@@ -619,41 +624,21 @@ async fn install_slack_page(
     require_admin(&state, cached_org)?;
     require_integration_store(&state)?;
 
-    let slack_oauth_url = state.slack_config.as_ref().map(|sc| {
-        format!(
-            "https://slack.com/oauth/v2/authorize?client_id={}&scope=assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email&redirect_uri={}/integrations/slack/callback&state={}",
-            urlencoding::encode(&sc.client_id),
-            urlencoding::encode(&sc.redirect_host),
-            urlencoding::encode(&org),
-        )
-    });
-
-    let html = state
-        .templates
-        .render(
-            "pages/install_slack.html.jinja",
-            context! {
-                title => format!("Install Slack - {} - Forest", org),
-                description => "Set up a Slack integration",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                error => query.error,
-                slack_oauth_url => slack_oauth_url,
-                has_slack_oauth => state.slack_config.is_some(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = InstallSlackPage {
+        chrome: org_chrome(
+            &state,
+            &session,
+            &org,
+            format!("Install Slack - {} - Forest", org),
+            "Set up a Slack integration".into(),
+        ),
+        org: org.clone(),
+        csrf_token: session.csrf_token.clone(),
+        error: query.error,
+        has_slack_oauth: state.slack_config.is_some(),
+    };
+    Ok(Html(crate::views::pages::install_slack::render(&page)).into_response())
 }
-
-// ─── Create Slack (manual webhook URL fallback) ──────────────────────
 
 #[derive(Deserialize)]
 struct CreateSlackForm {
@@ -720,35 +705,8 @@ async fn create_slack(
         .await
         .map_err(|e| internal_error(&state, "create slack", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/integration_installed.html.jinja",
-            context! {
-                title => format!("{} installed - Forest", created.name),
-                description => "Integration installed successfully",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                current_org => &org,
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "settings",
-                integration => context! {
-                    id => &created.id,
-                    name => &created.name,
-                    type_display => created.integration_type.display_name(),
-                },
-                api_token => created.api_token,
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    Ok(installed_page(&state, &session, &org, created))
 }
-
-// ─── Reinstall Slack ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct ReinstallForm {
@@ -766,14 +724,13 @@ async fn reinstall_slack(
     require_integration_store(&state)?;
     validate_csrf(&session, &form._csrf)?;
 
-    // Verify the integration exists and is a Slack integration
     let store = state.integration_store.as_ref().unwrap();
     let integration = store.get_integration(&org, &id).await.map_err(|e| {
         error_page(
             &state,
             axum::http::StatusCode::NOT_FOUND,
             "Not found",
-            &format!("Integration not found: {e}"),
+            &report_error("get Slack integration for reinstall", &e),
         )
     })?;
 
@@ -795,23 +752,80 @@ async fn reinstall_slack(
         )
     })?;
 
-    // Encode org + integration ID in state so callback can update instead of create
-    let oauth_state = format!("{}:reinstall:{}", org, id);
-    let redirect_uri = format!(
-        "{}/integrations/slack/callback",
-        slack_config.redirect_host
-    );
-    let url = format!(
-        "https://slack.com/oauth/v2/authorize?client_id={}&scope=assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email&redirect_uri={}&state={}",
-        urlencoding::encode(&slack_config.client_id),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&oauth_state),
-    );
-
+    let url = slack_authorize_redirect(&state, slack_config, &session, &org, Some(&id)).await?;
     Ok(Redirect::to(&url).into_response())
 }
 
-// ─── Slack OAuth callback ────────────────────────────────────────────
+const SLACK_INSTALL_STATE: &str = "slack_install";
+
+/// Existing bot scopes, unchanged by org baseline delivery, which needs only
+/// `chat:write`, `users:read` and `users:read.email` of these.
+const SLACK_BOT_SCOPES: &str = "assistant:write,channels:join,chat:write,chat:write.public,im:history,im:read,im:write,incoming-webhook,links:read,links:write,reactions:write,users:read,users:read.email";
+
+/// Binds a Slack install to this admin, organisation and (for a reinstall)
+/// integration with a single-use server-side nonce.
+async fn slack_authorize_redirect(
+    state: &AppState,
+    slack_config: &crate::state::SlackConfig,
+    session: &Session,
+    org: &str,
+    reinstall_id: Option<&str>,
+) -> Result<String, Response> {
+    let store = state.oauth_state_store.as_ref().ok_or_else(|| {
+        error_page(
+            state,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Not available",
+            "Slack installation needs the OAuth state store.",
+        )
+    })?;
+    let nonce = super::org_connections::new_nonce();
+    let return_to = format!(
+        "{org}\n{}\n{}",
+        session.user.user_id,
+        reinstall_id.unwrap_or_default()
+    );
+    store
+        .create(
+            SLACK_INSTALL_STATE,
+            &nonce,
+            Some(&return_to),
+            chrono::Utc::now() + chrono::Duration::minutes(10),
+        )
+        .await
+        .map_err(|e| internal_error(state, "slack install state", &e))?;
+    let redirect_uri = format!("{}/integrations/slack/callback", slack_config.redirect_host);
+    Ok(format!(
+        "{}?client_id={}&scope={}&redirect_uri={}&state={}",
+        state.slack_authorize_url,
+        urlencoding::encode(&slack_config.client_id),
+        SLACK_BOT_SCOPES,
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(&nonce),
+    ))
+}
+
+async fn start_slack_install(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Result<Response, Response> {
+    let cached_org = require_org_membership(&state, &session.user.orgs, &org)?;
+    require_admin(&state, cached_org)?;
+    require_integration_store(&state)?;
+    validate_csrf(&session, &form._csrf)?;
+    let slack_config = state.slack_config.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Not configured",
+            "Slack OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.",
+        )
+    })?;
+    let url = slack_authorize_redirect(&state, slack_config, &session, &org, None).await?;
+    Ok(Redirect::to(&url).into_response())
+}
 
 #[derive(Deserialize)]
 struct SlackCallbackQuery {
@@ -834,20 +848,48 @@ async fn slack_oauth_callback(
         )
     })?;
 
-    // Parse state: either "{org}" (new install) or "{org}:reinstall:{id}" (reinstall)
-    let (org, reinstall_id) = if raw_state.contains(":reinstall:") {
-        let parts: Vec<&str> = raw_state.splitn(2, ":reinstall:").collect();
-        (parts[0].to_string(), Some(parts[1].to_string()))
-    } else {
-        (raw_state, None)
+    let invalid_state = || {
+        error_page(
+            &state,
+            axum::http::StatusCode::FORBIDDEN,
+            "Installation not verified",
+            "This Slack installation link is invalid, expired or was started by someone else. Start again from Forest.",
+        )
     };
+    let flow = match state.oauth_state_store.as_ref() {
+        Some(store) => store
+            .consume(SLACK_INSTALL_STATE, &raw_state)
+            .await
+            .map_err(|e| internal_error(&state, "slack install state", &e))?,
+        None => None,
+    };
+    let Some(return_to) = flow.and_then(|f| f.return_to) else {
+        return Err(invalid_state());
+    };
+    let mut parts = return_to.splitn(3, '\n');
+    let (org, started_by, reinstall_id) = (
+        parts.next().unwrap_or_default().to_string(),
+        parts.next().unwrap_or_default().to_string(),
+        parts.next().filter(|s| !s.is_empty()).map(String::from),
+    );
+    if started_by != session.user.user_id {
+        return Err(invalid_state());
+    }
 
-    // If Slack returned an error (user denied)
-    if let Some(err) = query.error {
+    if query.error.is_some() {
         let redirect_to = if let Some(ref rid) = reinstall_id {
-            format!("/orgs/{}/settings/integrations/{}?error={}", org, rid, urlencoding::encode(&format!("Slack authorization denied: {err}")))
+            format!(
+                "/orgs/{}/settings/integrations/{}?error={}",
+                org,
+                rid,
+                urlencoding::encode("Slack authorization was denied. Please try again.")
+            )
         } else {
-            format!("/orgs/{}/settings/integrations/install/slack?error={}", org, urlencoding::encode(&format!("Slack authorization denied: {err}")))
+            format!(
+                "/orgs/{}/settings/integrations/install/slack?error={}",
+                org,
+                urlencoding::encode("Slack authorization was denied. Please try again.")
+            )
         };
         return Ok(Redirect::to(&redirect_to).into_response());
     }
@@ -874,10 +916,9 @@ async fn slack_oauth_callback(
         )
     })?;
 
-    // Exchange code for token
     let http = reqwest::Client::new();
     let token_resp = http
-        .post("https://slack.com/api/oauth.v2.access")
+        .post(state.slack_api.url("oauth.v2.access"))
         .form(&[
             ("client_id", slack_config.client_id.as_str()),
             ("client_secret", slack_config.client_secret.as_str()),
@@ -909,12 +950,20 @@ async fn slack_oauth_callback(
         return Ok(Redirect::to(&format!(
             "/orgs/{}/settings/integrations/install/slack?error={}",
             org,
-            urlencoding::encode(&format!("Slack error: {err_msg}"))
+            urlencoding::encode(&report_error("Slack OAuth response", &err_msg))
         ))
         .into_response());
     }
 
-    // Extract fields from Slack response
+    if resp_body["is_enterprise_install"].as_bool() == Some(true) {
+        return Ok(Redirect::to(&format!(
+            "/orgs/{}/settings/integrations/install/slack?error={}",
+            org,
+            urlencoding::encode("Enterprise Grid org-wide installs are not supported; install into one workspace.")
+        ))
+        .into_response());
+    }
+
     let team_id = resp_body["team"]["id"]
         .as_str()
         .unwrap_or("")
@@ -945,6 +994,7 @@ async fn slack_oauth_callback(
         format!("Slack - {channel_name}")
     };
 
+    let new_team_id = team_id.clone();
     let config = IntegrationConfig::Slack {
         team_id,
         team_name,
@@ -957,11 +1007,35 @@ async fn slack_oauth_callback(
     let store = state.integration_store.as_ref().unwrap();
 
     if let Some(ref existing_id) = reinstall_id {
-        // Reinstall: update existing integration's config
+        let existing = store.get_integration(&org, existing_id).await.map_err(|_| {
+            error_page(
+                &state,
+                axum::http::StatusCode::NOT_FOUND,
+                "Not found",
+                "Integration not found.",
+            )
+        })?;
+        if let IntegrationConfig::Slack { team_id: old_team, .. } = &existing.config
+            && !old_team.is_empty()
+            && *old_team != new_team_id
+        {
+            return Ok(Redirect::to(&format!(
+                "/orgs/{}/settings/integrations/{}?error={}",
+                org,
+                existing_id,
+                urlencoding::encode("Reinstall was authorised for a different Slack workspace; nothing changed.")
+            ))
+            .into_response());
+        }
         store
             .update_integration_config(&org, existing_id, &integration_name, &config)
             .await
             .map_err(|e| internal_error(&state, "reinstall slack", &e))?;
+        store
+            .set_integration_enabled(&org, existing_id, true)
+            .await
+            .map_err(|e| internal_error(&state, "reinstall slack", &e))?;
+        let _ = store.delete_directory_matches(existing_id).await;
 
         Ok(Redirect::to(&format!(
             "/orgs/{}/settings/integrations/{}",
@@ -969,7 +1043,6 @@ async fn slack_oauth_callback(
         ))
         .into_response())
     } else {
-        // New install: create integration
         let created = store
             .create_integration(&CreateIntegrationInput {
                 organisation: org.clone(),
@@ -981,38 +1054,34 @@ async fn slack_oauth_callback(
             .await
             .map_err(|e| internal_error(&state, "create slack", &e))?;
 
-        let html = state
-            .templates
-            .render(
-                "pages/integration_installed.html.jinja",
-                context! {
-                    title => format!("{} installed - Forest", created.name),
-                    description => "Integration installed successfully",
-                    user => context! {
-                        username => &session.user.username,
-                        user_id => &session.user.user_id,
-                    },
-                    current_org => &org,
-                    orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                    csrf_token => &session.csrf_token,
-                    active_tab => "settings",
-                    integration => context! {
-                        id => &created.id,
-                        name => &created.name,
-                        type_display => created.integration_type.display_name(),
-                    },
-                    api_token => created.api_token,
-                },
-            )
-            .map_err(|e| internal_error(&state, "template error", &e))?;
-
-        Ok(Html(html).into_response())
+        Ok(installed_page(&state, &session, &org, created))
     }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
+fn installed_page(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    created: forage_core::integrations::Integration,
+) -> Response {
+    let page = IntegrationInstalledPage {
+        chrome: org_chrome(
+            state,
+            session,
+            org,
+            format!("{} installed - Forest", created.name),
+            "Integration installed successfully".into(),
+        ),
+        org: org.to_string(),
+        type_display: created.integration_type.display_name(),
+        id: created.id,
+        name: created.name,
+        api_token: created.api_token,
+    };
+    Html(crate::views::pages::integration_installed::render(&page)).into_response()
+}
 
-fn notification_type_label(nt: &str) -> &str {
+pub(super) fn notification_type_label(nt: &str) -> &str {
     match nt {
         "release_annotated" => "Release annotated",
         "release_started" => "Release started",

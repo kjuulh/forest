@@ -1,28 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================================
-# rust-podinfo end-to-end test script
-#
-# This script exercises the full developer workflow using only `forest`
-# commands and `curl` for HTTP verification.
-#
-# Prerequisites:
-#   - mise installed
-#   - forest server running (mise run develop)
-#   - organisation "rawpotion" created:
-#       mise run forest -- organisation create --name rawpotion
-#   - destinations created:
-#       mise run forest -- destination create --organisation rawpotion --name k8s-dev     --environment dev     --type "forest/kubernetes@1"
-#       mise run forest -- destination create --organisation rawpotion --name k8s-staging --environment staging --type "forest/kubernetes@1"
-#       mise run forest -- destination create --organisation rawpotion --name k8s-prod    --environment prod    --type "forest/kubernetes@1"
-#
-# Usage:
-#   cd examples/rust-podinfo
-#   ./test.sh              # run everything
-#   ./test.sh --no-server  # skip steps that require the forest gRPC server
-# ============================================================================
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -43,9 +21,7 @@ skip() { echo "  SKIP: $1"; SKIP=$((SKIP + 1)); }
 
 section() { echo ""; echo "=== $1 ==="; }
 
-# --------------------------------------------------------------------------
 section "1. Forest run commands"
-# --------------------------------------------------------------------------
 
 for cmd in build validate test status compile docker-build; do
   echo "  Running: forest run $cmd"
@@ -56,9 +32,7 @@ for cmd in build validate test status compile docker-build; do
   fi
 done
 
-# --------------------------------------------------------------------------
 section "2. Dev server (forest run dev + curl)"
-# --------------------------------------------------------------------------
 
 echo "  Starting: forest run dev"
 mise run forest -- run dev &>/tmp/test-podinfo.log &
@@ -70,7 +44,6 @@ cleanup_dev() {
 }
 trap cleanup_dev EXIT
 
-# Wait for server to be ready
 for i in $(seq 1 30); do
   if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
     break
@@ -102,9 +75,7 @@ test_endpoint "GET /readyz"  "http://localhost:8081/readyz"  '"status":"ready"'
 cleanup_dev
 trap - EXIT
 
-# --------------------------------------------------------------------------
 section "3. Release prepare"
-# --------------------------------------------------------------------------
 
 echo "  Running: forest release prepare"
 if mise run forest -- release prepare > /dev/null 2>&1; then
@@ -113,7 +84,6 @@ else
   fail "release prepare"
 fi
 
-# Check generated files
 for env in dev staging prod; do
   if [ -d ".forest/deployment/$env" ]; then
     file_count=$(find ".forest/deployment/$env" -type f | wc -l)
@@ -123,7 +93,6 @@ for env in dev staging prod; do
   fi
 done
 
-# Spot-check rendered content
 if grep -q "replicas: 3" .forest/deployment/prod/*/forest/kubernetes@1/20-deployment.yaml 2>/dev/null; then
   pass "release prepare: prod replicas=3"
 else
@@ -136,9 +105,7 @@ else
   fail "release prepare: dev replicas=1"
 fi
 
-# --------------------------------------------------------------------------
 section "4. Release annotate + release (requires server)"
-# --------------------------------------------------------------------------
 
 if [ "$NO_SERVER" = true ]; then
   skip "release annotate (--no-server)"
@@ -163,7 +130,6 @@ else
     pass "release annotate (slug: $SLUG)"
   else
     fail "release annotate (no slug returned)"
-    # Print output for debugging
     echo "$ANNOTATE_OUTPUT" | tail -5
   fi
 
@@ -183,15 +149,9 @@ else
   fi
 fi
 
-# --------------------------------------------------------------------------
-# Cleanup
-# --------------------------------------------------------------------------
-
 rm -rf .forest
 
-# --------------------------------------------------------------------------
 section "Results"
-# --------------------------------------------------------------------------
 
 TOTAL=$((PASS + FAIL + SKIP))
 echo ""

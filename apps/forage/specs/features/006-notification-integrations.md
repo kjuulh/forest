@@ -307,7 +307,10 @@ Slack messages use Block Kit for rich formatting:
 - Only enabled integrations with matching rules receive notifications
 - Delivery failures are logged but don't block other integrations
 - Retry: 3 attempts with exponential backoff (1s, 5s, 25s)
-- After 3 failures, log error but don't disable integration
+- After 3 failures, log error but don't disable integration, except that a revoked
+  Slack token (`invalid_auth`, `token_revoked`, `account_inactive`) disables it
+- Individual DMs (personal links, org baseline, preferences, dedup per workspace)
+  follow 016-org-baseline-notifications.md
 
 ### Notification history
 - Paginated, newest first, 20 per page

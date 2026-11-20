@@ -1,0 +1,40 @@
+---
+source: crates/forage-server/src/tests/org_settings_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/testorg/settings" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">General</a></li><li><a href="/orgs/testorg/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/testorg/settings" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">General</a></li><li><a href="/orgs/testorg/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/testorg/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/testorg/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/testorg/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/testorg/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/testorg/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<div class="space-y-8">
+<div>
+<h2 class="text-lg font-bold mb-4">Organisation</h2>
+<div class="p-4 border border-gray-200 rounded-lg">
+<dl class="text-sm space-y-3">
+<div class="flex items-center justify-between">
+<dt class="text-gray-500">Name</dt>
+<dd class="font-medium">testorg</dd>
+</div>
+<div class="flex items-center justify-between">
+<dt class="text-gray-500">Role</dt>
+<dd class="font-medium">owner</dd>
+</div>
+</dl>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>

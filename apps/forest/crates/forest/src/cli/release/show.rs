@@ -71,36 +71,11 @@ impl ShowCommand {
             annotation,
             project,
             intent_id,
-            intent_state,
+            mut intent_state,
         } = resolved;
 
         let stages_filter: Option<&str> = self.stage.as_deref();
 
-        // Fetch plan output for each plan stage in scope.
-        let mut plan_outputs: BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse> =
-            BTreeMap::new();
-        for stage in intent_state
-            .stages
-            .iter()
-            .filter(|s| stages_filter.map(|sf| s.stage_id == sf).unwrap_or(true))
-        {
-            if !is_plan_stage(stage.stage_type) {
-                continue;
-            }
-            match grpc.get_plan_output(intent_id, &stage.stage_id).await {
-                Ok(plan) => {
-                    plan_outputs.insert(stage.stage_id.clone(), plan);
-                }
-                Err(e) => {
-                    tracing::warn!(stage = %stage.stage_id, "could not fetch plan output: {e:#}");
-                }
-            }
-        }
-
-        // Signals say what a destination's status cannot: flux@1 reports
-        // `reconcile` DEGRADED when the push landed but nothing told Flux to
-        // sync, which a bare SUCCEEDED would hide. A server without the
-        // signal service just shows none.
         let signals = match grpc.list_signals(intent_id).await {
             Ok(signals) => signals,
             Err(e) => {
@@ -109,29 +84,15 @@ impl ShowCommand {
             }
         };
 
-        let mut output = ShowOutput::new(
-            &annotation,
-            &project,
-            &intent_id,
-            &intent_state,
-            &plan_outputs,
-            stages_filter,
-        );
-        output.attach_signals(&signals);
+        let mut output = ShowOutput::new(&annotation, &project, &intent_id, &intent_state);
 
         let format = state.config.format;
         let json_mode = matches!(format, OutputFormat::Json);
 
-        // Render header eagerly so the user sees structure before the
-        // potentially long log replay starts.
         if !json_mode && !self.logs_only {
             print!("{}", output.render_header());
         }
 
-        // Collect logs by destination via WaitRelease, the stream `release
-        // create` follows live. By default only what is persisted: the stream
-        // stays open until the release is terminal, and a plan parked on its
-        // approval never gets there until someone has read this very output.
         let mode = if self.follow {
             WatchMode::Follow
         } else {
@@ -144,6 +105,10 @@ impl ShowCommand {
             .collect();
         let mut log_buffers: BTreeMap<String, Vec<DestLog>> = BTreeMap::new();
         let mut announced_parked = false;
+        let mut any_stage_failed = intent_state
+            .stages
+            .iter()
+            .any(|s| matches!(stage_status_name(s.status), "FAILED" | "CANCELLED"));
 
         let watch = grpc
             .watch_release(
@@ -152,6 +117,9 @@ impl ShowCommand {
                 ReleaseProgress::with_dependencies(depends_on),
                 |event, progress| {
                     use forest_grpc_interface::wait_release_event::Event;
+                    if let Some(Event::StageUpdate(stage)) = &event.event {
+                        any_stage_failed |= matches!(stage.status.as_str(), "FAILED" | "CANCELLED");
+                    }
                     if let Some(Event::LogLine(line)) = &event.event {
                         let stderr = matches!(
                             forest_grpc_interface::LogChannel::try_from(line.channel),
@@ -179,12 +147,54 @@ impl ShowCommand {
             .map_err(|e| {
                 tracing::warn!("wait_release stream error: {e:#}");
                 e
-            })
-            .ok();
+            });
+        let watch = if mode == WatchMode::Follow {
+            let watch = watch.context("follow release stream")?;
+            if !watch.progress.is_terminal() {
+                anyhow::bail!("release stream ended before a terminal release outcome");
+            }
+            Some(watch)
+        } else {
+            watch.ok()
+        };
 
-        // Without the stream, the intent state fetched above still says which
-        // stages are parked. Not narrowed by --stage: a parked plan is why the
-        // stages after it are pending, so `--stage deploy-prod` needs it too.
+        if mode == WatchMode::Follow && watch.as_ref().is_some_and(|w| w.end == WatchEnd::Terminal)
+        {
+            intent_state = grpc
+                .get_release_intent_states(&project.organisation, Some(&project.project), true)
+                .await
+                .context("refresh followed release state")?
+                .release_intents
+                .into_iter()
+                .find(|s| s.release_intent_id == intent_state.release_intent_id)
+                .context("followed release intent is no longer available")?;
+            any_stage_failed |= intent_state
+                .stages
+                .iter()
+                .any(|s| matches!(stage_status_name(s.status), "FAILED" | "CANCELLED"));
+        }
+        let mut plan_outputs: BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse> =
+            BTreeMap::new();
+        for stage in intent_state
+            .stages
+            .iter()
+            .filter(|s| stages_filter.map(|sf| s.stage_id == sf).unwrap_or(true))
+        {
+            if !is_plan_stage(stage.stage_type) {
+                continue;
+            }
+            match grpc.get_plan_output(intent_id, &stage.stage_id).await {
+                Ok(plan) => {
+                    plan_outputs.insert(stage.stage_id.clone(), plan);
+                }
+                Err(e) => {
+                    tracing::warn!(stage = %stage.stage_id, "could not fetch plan output: {e:#}");
+                }
+            }
+        }
+        output.attach_state(&intent_state, &plan_outputs, stages_filter);
+        output.attach_signals(&signals);
+
         let awaiting: Vec<String> = match &watch {
             Some(w) => w.progress.awaiting_approval(),
             None => intent_state
@@ -198,7 +208,6 @@ impl ShowCommand {
             w.end == WatchEnd::Snapshot && !w.progress.is_terminal() && awaiting.is_empty()
         });
 
-        // With --stage, keep the logs of that stage's destinations only.
         if stages_filter.is_some() {
             log_buffers
                 .retain(|dest, _| output.destinations.iter().any(|d| d.destination == *dest));
@@ -218,7 +227,6 @@ impl ShowCommand {
             println!("{json}");
         } else if self.logs_only {
             render_logs_only(&output.plan_outputs, &log_buffers);
-            // stderr, so `--logs-only > release.log` stays the logs alone.
             for hint in &hints {
                 eprintln!("{hint}");
             }
@@ -244,7 +252,7 @@ impl ShowCommand {
                 .any(|s| matches!(s.status.as_str(), "FAILED" | "TIMED_OUT" | "CANCELLED")),
         };
 
-        if any_failed {
+        if any_failed || any_stage_failed {
             anyhow::bail!("release reached a non-success terminal state");
         }
 
@@ -259,8 +267,6 @@ pub(crate) struct ResolvedRelease {
     pub(crate) intent_state: forest_grpc_interface::ReleaseIntentState,
 }
 
-/// Treat the target as a release-intent UUID first; fall back to slug.
-/// UUIDs are unambiguous so the order avoids accidental collisions.
 pub(crate) async fn resolve_target(
     state: &State,
     target: &str,
@@ -284,8 +290,6 @@ pub(crate) async fn resolve_target(
             .with_context(|| format!("release-intent {intent_id} not found in {organisation}"))?;
         let artifact_id: Uuid = intent_state.artifact_id.parse().context("artifact_id")?;
 
-        // No GetArtifactById RPC; look up the annotation via project's
-        // annotation listing and match on id.
         let annotations = grpc
             .get_release_annotations_by_project(&organisation, &intent_state.project)
             .await
@@ -461,8 +465,6 @@ impl Display for IntentPickItem {
     }
 }
 
-// ── Output structure (also the JSON shape) ──────────────────────────
-
 #[derive(Serialize)]
 struct ShowOutput {
     slug: String,
@@ -478,9 +480,7 @@ struct ShowOutput {
     destinations: Vec<DestView>,
     plan_outputs: Vec<PlanView>,
     logs: Vec<DestLogView>,
-    /// Stages parked on a plan approval; `forest release approve` clears them.
     awaiting_approval: Vec<String>,
-    /// The snapshot ended before the release did.
     in_progress: bool,
 }
 
@@ -569,9 +569,51 @@ impl ShowOutput {
         project: &Project,
         intent_id: &Uuid,
         intent_state: &forest_grpc_interface::ReleaseIntentState,
+    ) -> Self {
+        Self {
+            slug: annotation.slug.clone(),
+            release_intent_id: intent_id.to_string(),
+            artifact_id: annotation.artifact_id.to_string(),
+            project: format!("{}/{}", project.organisation, project.project),
+            created_at: intent_state.created_at.clone(),
+            title: annotation.context.title.clone(),
+            description: annotation.context.description.clone(),
+            actor: ActorRef {
+                user: annotation.source.username.clone(),
+                email: annotation.source.email.clone(),
+                source_type: annotation.source.source_type.clone(),
+                run_url: annotation.source.run_url.clone(),
+            },
+            source: SourceRef {
+                commit_sha: annotation.reference.as_ref().map(|r| r.commit_sha.clone()),
+                branch: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.commit_branch.clone()),
+                repo_url: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.repo_url.clone()),
+                version: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.version.clone()),
+            },
+            stages: Vec::new(),
+            destinations: Vec::new(),
+            plan_outputs: Vec::new(),
+            logs: Vec::new(),
+            awaiting_approval: Vec::new(),
+            in_progress: false,
+        }
+    }
+
+    fn attach_state(
+        &mut self,
+        intent_state: &forest_grpc_interface::ReleaseIntentState,
         plan_outputs: &BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse>,
         stages_filter: Option<&str>,
-    ) -> Self {
+    ) {
         let stages: Vec<StageView> = intent_state
             .stages
             .iter()
@@ -621,43 +663,9 @@ impl ShowOutput {
                     .collect(),
             })
             .collect();
-
-        Self {
-            slug: annotation.slug.clone(),
-            release_intent_id: intent_id.to_string(),
-            artifact_id: annotation.artifact_id.to_string(),
-            project: format!("{}/{}", project.organisation, project.project),
-            created_at: intent_state.created_at.clone(),
-            title: annotation.context.title.clone(),
-            description: annotation.context.description.clone(),
-            actor: ActorRef {
-                user: annotation.source.username.clone(),
-                email: annotation.source.email.clone(),
-                source_type: annotation.source.source_type.clone(),
-                run_url: annotation.source.run_url.clone(),
-            },
-            source: SourceRef {
-                commit_sha: annotation.reference.as_ref().map(|r| r.commit_sha.clone()),
-                branch: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.commit_branch.clone()),
-                repo_url: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.repo_url.clone()),
-                version: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.version.clone()),
-            },
-            stages,
-            destinations,
-            plan_outputs: plan_views,
-            logs: Vec::new(),
-            awaiting_approval: Vec::new(),
-            in_progress: false,
-        }
+        self.stages = stages;
+        self.destinations = destinations;
+        self.plan_outputs = plan_views;
     }
 
     fn attach_signals(&mut self, signals: &[forest_grpc_interface::Signal]) {
@@ -739,9 +747,6 @@ impl ShowOutput {
             let _ = writeln!(out, "stages:");
             for s in &self.stages {
                 render_stage(&mut out, s);
-                if let Some(err) = &s.error_message {
-                    let _ = writeln!(out, "    error: {err}");
-                }
             }
             out.push('\n');
         }
@@ -828,7 +833,12 @@ fn render_destination(out: &mut String, d: &DestView) {
         status = d.status,
     );
     if let Some(err) = &d.error_message {
-        let _ = writeln!(out, "    error: {err}");
+        let label = if d.status == "QUEUED" {
+            "blocked"
+        } else {
+            "error"
+        };
+        let _ = writeln!(out, "    {label}: {err}");
     }
     for s in &d.signals {
         let _ = writeln!(
@@ -842,8 +852,6 @@ fn render_destination(out: &mut String, d: &DestView) {
     }
 }
 
-/// The `HealthStatus` wire value as the name the server stores and a person
-/// reads.
 fn signal_status_name(status: i32) -> &'static str {
     use forest_grpc_interface::HealthStatus;
     match HealthStatus::try_from(status) {
@@ -860,8 +868,6 @@ fn signal_icon(status: &str) -> &'static str {
     match status {
         "HEALTHY" => "✓",
         "PROGRESSING" => "▶",
-        // A warning, not a cross: the destination succeeded, and this says
-        // what that success does not yet mean.
         "DEGRADED" => "⚠",
         "UNHEALTHY" | "MISSING" => "✗",
         _ => "•",
@@ -870,7 +876,6 @@ fn signal_icon(status: &str) -> &'static str {
 
 fn render_stage(out: &mut String, s: &StageView) {
     use std::fmt::Write;
-    // A parked plan stage stays ACTIVE; without this it reads as running.
     let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
     let _ = writeln!(
         out,
@@ -886,13 +891,20 @@ fn render_stage(out: &mut String, s: &StageView) {
         status = s.status,
         approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
     );
+    if let Some(err) = &s.error_message {
+        let label = if s.status == "PENDING" {
+            "blocked"
+        } else {
+            "error"
+        };
+        let _ = writeln!(out, "    {label}: {err}");
+    }
 }
 fn stage_icon(status: &str) -> &'static str {
     match status {
         "SUCCEEDED" => "✓",
         "ACTIVE" | "RUNNING" | "ASSIGNED" => "▶",
         "FAILED" | "CANCELLED" | "TIMED_OUT" => "✗",
-        // Neither a tick nor a cross: it did not run, and it did not go wrong.
         "SUPERSEDED" => "⇥",
         "PENDING" | "QUEUED" => "◌",
         _ => "•",
@@ -924,8 +936,6 @@ fn stage_status_name(status: i32) -> &'static str {
         _ => "UNSPECIFIED",
     }
 }
-
-// ── Small prompt helpers (mirrors `commit.rs`) ──────────────────────
 
 async fn prompt_org_select(state: &State) -> anyhow::Result<String> {
     let resp = state
@@ -985,9 +995,6 @@ mod tests {
         }
     }
 
-    /// The case #298 is about: the destination SUCCEEDED, but Flux was never
-    /// told to sync. The warning has to be on the destination's own lines,
-    /// not only somewhere in the log dump.
     #[test]
     fn a_degraded_reconcile_shows_under_a_succeeded_destination() {
         let mut out = String::new();
@@ -1021,9 +1028,6 @@ mod tests {
         }
     }
 
-    /// A parked plan stage is ACTIVE on the wire. Shown as bare ACTIVE it
-    /// reads as a plan still running, which is how a person ends up waiting
-    /// on a release that is waiting on them.
     #[test]
     fn a_parked_plan_stage_says_it_is_awaiting_approval() {
         let mut out = String::new();

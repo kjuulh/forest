@@ -1,12 +1,3 @@
-//! forest#288: `destination create` names the projects a new destination is
-//! added to without their asking.
-//!
-//! A project that declares no destinations for an environment is released to
-//! every destination there of a kind its artifact renders. So a new
-//! destination silently widens exactly those projects — and the create call is
-//! the one moment someone is looking. These tests pin who is, and is not,
-//! reported.
-
 use std::collections::HashMap;
 
 use forest_grpc_interface::{CreateDestinationRequest, DestinationType, ReleaseRequest};
@@ -56,8 +47,6 @@ async fn creating_a_destination_names_the_undeclared_projects_it_widens() -> any
     let env = format!("accept-env-{suffix}");
     let quiet_env = format!("accept-quiet-{suffix}");
 
-    // A flux-rendering project that has released into `env` without declaring
-    // anything for it — the shape that fans out.
     let given = given
         .a_registered_user()
         .await
@@ -122,7 +111,6 @@ async fn creating_a_destination_names_the_undeclared_projects_it_widens() -> any
         }
     };
 
-    // Of a kind the project renders: it will be released there next time.
     let widened = create(format!("second-flux-{suffix}"), env.clone(), FLUX).await;
     assert_eq!(
         widened,
@@ -130,15 +118,12 @@ async fn creating_a_destination_names_the_undeclared_projects_it_widens() -> any
         "the undeclared flux project gains a new flux destination",
     );
 
-    // Of a kind it never renders: the scheduler will not send it there, so
-    // there is nothing to warn about.
     let widened = create(format!("tf-{suffix}"), env.clone(), TERRAFORM).await;
     assert!(
         widened.is_empty(),
         "a terraform destination does not widen a flux-only project: {widened:?}",
     );
 
-    // An environment the project has never released into.
     let widened = create(format!("quiet-{suffix}"), quiet_env.clone(), FLUX).await;
     assert!(
         widened.is_empty(),

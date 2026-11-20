@@ -26,7 +26,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
 
     let (policy_type, soak_time, branch_restriction, approval, supersede) = match config {
         Some(PolicyConfig::SoakTime(c)) => (
-            1, // POLICY_TYPE_SOAK_TIME = 1
+            1,
             Some(SoakTimeConfig {
                 source_environment: c.source_environment,
                 target_environment: c.target_environment,
@@ -37,7 +37,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
             None,
         ),
         Some(PolicyConfig::BranchRestriction(c)) => (
-            2, // POLICY_TYPE_BRANCH_RESTRICTION = 2
+            2,
             None,
             Some(BranchRestrictionConfig {
                 target_environment: c.target_environment,
@@ -47,7 +47,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
             None,
         ),
         Some(PolicyConfig::Approval(c)) => (
-            3, // POLICY_TYPE_EXTERNAL_APPROVAL = 3
+            3,
             None,
             None,
             Some(ExternalApprovalConfig {
@@ -57,7 +57,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
             None,
         ),
         Some(PolicyConfig::SupersedePending(c)) => (
-            4, // POLICY_TYPE_SUPERSEDE_PENDING = 4
+            4,
             None,
             None,
             None,
@@ -446,6 +446,7 @@ impl PolicyService for PoliciesServer {
                 &req.target_environment,
                 req.branch.as_deref(),
                 release_intent_id.as_ref(),
+                None,
             )
             .await
             .context("evaluate policies")
@@ -503,7 +504,6 @@ impl PolicyService for PoliciesServer {
             .context("invalid release_intent_id")
             .to_internal_error()?;
 
-        // Prevent self-approval unless force_bypass
         if !req.force_bypass {
             let intent_actor = self
                 .state
@@ -573,7 +573,6 @@ impl PolicyService for PoliciesServer {
             .context("record approval decision")
             .to_internal_error()?;
 
-        // Signal coordinator to re-evaluate
         let _ = self
             .state
             .nats
@@ -706,7 +705,6 @@ impl PolicyService for PoliciesServer {
             .context("record rejection decision")
             .to_internal_error()?;
 
-        // Signal coordinator to re-evaluate
         let _ = self
             .state
             .nats

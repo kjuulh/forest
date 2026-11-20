@@ -1,0 +1,37 @@
+use crate::NavItem;
+use crate::components::{BackLink, Breadcrumbs, PillNav, SideNav};
+use crate::format::urlencode;
+use crate::project_settings::Section;
+component ProjectSettings(org: &str, project: &str, section: Section, description: &str = "", crumb: Option<&str>, children: Html) {
+{let base = format!("/orgs/{}/projects/{}", urlencode(org), urlencode(project));}
+{let section_href = format!("{base}/settings/{}", section.slug());}
+{let items: Vec<NavItem> = Section::ALL.iter().map(|s| NavItem::new(s.label(), format!("{base}/settings/{}", s.slug()), s == section)).collect();}
+{let crumbs = crate::project_settings::crumbs(org, project, *section, *crumb);}
+<section class="max-w-6xl mx-auto px-4 pt-10">
+  <div class="flex items-center justify-between gap-4 flex-wrap mb-4">
+    <Breadcrumbs crumbs={crumbs.as_slice()} truncate_last={crumb.is_some()} />
+    {if crumb.is_some() {
+      <BackLink href={section_href.as_str()} label={section.label()} />
+    } else {
+      <BackLink href={base.as_str()} label={*project} />
+    }}
+  </div>
+  <div class="mb-8">
+    <h1 class="font-mono text-2xl tracking-tight leading-tight">
+      <span class="text-gray-500">{org}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{project}</span><span class="text-gray-400 font-sans text-base font-normal ml-2">Settings</span>
+    </h1>
+    <p class="text-sm text-gray-500 mt-1">Release configuration for this project — triggers, policies and pipelines — and who outside the organisation can read it.</p>
+  </div>
+  <PillNav items={items.as_slice()} label="Project settings sections" />
+  <div class="flex gap-8">
+    <SideNav items={items.as_slice()} label="Project settings sections" />
+    <div class="flex-1 min-w-0">
+      <div class="mb-6">
+        <h2 class="text-lg font-bold">{crumb.unwrap_or(section.label())}</h2>
+        {if !description.is_empty() { <p class="text-sm text-gray-500 mt-1">{description}</p> }}
+      </div>
+      {children}
+    </div>
+  </div>
+</section>
+}

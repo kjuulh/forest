@@ -1,35 +1,12 @@
-//! Component file walker for `forest components publish`.
-//!
-//! Pure core. No gRPC, no async, no global state. Given a component
-//! root and a `WalkConfig`, returns the deterministic, sorted list of
-//! files to upload, plus a sibling list of skipped paths with reasons
-//! so callers (and tests) can introspect why something was dropped.
-//!
-//! Precedence rules (from spec 021):
-//! 1. **Default excludes** — non-overridable safety rails (`.git/`,
-//!    `target/`, `node_modules/`, `cue.mod/pkg/`, `.env*`, etc).
-//! 2. **`paths.include` allowlist** — when `Some`, only paths matching
-//!    one of the globs are eligible.
-//! 3. **`.forestignore`** — patterns subtract from whatever the
-//!    allowlist (or default) admitted.
-//!
-//! Defaults always win: a `.forestignore` of `!target/dist` does **not**
-//! re-include the default-excluded `target/`.
-
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-/// 10 MiB. Operator-overridable via `FOREST_PUBLISH_MAX_FILE_BYTES`.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
-/// 50 MiB. Operator-overridable via `FOREST_PUBLISH_MAX_TOTAL_BYTES`.
 pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 
-/// Directory names that are always excluded, regardless of config.
 const DEFAULT_EXCLUDE_DIRS: &[&str] = &[".git", "target", "node_modules", ".idea", ".vscode"];
 
-/// Filename patterns that are always excluded, regardless of config.
-/// Matched against the basename only.
 const DEFAULT_EXCLUDE_FILE_GLOBS: &[&str] = &[
     ".forestignore",
     ".DS_Store",
@@ -40,21 +17,6 @@ const DEFAULT_EXCLUDE_FILE_GLOBS: &[&str] = &[
     "*~",
 ];
 
-/// Path-prefix patterns (rel_path-rooted) that are always excluded.
-///
-/// `cue.mod/pkg/**` is vendored cue deps, re-vendored at consume time
-/// — never publish them.
-///
-/// `.forest/component/output/**` is where a build stages its binaries.
-/// Those are uploaded as typed per-platform payloads, so including them
-/// here as well would ship every binary twice — once addressable by
-/// platform and once as a meaningless generic file. Note this excludes
-/// only `output/` and `package/`: `.forest/component/meta.json` is a
-/// consumer-read file and must still publish.
-///
-/// `.forest/component/package/**` is where publish stages the payload it
-/// is about to upload. Walking it would package the previous run's
-/// package, so the payload would compound on every publish.
 const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &[
     "cue.mod/pkg/**",
     ".forest/component/output/**",
@@ -65,17 +27,8 @@ const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &[
 pub struct WalkConfig {
     pub max_file_bytes: u64,
     pub max_total_bytes: u64,
-    /// `forest.component.paths.include` globs. `None` ⇒ "include all".
     pub allowlist: Option<Vec<String>>,
-    /// `.forestignore` patterns (gitignore-style globs, parsed
-    /// line-by-line by the caller).
     pub forestignore: Vec<String>,
-    /// Compiled binary paths, uploaded separately as typed per-platform
-    /// binaries rather than as generic files.
-    ///
-    /// A list, not one path: a `prebuilt` component declares a binary per
-    /// platform, and every one of them has to be skipped here or it ships
-    /// twice.
     pub binary_paths: Vec<PathBuf>,
 }
 
@@ -185,7 +138,6 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             .collect::<Vec<_>>()
             .join("/");
 
-        // Path-traversal refusal.
         if rel_path.is_empty()
             || rel_path.starts_with('/')
             || rel_path.split('/').any(|seg| seg == "..")
@@ -193,8 +145,6 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             return Err(WalkError::UnsafePath(rel_path));
         }
 
-        // Default excludes (non-overridable). Check first so they
-        // short-circuit the rest.
         if let Some(reason) =
             matches_default_exclude(&rel_path, &default_basename_globs, &default_path_globs)
         {
@@ -204,14 +154,11 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             continue;
         }
 
-        // Symlinks: never followed, never published.
         if entry.file_type().is_symlink() {
             result.skipped.push((rel_path, SkipReason::Symlink));
             continue;
         }
 
-        // Compiled binaries are shipped separately as typed payloads;
-        // skip them here so they do not also ship as generic files.
         if !canonical_binaries.is_empty()
             && let Ok(canonical_entry) = std::fs::canonicalize(abs_path)
             && canonical_binaries.contains(&canonical_entry)
@@ -220,8 +167,6 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             continue;
         }
 
-        // Allowlist: only files matching one of the include globs are
-        // eligible. `.forestignore` then subtracts from that set.
         if let Some(ref allow) = allowlist_globs
             && !allow.is_match(&rel_path)
         {
@@ -229,14 +174,11 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             continue;
         }
 
-        // .forestignore subtracts. Default excludes already ran first,
-        // so `!target/dist` cannot re-include `target/`.
         if forestignore_globs.is_match(&rel_path) {
             result.skipped.push((rel_path, SkipReason::Forestignore));
             continue;
         }
 
-        // Size enforcement.
         let metadata = entry.metadata()?;
         let size = metadata.len();
         if size > config.max_file_bytes {
@@ -270,7 +212,6 @@ fn matches_default_exclude(
     basename_globs: &GlobSet,
     path_globs: &GlobSet,
 ) -> Option<&'static str> {
-    // Any path component matching a default-excluded directory.
     for seg in rel_path.split('/') {
         for d in DEFAULT_EXCLUDE_DIRS {
             if *d == seg {
@@ -472,10 +413,6 @@ mod tests {
 
     #[test]
     fn forestignore_negation_cannot_re_include_default_excludes() {
-        // !target/dist is meaningless against the default exclude;
-        // the forestignore parser would normally treat it as a
-        // re-include, but we apply default excludes *first*. The
-        // file is gone before forestignore even gets a vote.
         let tmp = make_tree(&[("forest.cue", b"x"), ("target/dist/keepme", b"data")]);
         let cfg = WalkConfig {
             forestignore: vec!["!target/dist/**".into()],
@@ -578,9 +515,6 @@ mod tests {
         );
     }
 
-    /// Publish stages its payload under `.forest/component/package`;
-    /// walking that would package the previous run's package, and the
-    /// payload would compound on every publish.
     #[test]
     fn staged_package_dir_is_excluded() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -623,8 +557,6 @@ mod tests {
 
         let result = component_walk(tmp.path(), &WalkConfig::default()).unwrap();
 
-        // real.txt is a regular file → included.
-        // link.txt is a symlink → skipped.
         let included: Vec<&str> = rel_paths(&result);
         assert!(included.contains(&"forest.cue"));
         assert!(included.contains(&"real.txt"));
@@ -645,7 +577,7 @@ mod tests {
     fn invalid_glob_in_allowlist_errors() {
         let tmp = make_tree(&[("forest.cue", b"x")]);
         let cfg = WalkConfig {
-            allowlist: Some(vec!["[".into()]), // unbalanced
+            allowlist: Some(vec!["[".into()]),
             ..Default::default()
         };
         let err = component_walk(tmp.path(), &cfg).unwrap_err();

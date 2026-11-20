@@ -10,7 +10,6 @@ import { FIXTURES, byKey } from "./fixtures.js";
 const stateOf = (release, env) =>
   releaseEnvStates(release).find((e) => e.env === env)?.kind;
 
-// Newest first, the order the timeline renders in.
 const timelineOf = (releases, env) =>
   timelineEnvStates(releases).map((states) => states.find((e) => e.env === env)?.kind);
 
@@ -25,9 +24,6 @@ describe("fixtures resolve to their documented lane states", () => {
 });
 
 describe("a plan awaiting approval is not finished", () => {
-  // The regression this module exists for: prod's plan is parked, prod's
-  // destination has never been touched, and the lane used to draw the release
-  // as settled — indistinguishable from one that had completed.
   it("marks the gated environment `awaiting`, not `pending`", () => {
     expect(stateOf(byKey("awaiting-plan").release, "prod")).toBe("awaiting");
   });
@@ -67,7 +63,6 @@ describe("states that must NOT read as unfinished", () => {
   });
 
   it("a rejected plan does not linger as awaiting", () => {
-    // CANCELLED with no approval_status: the plan is over, not parked.
     expect(stateOf(byKey("rejected").release, "prod")).not.toBe("awaiting");
   });
 });
@@ -82,8 +77,6 @@ describe("states that must read as unfinished", () => {
   });
 
   it("`pending` is not unfinished-for-rail purposes", () => {
-    // Queued behind an upstream stage draws no in-flight segment: nothing is
-    // happening on that lane yet.
     expect(isUnfinished("pending")).toBe(false);
   });
 });
@@ -116,8 +109,6 @@ describe("laneStatesAttr encoding", () => {
   });
 
   it("survives missing fields rather than throwing", () => {
-    // The timeline renders optimistically from SSE deltas, so partial release
-    // objects reach this function in practice.
     expect(() => laneStatesAttr({})).not.toThrow();
     expect(laneStatesAttr({})).toBe("");
   });
@@ -129,8 +120,6 @@ describe("laneStatesAttr encoding", () => {
 });
 
 describe("fixtures with `below` resolve across the timeline", () => {
-  // Same fixtures the gallery renders, so the words and the pixels cannot
-  // drift: `expect` is the top card, `expectBelow` the older cards under it.
   for (const f of FIXTURES.filter((x) => x.below)) {
     it(`${f.key}: ${f.title}`, () => {
       const resolved = timelineEnvStates([f.release, ...f.below]);
@@ -147,10 +136,6 @@ describe("fixtures with `below` resolve across the timeline", () => {
 });
 
 describe("a newer release supersedes an older leg on the same environment", () => {
-  // The screenshot: prod's newest release is complete, and two older ones below
-  // it never finished prod — one parked on approval, one failed. The gutter kept
-  // drawing the amber "went backwards" hatch down to them, so a healthy prod
-  // read as broken.
   const live = byKey("complete").release;
   const awaiting = byKey("awaiting-plan").release;
   const failed = byKey("failed").release;
@@ -164,10 +149,6 @@ describe("a newer release supersedes an older leg on the same environment", () =
     expect(timelineOf([live, stale], "prod")).toEqual(["live", "past"]);
   });
 
-  // Not demoted, and deliberately so: a deploy running against an older commit
-  // while prod is live on a newer one is a rollback in progress. Demoting it
-  // would leave the one state nobody can afford to miss invisible in the
-  // gutter. Idle legs above are a different thing — nothing is executing there.
   it("leaves an older in-flight leg alone — that is a rollback", () => {
     expect(timelineOf([live, byKey("deploying").release], "prod")).toEqual(["live", "flight"]);
   });
@@ -177,7 +158,6 @@ describe("a newer release supersedes an older leg on the same environment", () =
   });
 
   it("reproduces the screenshot's whole prod column as healthy", () => {
-    // newest → oldest: complete, superseded-success, failed, complete, failed
     const column = timelineOf(
       [live, byKey("superseded").release, failed, byKey("awaiting-plan").release, failed],
       "prod",
@@ -187,8 +167,6 @@ describe("a newer release supersedes an older leg on the same environment", () =
   });
 
   it("does not leak across environments", () => {
-    // `awaiting-plan` is live on dev and parked on prod. A newer release that is
-    // live on prod only must not settle dev.
     const prodOnly = {
       destinations: [{ environment: "prod", status: "SUCCEEDED", is_current: true }],
       pipeline_stages: [],
@@ -215,16 +193,11 @@ describe("supersession must not over-suppress", () => {
   });
 
   it("an older release that is still what prod runs stays `live`", () => {
-    // Not a contradiction: the newest release is parked on prod approval, so
-    // prod is genuinely still on the release below it. Demoting that to `past`
-    // would leave the lane claiming prod runs nothing at all.
     expect(timelineOf([byKey("awaiting-plan").release, byKey("complete").release], "prod"))
       .toEqual(["awaiting", "live"]);
   });
 
   it("only `live` supersedes — a newer failure does not settle the lane", () => {
-    // prod is genuinely broken: the newest release failed, and the one below it
-    // is still parked. Neither leg may be swallowed.
     const column = timelineOf([byKey("failed").release, byKey("awaiting-plan").release], "prod");
     expect(column).toEqual(["past", "awaiting"]);
     expect(column.some(isUnfinished)).toBe(true);
@@ -242,8 +215,6 @@ describe("supersession must not over-suppress", () => {
 });
 
 describe("supersession leaves per-release history intact", () => {
-  // Scope guard: the *card* must keep reporting its own outcome. Only the
-  // aggregate gutter goes quiet.
   it("releaseEnvStates is unchanged by what sits above a release", () => {
     const awaiting = byKey("awaiting-plan").release;
     expect(stateOf(awaiting, "prod")).toBe("awaiting");
@@ -271,7 +242,6 @@ describe("timelineLaneStatesAttrs", () => {
   });
 
   it("survives holes and missing input rather than throwing", () => {
-    // The timeline renders optimistically from SSE deltas.
     expect(timelineLaneStatesAttrs([])).toEqual([]);
     expect(timelineLaneStatesAttrs(undefined)).toEqual([]);
     expect(timelineLaneStatesAttrs([null, {}])).toEqual(["", ""]);
@@ -279,17 +249,9 @@ describe("timelineLaneStatesAttrs", () => {
 });
 
 describe("every lane state has a rendering", () => {
-  // Guards the seam the original bug fell through: the resolver gained a state
-  // the template did not handle, so it fell to the `{:else}` branch and rendered
-  // as a settled historical dot. Adding a kind to DOT_PRIORITY without a
-  // matching branch now fails here rather than in someone's browser.
   const componentSrc = () =>
     readFileSync(new URL("../ReleaseTimeline.svelte", import.meta.url), "utf8");
 
-  // A dot now carries its state as `data-kind` and CSS draws it, rather than
-  // the template branching per kind. The guard is the same one either way: a
-  // kind the stylesheet does not name falls back to the plain dot and reads as
-  // settled history, which is exactly the bug this file exists to prevent.
   it("each DOT_PRIORITY kind is drawn distinctly in ReleaseTimeline.svelte", () => {
     const src = componentSrc();
     for (const kind of Object.keys(DOT_PRIORITY)) {
@@ -298,7 +260,6 @@ describe("every lane state has a rendering", () => {
     }
   });
 
-  // And it must have a word for it, because the dot is also a tooltip.
   it("each DOT_PRIORITY kind has a label", () => {
     const src = componentSrc();
     const words = src.slice(src.indexOf("const KIND_WORDS"), src.indexOf("};", src.indexOf("const KIND_WORDS")));
@@ -313,15 +274,11 @@ describe("every lane state has a rendering", () => {
   });
 
   it("the gutter reads lane states resolved across the timeline, not per release", () => {
-    // `laneStatesAttr(release)` alone cannot see that prod has moved on, and
-    // wiring the attribute back to it would silently restore the stale warning.
     const src = componentSrc();
     expect(src).toContain("timelineLaneStatesAttrs");
     expect(src).toContain("data-lane-states={laneStatesBySlug.get(release.slug)");
   });
 });
-
-// ── Gate stages (forest#252) ────────────────────────────────────────
 
 describe("gate stages", () => {
   const gate = (over = {}) => ({
@@ -336,8 +293,6 @@ describe("gate stages", () => {
     expect(effectiveStatus(gate())).toBe("AWAITING_SIGNAL");
   });
 
-  // The server clears the list when everything has reported, just before the
-  // stage succeeds. That is finishing, not waiting.
   it("a running gate with nothing outstanding is not awaiting", () => {
     expect(isGateAwaiting(gate({ gate_waiting_on: [] }))).toBe(false);
     expect(effectiveStatus(gate({ gate_waiting_on: [] }))).toBe("RUNNING");
@@ -350,8 +305,6 @@ describe("gate stages", () => {
     }
   });
 
-  // An older forage against a newer forest, or a stage the server has not
-  // evaluated yet: absent rather than empty.
   it("survives gate_waiting_on being absent", () => {
     const { gate_waiting_on, ...noField } = gate();
     expect(isGateAwaiting(noField)).toBe(false);
@@ -364,11 +317,9 @@ describe("gate stages", () => {
   });
 });
 
-// ── Rollbacks ───────────────────────────────────────────────────────
-
 describe("timelineRollbacks", () => {
-  const liveOnProd = byKey("complete").release;      // live on dev and prod
-  const deployingProd = byKey("deploying").release;  // prod RUNNING
+  const liveOnProd = byKey("complete").release;
+  const deployingProd = byKey("deploying").release;
 
   it("names an older in-flight leg under a live one as a rollback", () => {
     const [newest, older] = timelineRollbacks([liveOnProd, deployingProd]);
@@ -376,16 +327,12 @@ describe("timelineRollbacks", () => {
     expect([...older]).toEqual(["prod"]);
   });
 
-  // The ordinary case, and the one that must not be mislabelled: nothing is
-  // live on prod yet, so this deploy is going forwards.
   it("does not call a forward deploy a rollback", () => {
     const [only] = timelineRollbacks([deployingProd]);
     expect([...only]).toEqual([]);
   });
 
   it("is per environment", () => {
-    // `deploying` is live on dev and in flight on prod. A newer release live on
-    // dev alone says nothing about prod.
     const devOnly = {
       destinations: [{ environment: "dev", status: "SUCCEEDED", is_current: true }],
       pipeline_stages: [],

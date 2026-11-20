@@ -3,6 +3,7 @@ pub mod apps;
 pub mod component_aggregate;
 pub mod component_registry;
 pub mod device_login_aggregate;
+pub mod plan_guard;
 pub mod policy;
 pub mod policy_aggregate;
 pub mod trigger_aggregate;

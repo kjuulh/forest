@@ -15,7 +15,6 @@ members = [
   "components/forest-contrib/build-go/crates/build-go",
   "components/forest-contrib/build-docker/crates/build-docker",
   "examples/build-rust-example/crates/build-rust-example",
-  # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",
 ]
@@ -32,26 +31,8 @@ forest-manifest = { path = "crates/forest-manifest" }
 forest-runner = { path = "crates/forest-runner" }
 forest-sdk = { path = "crates/forest-sdk" }
 forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
-mire = { version = "=0.3.0", default-features = false }
-mire-sagas = { version = "=0.3.0", default-features = false }
-# One crypto provider, `ring`, and the graph is held to it.
-#
-# `cargo tree -i aws-lc-rs -e features` found exactly two things turning
-# rustls's `aws_lc_rs` feature on, and both are ours to set:
-#
-#   * tonic's `tls-aws-lc` (below, now `tls-ring`), and
-#   * reqwest 0.13's default features, via `default` -> `default-tls` ->
-#     `rustls` -> `__rustls-aws-lc-rs`, from the bare `reqwest = "0.13"` in
-#     crates/forest and crates/forest-server.
-#
-# sqlx (`tls-rustls` -> `tls-rustls-ring`), attohttpc (rustls with
-# `default-features = false, features = ["ring"]`) and rustls-platform-verifier
-# (rustls with no provider feature at all) never asked for aws-lc-rs — they only
-# depend on rustls, which is not the same thing.
-#
-# Keep it that way. Anything new that wants rustls must not enable `aws-lc-rs`,
-# or `aws-lc-sys` starts compiling again and there are two crypto
-# implementations in the audit surface instead of one.
+mire = { version = "=0.4.0", default-features = false, features = ["postgres"] }
+mire-sagas = { version = "=0.4.0", default-features = false, features = ["postgres"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sqlx = { version = "=0.9.0", features = [
   "chrono",
@@ -96,9 +77,5 @@ tonic-health = "=0.14.6"
 async-nats = "0.40"
 insta = "1"
 
-# Neither workspace had a [profile] section, so every debug build carried full
-# DWARF: measured at 16% of the wall clock and over half of `target/`.
-# `line-tables-only` keeps file and line in panics and backtraces — what anyone
-# reading a stack trace actually needs — and drops the rest.
 [profile.dev]
 debug = "line-tables-only"

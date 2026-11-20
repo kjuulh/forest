@@ -6,14 +6,15 @@ use forage_core::platform::{
     AllowedDomain, ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext,
     ArtifactDestination, ArtifactRef, ArtifactSource, ClientPrincipal, CreateOrgRuleSetInput,
     CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp,
-    Destination, DestinationType, DestinationTypeInfo, DirectoryLookup, DirectoryUser, Environment,
-    ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef, NotificationPreference, OAuthApp,
-    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
+    DelegatingUser, DelegatingUserOrganisation, Destination, DestinationType, DestinationTypeInfo,
+    DirectoryLookup, DirectoryUser, Environment, ForestOAuthApps, ForestPlatform, JoinOffer,
+    MetadataFieldDef, NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken,
+    OAuthDeviceAuthorization, OAuthDeviceToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
     OAuthUserinfo, OrgMember, OrgPolicyRule, OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule,
-    Organisation, PipelineStage, PipelineStageConfig, PlanOutput, PlatformError, Policy,
-    PolicyConfig, PolicyEvaluation, ProjectSelector, ReleasePipeline, Trigger,
-    UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
-    VerifyDomainOutcome,
+    Organisation, PendingOAuthDeviceAuthorization, PipelineStage, PipelineStageConfig, PlanOutput,
+    PlatformError, Policy, PolicyConfig, PolicyEvaluation, ProjectSelector, ReleasePipeline,
+    Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput,
+    UpdateTriggerInput, VerifyDomainOutcome,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
@@ -43,7 +44,6 @@ fn bearer_request<T>(access_token: &str, msg: T) -> Result<Request<T>, String> {
     Ok(req)
 }
 
-/// Real gRPC client to forest-server's UsersService.
 #[derive(Clone)]
 pub struct GrpcForestClient {
     channel: Channel,
@@ -51,7 +51,6 @@ pub struct GrpcForestClient {
 }
 
 impl GrpcForestClient {
-    /// Create a client that connects lazily (for when server may not be available at startup).
     pub fn connect_lazy(endpoint: &str) -> anyhow::Result<Self> {
         let channel = Channel::from_shared(endpoint.to_string())?.connect_lazy();
         Ok(Self {
@@ -147,13 +146,49 @@ impl GrpcForestClient {
         bearer_request(access_token, msg).map_err(AuthError::Other)
     }
 
-    /// Fetch release intent states using a service token (for background workers).
     pub async fn get_release_intent_states_with_token(
         &self,
         service_token: &str,
         organisation: &str,
         project: Option<&str>,
         include_completed: bool,
+    ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
+        self.release_intent_states(
+            service_token,
+            organisation,
+            project,
+            include_completed,
+            convert_pipeline_stage_state,
+        )
+        .await
+    }
+
+    /// Like `get_release_intent_states_with_token`, but keeps the statuses the
+    /// web UI folds into PENDING (`AWAITING_SIGNAL`, `SUPERSEDED`): a release
+    /// notification must tell a superseded stage from one still to run.
+    pub async fn get_release_intent_states_for_notifications(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        project: &str,
+    ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
+        self.release_intent_states(
+            service_token,
+            organisation,
+            Some(project),
+            true,
+            convert_pipeline_stage_state_for_notifications,
+        )
+        .await
+    }
+
+    async fn release_intent_states(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+        include_completed: bool,
+        convert_stage: fn(forage_grpc::PipelineStageState) -> forage_core::platform::PipelineRunStageState,
     ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, String> {
         let req = bearer_request(
             service_token,
@@ -183,7 +218,7 @@ impl GrpcForestClient {
                 stages: ri
                     .stages
                     .into_iter()
-                    .map(convert_pipeline_stage_state)
+                    .map(convert_stage)
                     .collect(),
                 steps: ri
                     .steps
@@ -195,6 +230,132 @@ impl GrpcForestClient {
     }
 }
 
+impl GrpcForestClient {
+    /// Pages through the organisation's members (bounded to 5000) looking for `user_id`.
+    pub async fn is_org_member_with_token(
+        &self,
+        service_token: &str,
+        organisation: &str,
+        user_id: &str,
+    ) -> Result<bool, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetOrganisationRequest {
+                identifier: Some(forage_grpc::get_organisation_request::Identifier::Name(
+                    organisation.into(),
+                )),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let org = match self.org_client().get_organisation(req).await {
+            Ok(resp) => resp.into_inner().organisation,
+            Err(status) if status.code() == tonic::Code::NotFound => return Ok(false),
+            Err(status) => return Err(format!("gRPC get_organisation: {}", status.code())),
+        };
+        let Some(org) = org else { return Ok(false) };
+
+        let mut page_token = String::new();
+        for _ in 0..50 {
+            let req = bearer_request(
+                service_token,
+                forage_grpc::ListMembersRequest {
+                    organisation_id: org.organisation_id.clone(),
+                    page_size: 100,
+                    page_token: page_token.clone(),
+                },
+            )
+            .map_err(|e| format!("invalid token: {e}"))?;
+            let resp = self
+                .org_client()
+                .list_members(req)
+                .await
+                .map_err(|s| format!("gRPC list_members: {}", s.code()))?
+                .into_inner();
+            if resp.members.iter().any(|m| m.user_id == user_id) {
+                return Ok(true);
+            }
+            if resp.next_page_token.is_empty() || resp.members.is_empty() {
+                return Ok(false);
+            }
+            page_token = resp.next_page_token;
+        }
+        Err("member list exceeded the paging bound".into())
+    }
+
+    /// `Ok(None)` when the user no longer exists.
+    pub async fn recipient_profile_with_token(
+        &self,
+        service_token: &str,
+        user_id: &str,
+    ) -> Result<Option<forage_core::integrations::direct::RecipientProfile>, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetUserRequest {
+                identifier: Some(forage_grpc::get_user_request::Identifier::UserId(
+                    user_id.into(),
+                )),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let user = match self.client().get_user(req).await {
+            Ok(resp) => resp.into_inner().user,
+            Err(status) if status.code() == tonic::Code::NotFound => return Ok(None),
+            Err(status) => return Err(format!("gRPC get_user: {}", status.code())),
+        };
+        let Some(user) = user else { return Ok(None) };
+        let github_user_ids = user
+            .oauth_connections
+            .iter()
+            .filter(|c| c.provider() == forage_grpc::OAuthProvider::OauthProviderGithub)
+            .filter_map(|c| c.provider_user_id.parse::<i64>().ok())
+            .collect();
+        let converted = convert_user(user);
+        Ok(Some(forage_core::integrations::direct::RecipientProfile {
+            user_id: converted.user_id,
+            username: converted.username,
+            emails: converted.emails,
+            github_user_ids,
+        }))
+    }
+
+    pub async fn user_notification_preferences_with_token(
+        &self,
+        service_token: &str,
+        user_id: &str,
+    ) -> Result<Vec<NotificationPreference>, String> {
+        let req = bearer_request(
+            service_token,
+            forage_grpc::GetUserNotificationPreferencesRequest {
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(|e| format!("invalid token: {e}"))?;
+        let resp = self
+            .notification_client()
+            .get_user_notification_preferences(req)
+            .await
+            .map_err(|s| format!("gRPC get_user_notification_preferences: {}", s.code()))?;
+        Ok(resp
+            .into_inner()
+            .preferences
+            .into_iter()
+            .map(convert_notification_preference)
+            .collect())
+    }
+}
+
+fn convert_notification_preference(p: forage_grpc::NotificationPreference) -> NotificationPreference {
+    let nt = forage_grpc::NotificationType::try_from(p.notification_type)
+        .unwrap_or(forage_grpc::NotificationType::Unspecified);
+    let ch = forage_grpc::NotificationChannel::try_from(p.channel)
+        .unwrap_or(forage_grpc::NotificationChannel::Unspecified);
+    NotificationPreference {
+        notification_type: nt.as_str_name().to_string(),
+        channel: ch.as_str_name().to_string(),
+        enabled: p.enabled,
+    }
+}
+
 fn map_status(status: tonic::Status) -> AuthError {
     match status.code() {
         tonic::Code::Unauthenticated => AuthError::InvalidCredentials,
@@ -202,11 +363,6 @@ fn map_status(status: tonic::Status) -> AuthError {
         tonic::Code::PermissionDenied => AuthError::PermissionDenied(status.message().into()),
         tonic::Code::Unavailable => AuthError::Unavailable(status.message().into()),
         tonic::Code::NotFound => AuthError::NotFound,
-        // `FailedPrecondition` carries a wire-stable code in the message
-        // for callers to branch on. Currently used by:
-        //   - `last_auth_method` from `UnlinkOAuthProvider` (DATA-247)
-        //   - `email_not_verified` from `Login` (handled inline above)
-        // Unrecognised precondition codes fall through to `Other`.
         tonic::Code::FailedPrecondition if status.message() == "last_auth_method" => {
             AuthError::LastAuthMethod
         }
@@ -807,7 +963,6 @@ impl ForestAuth for GrpcForestClient {
             }
         };
 
-        // Use service account key for this privileged call.
         let service_key = self.service_account_key.as_deref().ok_or(AuthError::Other(
             "service account key not configured".into(),
         ))?;
@@ -999,8 +1154,6 @@ impl ForestAuth for GrpcForestClient {
     }
 }
 
-/// Map a forage-core `LinkedProvider` into the Forest proto enum value.
-/// Returns `None` for `Slack`, which Forest does not know about.
 fn linked_provider_to_proto(p: forage_core::auth::LinkedProvider) -> Option<i32> {
     match p {
         forage_core::auth::LinkedProvider::GitHub => {
@@ -1013,9 +1166,6 @@ fn linked_provider_to_proto(p: forage_core::auth::LinkedProvider) -> Option<i32>
     }
 }
 
-/// Map a Forest `OAuthConnection` into a forage-core `LinkedIdentity`.
-/// Returns `None` for providers we don't surface on the UI
-/// (e.g. `MAGIC_LINK`).
 fn convert_oauth_connection_to_linked(
     c: forage_grpc::OAuthConnection,
 ) -> Option<forage_core::auth::LinkedIdentity> {
@@ -1033,9 +1183,6 @@ fn convert_oauth_connection_to_linked(
     } else {
         Some(c.provider_email.as_str())
     };
-    // Decode the provider-specific extras Forest stored at link time.
-    // Both fields are best-effort — fall back to `None` if missing or
-    // malformed so the link still renders.
     let display_name_override = if c.provider_display_name.is_empty() {
         None
     } else {
@@ -1053,9 +1200,6 @@ fn convert_oauth_connection_to_linked(
         linked_at.as_deref(),
         extras.as_ref(),
     );
-    // The server-side helper splits `display_name` out of the JSON and
-    // sends it via the dedicated field — prefer it when present, since
-    // it's the value the link flow explicitly wrote.
     if let Some(name) = display_name_override {
         identity.display_name = name;
     }
@@ -1164,8 +1308,6 @@ fn convert_artifact(a: forage_grpc::Artifact) -> Artifact {
     }
 }
 
-/// forest's `HealthStatus` as its name, so neither forage-core nor the
-/// frontend needs the enum.
 fn health_status_name(v: i32) -> &'static str {
     match forage_grpc::HealthStatus::try_from(v) {
         Ok(forage_grpc::HealthStatus::Healthy) => "HEALTHY",
@@ -1191,8 +1333,6 @@ fn health_status_value(name: &str) -> i32 {
 fn gate_timeout_name(v: i32) -> String {
     match forage_grpc::GateTimeoutBehaviour::try_from(v) {
         Ok(forage_grpc::GateTimeoutBehaviour::Proceed) => "PROCEED".to_string(),
-        // Unspecified included: the server reads an unset value as FAIL, and
-        // showing anything else here would misdescribe what a timeout does.
         _ => "FAIL".to_string(),
     }
 }
@@ -1244,8 +1384,6 @@ fn convert_pipeline_stage(s: forage_grpc::PipelineStage) -> PipelineStage {
     }
 }
 
-/// Convert a `PipelineStageState` proto message (from GetReleaseIntentStates)
-/// to the domain type. Same enum mapping as `convert_pipeline_run_stage`.
 fn convert_pipeline_stage_state(
     s: forage_grpc::PipelineStageState,
 ) -> forage_core::platform::PipelineRunStageState {
@@ -1253,6 +1391,7 @@ fn convert_pipeline_stage_state(
         Ok(forage_grpc::PipelineRunStageType::Deploy) => "deploy",
         Ok(forage_grpc::PipelineRunStageType::Wait) => "wait",
         Ok(forage_grpc::PipelineRunStageType::Plan) => "plan",
+        Ok(forage_grpc::PipelineRunStageType::Gate) => "gate",
         _ => "unknown",
     };
     let status = match forage_grpc::PipelineRunStageStatus::try_from(s.status) {
@@ -1282,6 +1421,21 @@ fn convert_pipeline_stage_state(
         gate_deadline: s.gate_deadline,
         gate_waiting_on: s.gate_waiting_on,
     }
+}
+
+fn convert_pipeline_stage_state_for_notifications(
+    s: forage_grpc::PipelineStageState,
+) -> forage_core::platform::PipelineRunStageState {
+    let status = match forage_grpc::PipelineRunStageStatus::try_from(s.status) {
+        Ok(forage_grpc::PipelineRunStageStatus::AwaitingSignal) => Some("AWAITING_SIGNAL"),
+        Ok(forage_grpc::PipelineRunStageStatus::Superseded) => Some("SUPERSEDED"),
+        _ => None,
+    };
+    let mut stage = convert_pipeline_stage_state(s);
+    if let Some(status) = status {
+        stage.status = status.into();
+    }
+    stage
 }
 
 fn convert_release_step_state(
@@ -1401,19 +1555,10 @@ fn convert_policy(p: forage_grpc::Policy) -> Policy {
             target_environment: c.target_environment,
             required_approvals: c.required_approvals,
         },
-        Some(forage_grpc::policy::Config::SupersedePending(c)) => {
-            PolicyConfig::SupersedePending {
-                target_environment: c.target_environment,
-                same_branch_only: c.same_branch_only,
-            }
-        }
-        // A config forage cannot read — a policy type newer than this build.
-        // Rendering it as an empty soak-time policy, which is what this used to
-        // do, invents a policy that does not exist and shows a target
-        // environment of "" for a rule that is really gating something. An
-        // empty branch restriction is the honest shape: the type string
-        // alongside it already says "unknown", and no field here claims a value
-        // the server did not send.
+        Some(forage_grpc::policy::Config::SupersedePending(c)) => PolicyConfig::SupersedePending {
+            target_environment: c.target_environment,
+            same_branch_only: c.same_branch_only,
+        },
         None => PolicyConfig::BranchRestriction {
             target_environment: String::new(),
             branch_pattern: String::new(),
@@ -1486,10 +1631,6 @@ fn policy_config_to_grpc(
                     forage_grpc::SupersedePendingConfig {
                         target_environment: target_environment.clone(),
                         same_branch_only: *same_branch_only,
-                        // Not settable from forage: forest cannot interrupt an
-                        // in-flight deploy into a defined state, so the policy
-                        // lets a running deploy finish and collapses the queue
-                        // behind it. Validation rejects `true` server-side.
                         cancel_in_progress: false,
                     },
                 ),
@@ -1579,9 +1720,6 @@ fn org_policy_rule_from_grpc(rule: forage_grpc::OrgPolicyRule) -> OrgPolicyRule 
                 same_branch_only: c.same_branch_only,
             }
         }
-        // See `convert_policy` for why this is no longer an empty soak-time
-        // config: a rule type newer than this build must not be rendered as a
-        // policy that does not exist.
         None => PolicyConfig::BranchRestriction {
             target_environment: String::new(),
             branch_pattern: String::new(),
@@ -1751,8 +1889,6 @@ fn map_platform_status(status: tonic::Status) -> PlatformError {
         tonic::Code::Unavailable => PlatformError::Unavailable(status.message().into()),
         tonic::Code::InvalidArgument => PlatformError::InvalidArgument(status.message().into()),
         tonic::Code::AlreadyExists => PlatformError::AlreadyExists(status.message().into()),
-        // Unimplemented surfaces in v1 when admin picks policy=auto_join_oauth
-        // (DATA-252) — treat as user-fixable, not a 500.
         tonic::Code::Unimplemented => PlatformError::InvalidArgument(status.message().into()),
         _ => PlatformError::Other(status.message().into()),
     }
@@ -2244,8 +2380,6 @@ impl ForestPlatform for GrpcForestClient {
                 organisation: organisation.into(),
                 set_sensitive_keys: sensitive_keys.is_some(),
                 sensitive_keys: sensitive_keys.unwrap_or_default().to_vec(),
-                // The editor renders every key at once, so removing a row has to
-                // delete it. That only works if this replaces rather than merges.
                 merge_metadata: false,
             },
         )?;
@@ -3033,17 +3167,7 @@ impl ForestPlatform for GrpcForestClient {
             .into_inner()
             .preferences
             .into_iter()
-            .map(|p| {
-                let nt = forage_grpc::NotificationType::try_from(p.notification_type)
-                    .unwrap_or(forage_grpc::NotificationType::Unspecified);
-                let ch = forage_grpc::NotificationChannel::try_from(p.channel)
-                    .unwrap_or(forage_grpc::NotificationChannel::Unspecified);
-                NotificationPreference {
-                    notification_type: nt.as_str_name().to_string(),
-                    channel: ch.as_str_name().to_string(),
-                    enabled: p.enabled,
-                }
-            })
+            .map(convert_notification_preference)
             .collect())
     }
 
@@ -3068,6 +3192,30 @@ impl ForestPlatform for GrpcForestClient {
         )?;
         self.notification_client()
             .set_notification_preference(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn reset_notification_preference(
+        &self,
+        access_token: &str,
+        notification_type: &str,
+        channel: &str,
+    ) -> Result<(), PlatformError> {
+        let nt = forage_grpc::NotificationType::from_str_name(notification_type)
+            .unwrap_or(forage_grpc::NotificationType::Unspecified) as i32;
+        let ch = forage_grpc::NotificationChannel::from_str_name(channel)
+            .unwrap_or(forage_grpc::NotificationChannel::Unspecified) as i32;
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ResetNotificationPreferenceRequest {
+                notification_type: nt,
+                channel: ch,
+            },
+        )?;
+        self.notification_client()
+            .reset_notification_preference(req)
             .await
             .map_err(map_platform_status)?;
         Ok(())
@@ -3287,7 +3435,79 @@ impl ForestPlatform for GrpcForestClient {
         })
     }
 
-    // -- Auto-invite by verified email domain (DATA-252) ----------------------
+    #[tracing::instrument(skip_all)]
+    async fn get_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: Option<&str>,
+    ) -> Result<forage_core::platform::Visibility, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::GetVisibilityRequest {
+                organisation: organisation.into(),
+                project: project.map(Into::into),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .get_visibility(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(forage_core::platform::Visibility {
+            organisation: resp.organisation_visibility,
+            project: resp.project_visibility,
+            can_change: resp.can_change,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn set_organisation_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::SetOrganisationVisibilityRequest {
+                organisation: organisation.into(),
+                visibility: visibility.into(),
+            },
+        )?;
+        self.org_client()
+            .set_organisation_visibility(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn set_project_visibility(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::UpdateProjectRequest {
+                organisation: organisation.into(),
+                project: project.into(),
+                readme: None,
+                description: None,
+                metadata: None,
+                visibility: Some(visibility.into()),
+            },
+        )?;
+        self.release_client()
+            .update_project(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
 
     #[tracing::instrument(skip_all)]
     async fn list_allowed_domains(
@@ -3631,9 +3851,6 @@ impl ForestRegistry for GrpcForestClient {
         page: i32,
         page_size: i32,
     ) -> Result<ComponentSearchResult, PlatformError> {
-        // No bearer header — the server marks this RPC as AuthMode::None
-        // and would ignore one anyway. Anything we attach here would
-        // amount to handing the service-account key to anonymous traffic.
         let req = Request::new(forage_grpc::SearchPublicComponentsRequest {
             query: query.into(),
             organisation: organisation.unwrap_or_default().into(),
@@ -3771,9 +3988,6 @@ fn convert_tool_facet(t: forage_grpc::ToolFacet) -> forage_core::registry::ToolF
     }
 }
 
-/// Map the proto enum (as i32, since prost emits `Enumeration` as i32 fields)
-/// to the domain `ToolShape`. Unknown / future variants degrade to
-/// `ToolShape::Unknown`, matching the spec's forward-compat rule.
 fn convert_shape(raw: i32) -> forage_core::registry::ToolShape {
     use forage_core::registry::ToolShape;
     match forage_grpc::ComponentShape::try_from(raw) {
@@ -3813,15 +4027,9 @@ fn convert_component_version_info(v: forage_grpc::ComponentVersionInfo) -> Compo
     }
 }
 
-/// Translate a 1-indexed UI page to the 0-indexed proto page.
-/// `SearchComponentsRequest.page` is documented as 0-indexed in `forest.v1.rs`,
-/// while routes use `params.page.unwrap_or(1).max(1)` (1-indexed). Without this
-/// translation, page=1 produced offset=20 server-side and hid the first page.
 fn ui_page_to_proto(ui_page: i32) -> i32 {
     ui_page.saturating_sub(1).max(0)
 }
-
-// ─── OAuth applications ──────────────────────────────────────────────
 
 fn convert_oauth_app(app: forage_grpc::OAuthApp) -> OAuthApp {
     OAuthApp {
@@ -3834,6 +4042,7 @@ fn convert_oauth_app(app: forage_grpc::OAuthApp) -> OAuthApp {
         redirect_uris: app.redirect_uris,
         scopes: app.scopes,
         grant_types: app.grant_types,
+        public: app.public,
         created_by: app.created_by,
         created_at: app
             .created_at
@@ -3870,6 +4079,7 @@ impl ForestOAuthApps for GrpcForestClient {
                 homepage_url: homepage_url.into(),
                 redirect_uris: redirect_uris.to_vec(),
                 scopes: scopes.to_vec(),
+                public: false,
             },
         )?;
 
@@ -4031,8 +4241,6 @@ impl ForestOAuthApps for GrpcForestClient {
         Ok(())
     }
 
-    // ── Authorization server (service-account authenticated) ──────────
-
     async fn lookup_oauth_client(
         &self,
         client_id: &str,
@@ -4060,6 +4268,7 @@ impl ForestOAuthApps for GrpcForestClient {
                     homepage_url: r.homepage_url,
                     redirect_uris: r.redirect_uris,
                     scopes: r.scopes,
+                    public: r.public,
                 }))
             }
             Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
@@ -4159,10 +4368,23 @@ impl ForestOAuthApps for GrpcForestClient {
         if !resp.active {
             return Ok(None);
         }
+        let user = (!resp.user_id.is_empty()).then(|| DelegatingUser {
+            user_id: resp.user_id,
+            username: resp.username,
+            organisations: resp
+                .organisations
+                .into_iter()
+                .map(|o| DelegatingUserOrganisation {
+                    organisation_id: o.organisation_id,
+                    name: o.name,
+                })
+                .collect(),
+        });
         Ok(Some(ClientPrincipal {
             app_id: resp.app_id,
             organisation_id: resp.organisation_id,
             scopes: resp.scopes,
+            user,
         }))
     }
 
@@ -4205,7 +4427,6 @@ impl ForestOAuthApps for GrpcForestClient {
                     emails: u.emails.into_iter().map(|e| e.email).collect(),
                 }))
             }
-            // A person who isn't there is a normal answer, not a fault.
             Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
             Err(status) => Err(map_platform_status(status)),
         }
@@ -4413,15 +4634,188 @@ impl ForestOAuthApps for GrpcForestClient {
             .into_inner();
         Ok(resp.scopes)
     }
+
+    async fn initiate_oauth_device_authorization(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthDeviceAuthorization, OAuthFlowError> {
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::InitiateOAuthDeviceAuthorizationRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                scopes: scopes.to_vec(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .initiate_o_auth_device_authorization(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        Ok(OAuthDeviceAuthorization {
+            device_code: resp.device_code,
+            user_code: resp.user_code,
+            verification_uri: resp.verification_uri,
+            verification_uri_complete: resp.verification_uri_complete,
+            expires_in_seconds: resp.expires_in_seconds,
+            interval_seconds: resp.interval_seconds,
+        })
+    }
+
+    async fn lookup_oauth_device_authorization(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<PendingOAuthDeviceAuthorization>, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::LookupOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        match self
+            .oauth_apps_client()
+            .lookup_o_auth_device_authorization(req)
+            .await
+        {
+            Ok(resp) => {
+                let resp = resp.into_inner();
+                Ok(Some(PendingOAuthDeviceAuthorization {
+                    client_id: resp.client_id,
+                    name: resp.name,
+                    homepage_url: resp.homepage_url,
+                    scopes: resp.scopes,
+                }))
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
+            Err(status) => Err(map_platform_status(status)),
+        }
+    }
+
+    async fn approve_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ApproveOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+                approving_ip: approving_ip.into(),
+                approving_user_agent: approving_user_agent.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        self.oauth_apps_client()
+            .approve_o_auth_device_authorization(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn deny_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::DenyOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        self.oauth_apps_client()
+            .deny_o_auth_device_authorization(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn exchange_oauth_device_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> Result<OAuthDeviceToken, OAuthFlowError> {
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ExchangeOAuthDeviceCodeRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                device_code: device_code.into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .exchange_o_auth_device_code(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        use forage_grpc::OAuthDeviceTokenStatus as S;
+        Ok(match S::try_from(resp.status).unwrap_or(S::Unspecified) {
+            S::Issued => {
+                let tokens = resp
+                    .tokens
+                    .ok_or_else(|| OAuthFlowError::ServerError("no tokens in response".into()))?;
+                OAuthDeviceToken::Issued(OAuthIssuedTokens {
+                    access_token: tokens.access_token,
+                    refresh_token: tokens.refresh_token,
+                    token_type: tokens.token_type,
+                    expires_in_seconds: tokens.expires_in_seconds,
+                    scopes: tokens.scopes,
+                    id_token: opt(tokens.id_token),
+                })
+            }
+            S::AuthorizationPending => OAuthDeviceToken::AuthorizationPending,
+            S::SlowDown => OAuthDeviceToken::SlowDown,
+            S::AccessDenied => OAuthDeviceToken::AccessDenied,
+            S::ExpiredToken => OAuthDeviceToken::ExpiredToken,
+            S::Unspecified => {
+                return Err(OAuthFlowError::ServerError(
+                    "unknown device token status".into(),
+                ));
+            }
+        })
+    }
 }
 
-/// Treat an empty proto string field as absent.
 fn opt(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// Map a forest gRPC status to an OAuth flow error. forest-server sets the
-/// status *message* to the RFC 6749 error code for these endpoints.
 fn map_oauth_flow_status(status: tonic::Status) -> OAuthFlowError {
     match (status.code(), status.message()) {
         (tonic::Code::Unauthenticated, _) => OAuthFlowError::InvalidClient,
@@ -4435,6 +4829,26 @@ fn map_oauth_flow_status(status: tonic::Status) -> OAuthFlowError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_stage_states_keep_superseded_and_awaiting_signal() {
+        let stage = |status: forage_grpc::PipelineRunStageStatus| forage_grpc::PipelineStageState {
+            stage_id: "prod".into(),
+            stage_type: forage_grpc::PipelineRunStageType::Gate as i32,
+            status: status as i32,
+            ..Default::default()
+        };
+        let superseded = stage(forage_grpc::PipelineRunStageStatus::Superseded);
+        assert_eq!(convert_pipeline_stage_state(superseded.clone()).status, "PENDING");
+        let s = convert_pipeline_stage_state_for_notifications(superseded);
+        assert_eq!(s.status, "SUPERSEDED");
+        assert_eq!(s.stage_type, "gate");
+        let waiting = stage(forage_grpc::PipelineRunStageStatus::AwaitingSignal);
+        assert_eq!(
+            convert_pipeline_stage_state_for_notifications(waiting).status,
+            "AWAITING_SIGNAL"
+        );
+    }
 
     fn make_org(id: &str, name: &str) -> forage_grpc::Organisation {
         forage_grpc::Organisation {
@@ -4456,8 +4870,6 @@ mod tests {
             ..Default::default()
         }
     }
-
-    // ── The supersede-pending policy type (DATA-817) ─────────────────
 
     #[test]
     fn a_supersede_pending_policy_survives_the_round_trip() {
@@ -4490,9 +4902,11 @@ mod tests {
             other => panic!("expected a supersede-pending config, got {other:?}"),
         }
 
-        // And back out again, as the create form sends it.
         let (policy_type, config) = policy_config_to_grpc(&converted.config);
-        assert_eq!(policy_type, forage_grpc::PolicyType::SupersedePending as i32);
+        assert_eq!(
+            policy_type,
+            forage_grpc::PolicyType::SupersedePending as i32
+        );
         match config {
             Some(forage_grpc::create_policy_request::Config::SupersedePending(c)) => {
                 assert_eq!(c.target_environment, "prod");
@@ -4506,14 +4920,6 @@ mod tests {
         }
     }
 
-    /// A policy whose config forage cannot read must not be dressed up as a
-    /// policy that does exist.
-    ///
-    /// This used to fall back to an empty `SoakTime`, so a policy type newer
-    /// than the running forage build rendered as a soak-time rule gating ""
-    /// for 0 seconds — a rule nobody wrote, shown as if they had. The type
-    /// string already says "unknown"; the config must not contradict it by
-    /// naming a shape.
     #[test]
     fn an_unreadable_policy_config_does_not_masquerade_as_soak_time() {
         let policy = forage_grpc::Policy {
@@ -4550,10 +4956,9 @@ mod tests {
     #[test]
     fn convert_organisations_truncates_when_roles_shorter() {
         let orgs = vec![make_org("o1", "alpha"), make_org("o2", "beta")];
-        let roles = vec!["owner".into()]; // only 1 role for 2 orgs
+        let roles = vec!["owner".into()];
 
         let result = convert_organisations(orgs, roles);
-        // zip truncates to shorter iterator
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "alpha");
     }
@@ -4633,8 +5038,6 @@ mod tests {
         assert_eq!(ui_page_to_proto(-5), 0);
     }
 
-    // ── Tools (TASKS/018 + specs/features/007) ───────────────────────
-
     fn make_tool_entry(
         shape: forage_grpc::ComponentShape,
         upstream_host: &str,
@@ -4652,7 +5055,6 @@ mod tests {
 
     #[test]
     fn convert_tool_summary_maps_all_fields() {
-        // P5 — every field on OrgToolEntry survives the conversion intact.
         let entry = make_tool_entry(
             forage_grpc::ComponentShape::ToolBinary,
             "",
@@ -4674,9 +5076,6 @@ mod tests {
 
     #[test]
     fn convert_tool_summary_handles_missing_facet() {
-        // E3 — a tool with no facet (shouldn't happen post-server-validation,
-        // but the conversion stays total). Description falls back to empty,
-        // argv_passthrough to false.
         let entry = make_tool_entry(
             forage_grpc::ComponentShape::ToolExternal,
             "github.com",
@@ -4712,8 +5111,6 @@ mod tests {
 
     #[test]
     fn convert_shape_unknown_for_unspecified_and_invalid() {
-        // Forward-compat: an unknown variant (e.g. a future server adds one)
-        // degrades to Unknown rather than panicking.
         use forage_core::registry::ToolShape;
         assert_eq!(
             convert_shape(forage_grpc::ComponentShape::Unspecified as i32),
@@ -4721,16 +5118,6 @@ mod tests {
         );
         assert_eq!(convert_shape(999), ToolShape::Unknown);
     }
-
-    // ─── map_status: error code translation ──────────────────────────
-    //
-    // The route layer in `routes/auth.rs::complete_link_flow` pattern-matches
-    // on the `AuthError::AlreadyExists(msg)` body to differentiate
-    // "already linked to another user" (cross-user conflict, 409) from
-    // "already linked to same user" (idempotent re-link). These tests
-    // pin the contract between Forest's friendly constraint messages
-    // (in `repositories/error.rs`) and the route layer's substring
-    // matching.
 
     #[test]
     fn map_status_translates_cross_user_constraint_message() {
@@ -4754,8 +5141,6 @@ mod tests {
             tonic::Status::already_exists("user already has an account linked for this provider");
         match map_status(status) {
             AuthError::AlreadyExists(msg) => {
-                // This message is what the route layer falls through to —
-                // it triggers `already_linked_<provider>` (vs `already_linked_other_<provider>`).
                 assert!(
                     msg.contains("user already has an account linked"),
                     "expected the same-user message verbatim; got: {msg}"
@@ -4792,8 +5177,6 @@ mod tests {
         }
     }
 
-    // ─── convert_oauth_connection_to_linked: extras handling ─────────
-
     #[test]
     fn convert_oauth_connection_decodes_provider_data_extras() {
         let conn = forage_grpc::OAuthConnection {
@@ -4807,7 +5190,6 @@ mod tests {
         let id = convert_oauth_connection_to_linked(conn).expect("github should convert");
         assert_eq!(id.provider, forage_core::auth::LinkedProvider::GitHub);
         assert_eq!(id.external_id, "12345");
-        // provider_display_name wins over the JSON-embedded login.
         assert_eq!(id.display_name, "kjuulh");
         assert_eq!(id.email.as_deref(), Some("kasper@understory.io"));
         assert_eq!(id.avatar_url.as_deref(), Some("https://example.com/a.png"));
@@ -4824,7 +5206,6 @@ mod tests {
             provider_data_json: String::new(),
         };
         let id = convert_oauth_connection_to_linked(conn).expect("google should convert");
-        // With no extras and no display_name, falls back to email.
         assert_eq!(id.display_name, "kasper@understory.io");
         assert_eq!(id.avatar_url, None);
     }
@@ -4847,7 +5228,6 @@ mod tests {
 
     #[test]
     fn convert_oauth_connection_tolerates_malformed_provider_data_json() {
-        // Defensive: a corrupt JSON blob shouldn't drop the whole identity.
         let conn = forage_grpc::OAuthConnection {
             provider: forage_grpc::OAuthProvider::OauthProviderGithub as i32,
             provider_user_id: "12345".into(),
@@ -4857,7 +5237,6 @@ mod tests {
             provider_data_json: "not-json{".into(),
         };
         let id = convert_oauth_connection_to_linked(conn).expect("identity should still render");
-        // display_name still wins because the field is parsed separately.
         assert_eq!(id.display_name, "kjuulh");
     }
 }

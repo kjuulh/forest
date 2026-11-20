@@ -38,9 +38,6 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
         Ok(self)
     }
 
-    /// A reported failure has to leave a release behind, not just a
-    /// notification: a project whose successes are releases and whose failures
-    /// are nothing under-reports itself everywhere (DATA-637).
     async fn a_failed_release_is_recorded(self) -> anyhow::Result<Self> {
         let artifact_id: uuid::Uuid = self.data().artifact_id.parse()?;
 
@@ -60,10 +57,6 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
         Ok(self)
     }
 
-    /// And the intent has to be closed out. These releases are written terminal
-    /// rather than transitioned into it, so they never pass through the event
-    /// store's finalizer — forgetting to call it left the intent ACTIVE forever
-    /// and made a dead deploy look permanently in flight.
     async fn the_intent_is_finalized_failed(self) -> anyhow::Result<Self> {
         let artifact_id: uuid::Uuid = self.data().artifact_id.parse()?;
 
@@ -150,16 +143,6 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
         Ok(self)
     }
 
-    /// Every artifact in the listing carries its own destinations and nobody
-    /// else's.
-    ///
-    /// `artifact_is_listed_in_project` releases a single artifact, so it cannot
-    /// see the mistake that matters here. The listing used to run one
-    /// destinations query per annotation, which made cross-contamination
-    /// impossible by construction; it now runs one query for every artifact at
-    /// once and groups the rows in memory, and a grouping bug — the wrong key,
-    /// a `get` where the loop wanted the next artifact's rows — shows up only
-    /// once two artifacts in the same project went to different places.
     async fn each_artifact_lists_only_its_own_destination(
         self,
         expected: &[(String, String)],

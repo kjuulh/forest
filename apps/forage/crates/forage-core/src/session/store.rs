@@ -5,8 +5,6 @@ use chrono::{Duration, Utc};
 
 use super::{SessionData, SessionError, SessionId, SessionStore};
 
-/// In-memory session store. Suitable for single-instance deployments.
-/// Sessions are lost on server restart.
 pub struct InMemorySessionStore {
     sessions: RwLock<HashMap<SessionId, SessionData>>,
     max_inactive: Duration,
@@ -26,7 +24,6 @@ impl InMemorySessionStore {
         }
     }
 
-    /// Remove sessions inactive for longer than `max_inactive`.
     pub fn reap_expired(&self) {
         let cutoff = Utc::now() - self.max_inactive;
         let mut sessions = self.sessions.write().unwrap();

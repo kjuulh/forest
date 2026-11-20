@@ -31,40 +31,16 @@ pub struct UpdateCommand {
     component: Option<String>,
 }
 
-/// What updating one versioned dependency produced.
-///
-/// Dependencies are resolved and downloaded concurrently (DATA-505), so the
-/// per-dep work cannot write `forest.lock` or print progress lines itself —
-/// interleaved output is unreadable and concurrent read-modify-write of the
-/// lockfile loses entries. Each unit of work returns this instead, and the
-/// caller applies it in dependency order once the fan-out has drained.
 #[derive(Default)]
 struct DepUpdate {
-    /// Lockfile entry to record, if any.
     entry: Option<LockEntry>,
-    /// Line to show the user, replayed in dependency order.
-    message: Option<UpdateMessage>,
-    /// Whether this counts toward the "updated N component(s)" tally.
+    message: Option<String>,
     updated: bool,
-}
-
-enum UpdateMessage {
-    Success(String),
-    Warn(String),
-}
-
-impl UpdateMessage {
-    fn emit(self) {
-        match self {
-            UpdateMessage::Success(m) => crate::ui::success(m),
-            UpdateMessage::Warn(m) => crate::ui::warn(m),
-        }
-    }
 }
 
 impl UpdateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        let project = state.project_parser().get_project().await?;
+        let project = state.project_parser().get_project_specs().await?;
         let project_dir = project.path.clone();
         let client = state.grpc_client();
         let (os, arch) = component_binary::current_platform();
@@ -72,12 +48,8 @@ impl UpdateCommand {
         let mut lockfile = LockFile::load(&project_dir).await?;
         let mut updated = 0;
 
-        // Pass 1 (serial, no I/O worth parallelising): local path deps are
-        // recorded straight away, versioned deps are collected for the
-        // concurrent pass.
         let mut versioned = Vec::new();
         for dep in &project.dependencies.dependencies {
-            // Filter to specific component if requested
             if let Some(filter) = &self.component {
                 let dep_fqn = format!("{}/{}", dep.organisation, dep.name);
                 if dep_fqn != *filter {
@@ -87,8 +59,6 @@ impl UpdateCommand {
 
             match &dep.dependency_type {
                 DependencyType::Local(path) => {
-                    // Record path dep in lock file (like Cargo does).
-                    // The version is read from the component's CUE config.
                     let version =
                         read_local_component_version(path).unwrap_or_else(|| "0.0.0".to_string());
 
@@ -102,7 +72,6 @@ impl UpdateCommand {
                     });
                 }
                 DependencyType::Versioned(current_version) => {
-                    // The version in forest.cue is the spec (e.g., "0.1" or "1" or "0.1.0")
                     let version_str = current_version.to_string();
                     let spec = VersionSpec::parse(&version_str).with_context(|| {
                         format!(
@@ -115,10 +84,6 @@ impl UpdateCommand {
             }
         }
 
-        // Pass 2 (concurrent, bounded + adaptive): resolve each spec against
-        // the registry and fetch what it points at. `lockfile` is read-only
-        // here — the up-to-date check only reads Registry entries, and the
-        // path-dep inserts above never touch those.
         let limiter = crate::download::Limiter::new(state.config.max_downloads_in_flight());
         let lockfile_snapshot = &lockfile;
         let results = crate::download::map_bounded(
@@ -127,48 +92,28 @@ impl UpdateCommand {
             |(dep, spec), lim| {
                 let client = client.clone();
                 async move {
-                    // List available versions from registry
-                    let versions_response = client
+                    let available = client
                         .list_component_versions(&dep.organisation, &dep.name)
-                        .await;
+                        .await
+                        .with_context(|| {
+                            format!("list versions of {}/{}", dep.organisation, dep.name)
+                        })?;
 
-                    let available = match versions_response {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to list versions for {}/{}: {e}",
-                                dep.organisation,
-                                dep.name
-                            );
-                            return Ok(DepUpdate::default());
-                        }
-                    };
-
-                    // Parse available versions
                     let mut semver_versions: Vec<semver::Version> = available
                         .iter()
                         .filter_map(|v| semver::Version::parse(&v.version).ok())
                         .collect();
                     semver_versions.sort();
 
-                    // Resolve the best match
-                    let Some(resolved) = spec.resolve(&semver_versions) else {
-                        return Ok(DepUpdate {
-                            message: Some(UpdateMessage::Warn(format!(
-                                "{}/{}: no version matches '{spec}'",
-                                dep.organisation, dep.name
-                            ))),
-                            ..Default::default()
-                        });
-                    };
+                    let resolved = spec.resolve(&semver_versions).with_context(|| {
+                        format!(
+                            "no published version of {}/{} matches '{spec}'",
+                            dep.organisation, dep.name
+                        )
+                    })?;
 
                     let resolved_str = resolved.to_string();
 
-                    // Component kind drives the download path:
-                    //   - kind=binary → per-platform binary download + lockfile hash
-                    //   - kind=cue / deno / files → stream the file bundle into
-                    //     the cache via the shared ensure_versioned_dep_cached
-                    //     helper; no lockfile hash (immutable version is the lock)
                     let manifest_raw = client
                         .get_component_manifest(&dep.organisation, &dep.name, &resolved_str)
                         .await
@@ -184,7 +129,6 @@ impl UpdateCommand {
                         .unwrap_or(false);
 
                     if is_binary {
-                        // Check if we already have this version cached
                         if let Some(existing_hash) = lockfile_snapshot
                             .get(&dep.organisation, &dep.name, &resolved_str, os, arch)
                         {
@@ -193,32 +137,32 @@ impl UpdateCommand {
                                 .unwrap_or(existing_hash);
                             if component_binary::resolve_binary_from_hash(hash).is_some() {
                                 return Ok(DepUpdate {
-                                    message: Some(UpdateMessage::Success(format!(
+                                    message: Some(format!(
                                         "{}/{}@{} up to date",
                                         dep.organisation, dep.name, resolved_str
-                                    ))),
+                                    )),
                                     ..Default::default()
                                 });
                             }
                         }
 
-                        // The registry stores macOS binaries under the "darwin"
-                        // os key (publish translates macos→darwin on upload).
-                        // `forest run`'s download path does this too; the
-                        // update path needs the same translation or a macOS
-                        // consumer gets a spurious "binary not found". DATA-312.
                         let registry_os = if os == "macos" { "darwin" } else { os };
                         let label = format!(
                             "Downloading {}/{}@{}",
                             dep.organisation, dep.name, resolved_str
                         );
-                        let binary = client
-                            .download_component_binary(
-                                &dep.organisation,
-                                &dep.name,
-                                &resolved_str,
-                                registry_os,
-                                arch,
+                        let streamed = client
+                            .download_component_binary_to_file(
+                                &crate::grpc::BinaryRef {
+                                    organisation: &dep.organisation,
+                                    name: &dep.name,
+                                    version: &resolved_str,
+                                    os: registry_os,
+                                    arch,
+                                },
+                                &component_binary::binary_download_dir()?,
+                                None,
+                                None,
                                 Some(&label),
                             )
                             .await
@@ -228,12 +172,11 @@ impl UpdateCommand {
                                     dep.organisation, dep.name, resolved_str, os, arch
                                 )
                             })?;
-                        let size_bytes = binary.len();
-                        lim.add_bytes(size_bytes as u64);
+                        let size_bytes = streamed.size_bytes;
+                        lim.add_bytes(size_bytes);
 
                         let (sha256, _cache_path) =
-                            component_binary::store_binary_in_cache(&binary)?;
-                        drop(binary);
+                            component_binary::install_downloaded_binary(streamed).await?;
 
                         tracing::debug!(
                             "updated {}/{}@{} ({} bytes)",
@@ -253,14 +196,13 @@ impl UpdateCommand {
                                     sha256: format!("sha256:{sha256}"),
                                 },
                             }),
-                            message: Some(UpdateMessage::Success(format!(
+                            message: Some(format!(
                                 "Updated {}/{}@{}",
                                 dep.organisation, dep.name, resolved_str
-                            ))),
+                            )),
                             updated: true,
                         })
                     } else {
-                        // Files-based (CUE-only library or Deno component).
                         let outcome = state
                             .components_service()
                             .ensure_versioned_dep_cached(
@@ -277,25 +219,21 @@ impl UpdateCommand {
                             })?;
                         match outcome {
                             EnsureCachedOutcome::AlreadyCached => Ok(DepUpdate {
-                                message: Some(UpdateMessage::Success(format!(
+                                message: Some(format!(
                                     "{}/{}@{} up to date",
                                     dep.organisation, dep.name, resolved_str
-                                ))),
+                                )),
                                 ..Default::default()
                             }),
                             EnsureCachedOutcome::Downloaded => Ok(DepUpdate {
-                                message: Some(UpdateMessage::Success(format!(
+                                message: Some(format!(
                                     "Updated {}/{}@{} (files)",
                                     dep.organisation, dep.name, resolved_str
-                                ))),
+                                )),
                                 updated: true,
                                 ..Default::default()
                             }),
                             EnsureCachedOutcome::BinaryRequiresPlatformDownload => {
-                                // Manifest probe said non-binary but the
-                                // ensure helper disagreed. Race or stale
-                                // manifest cache — skip with a hint instead
-                                // of erroring loudly.
                                 tracing::warn!(
                                     "manifest probe for {}/{}@{} disagreed with ensure_versioned_dep_cached",
                                     dep.organisation,
@@ -311,10 +249,6 @@ impl UpdateCommand {
         )
         .await;
 
-        // Pass 3 (serial): replay output in dependency order and apply the
-        // lockfile writes. Every dep got its chance to run before the first
-        // error surfaces, so one unreachable component does not discard the
-        // downloads that succeeded.
         let mut first_error = None;
         let mut pending = Vec::new();
         for result in results {
@@ -329,7 +263,7 @@ impl UpdateCommand {
                 lockfile.insert(entry);
             }
             if let Some(message) = update.message {
-                message.emit();
+                crate::ui::success(message);
             }
             if update.updated {
                 updated += 1;
@@ -353,10 +287,7 @@ impl UpdateCommand {
     }
 }
 
-/// Read the version from a local component's CUE config (forest.cue).
-/// Returns None if the version can't be determined.
 fn read_local_component_version(path: &std::path::Path) -> Option<String> {
-    // Try to read from .forest/component/meta.json first
     let meta_path = path.join(".forest").join("component").join("meta.json");
     if let Ok(content) = std::fs::read_to_string(&meta_path) {
         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -366,7 +297,6 @@ fn read_local_component_version(path: &std::path::Path) -> Option<String> {
         }
     }
 
-    // Fallback: try running cue export to get the version
     let output = std::process::Command::new("cue")
         .args(["export", "--out", "json", "forest.cue"])
         .current_dir(path)

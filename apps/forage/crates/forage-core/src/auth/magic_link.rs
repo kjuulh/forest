@@ -4,36 +4,23 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
-/// Token type for the passwordless-login flow.
 pub const TOKEN_TYPE_MAGIC_LINK: &str = "magic-link";
-/// Token type for email-verification at signup (and post-signup add_email).
 pub const TOKEN_TYPE_EMAIL_VERIFY: &str = "email-verify";
 
-/// Errors from magic link token operations.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum MagicLinkError {
     #[error("store error: {0}")]
     Store(String),
 }
 
-/// What `verify_and_consume` returns: the email tied to the token, plus
-/// any `return_to` intent that was stored alongside it at issue time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumedMagicLink {
     pub email: String,
     pub return_to: Option<String>,
 }
 
-/// Trait for token persistence shared by the magic-link login flow and
-/// the email-verification flow. The `token_type` discriminator
-/// segregates the two address-spaces; consumers cannot redeem a
-/// magic-link token at the verify-email route or vice versa.
 #[async_trait::async_trait]
 pub trait MagicLinkStore: Send + Sync {
-    /// Store a hashed token with its associated email and expiry, scoped
-    /// to a specific `token_type`. `return_to` is an opaque application
-    /// intent recovered at verify time — used by the device-login flow
-    /// to land the user on `/device?user_code=…` after sign-in.
     async fn store_token(
         &self,
         token_type: &str,
@@ -43,17 +30,12 @@ pub trait MagicLinkStore: Send + Sync {
         return_to: Option<&str>,
     ) -> Result<(), MagicLinkError>;
 
-    /// Verify and consume a token atomically. Returns the row's email
-    /// plus return_to if a non-expired (token_type, token_hash) pair
-    /// existed, None otherwise.
     async fn verify_and_consume(
         &self,
         token_type: &str,
         token_hash: &str,
     ) -> Result<Option<ConsumedMagicLink>, MagicLinkError>;
 
-    /// Count tokens of the given type created for this email since the
-    /// given time (for per-type rate limiting).
     async fn count_recent(
         &self,
         token_type: &str,
@@ -61,12 +43,9 @@ pub trait MagicLinkStore: Send + Sync {
         since: DateTime<Utc>,
     ) -> Result<u64, MagicLinkError>;
 
-    /// Remove expired tokens (across all types).
     async fn reap_expired(&self) -> Result<u64, MagicLinkError>;
 }
 
-/// Generate a magic link token.
-/// Returns `(raw_token_base64url, sha256_hex_hash)`.
 pub fn generate_magic_link_token() -> (String, String) {
     use rand::Rng;
     let mut bytes = [0u8; 32];
@@ -109,7 +88,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex
 }
 
-/// Hash a raw token for storage/lookup.
 pub fn hash_magic_link_token(raw: &str) -> String {
     sha256_hex(raw.as_bytes())
 }
@@ -122,8 +100,6 @@ struct StoredToken {
     return_to: Option<String>,
 }
 
-/// In-memory implementation for development and tests. Keys by
-/// `(token_type, token_hash)` so the two address-spaces don't collide.
 pub struct InMemoryMagicLinkStore {
     tokens: Mutex<HashMap<(String, String), StoredToken>>,
 }
@@ -229,7 +205,6 @@ mod tests {
             .await
             .unwrap();
 
-        // First consume succeeds
         let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
@@ -242,7 +217,6 @@ mod tests {
             })
         );
 
-        // Second consume fails (single-use)
         let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
@@ -349,7 +323,6 @@ mod tests {
         let (_, hash) = generate_magic_link_token();
         let expires = Utc::now() + chrono::Duration::minutes(15);
 
-        // Store as magic-link, attempt to redeem as email-verify.
         store
             .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires, None)
             .await
@@ -361,7 +334,6 @@ mod tests {
             .unwrap();
         assert_eq!(consumed, None, "cross-type redemption must fail");
 
-        // Original type still works.
         let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await

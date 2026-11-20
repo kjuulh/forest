@@ -22,8 +22,6 @@ pub struct ReleasePipelinesServer {
     pub state: State,
 }
 
-// ── Proto <-> Domain conversions ─────────────────────────────────────
-
 fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
     stages
         .iter()
@@ -68,18 +66,9 @@ fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
         .collect()
 }
 
-// ── Gate conversion, shared with org_rules ───────────────────────────────
-//
-// `stages_to_proto` / `stages_from_proto` are duplicated between this module
-// and `org_rules`, which predates this change. Rather than add a third copy of
-// the gate's own conversion to that, the gate-specific parts live here and both
-// call them.
-
 pub(crate) fn gate_timeout_from_proto(v: i32) -> GateTimeout {
     match GateTimeoutBehaviour::try_from(v) {
         Ok(GateTimeoutBehaviour::Proceed) => GateTimeout::Proceed,
-        // Unspecified included: an unset value must mean Fail, or a gate whose
-        // caller forgot the field would quietly stop gating.
         _ => GateTimeout::Fail,
     }
 }
@@ -104,10 +93,6 @@ pub(crate) fn requirements_from_proto(reqs: Vec<ProtoSignalRequirement>) -> Vec<
                     Ok(HealthStatus::Degraded) => Some("DEGRADED".to_string()),
                     Ok(HealthStatus::Unhealthy) => Some("UNHEALTHY".to_string()),
                     Ok(HealthStatus::Missing) => Some("MISSING".to_string()),
-                    // Dropped rather than mapped to a default. An UNSPECIFIED
-                    // in the accept list would otherwise become a status the
-                    // gate waits for and nothing can send; dropping it leaves
-                    // the list empty, which `accepted()` reads as HEALTHY.
                     Ok(HealthStatus::Unspecified) | Err(_) => None,
                 })
                 .collect(),

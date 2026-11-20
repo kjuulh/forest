@@ -1,19 +1,11 @@
-//! Saved plans for `forest/terraform@1` (forest#284).
-//!
-//! The plan stage of a release pipeline keeps the binary plan it produced, and
-//! the deploy stage of the same release intent applies exactly that file. See
-//! the `terraform_plans` migration for why, and for why a row is deleted as
-//! soon as its apply has been attempted.
-
 use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// One terraform root's saved plan.
+pub const PLAN_RETENTION_DAYS: i32 = 7;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedPlan {
-    /// The work dir, relative to the release's temp root — the same path the
-    /// deploy stage lays the artifact out at.
     pub work_dir: String,
     pub plan: Vec<u8>,
     pub lock_file: Option<String>,
@@ -29,9 +21,6 @@ impl TerraformPlanStore {
         Self { db }
     }
 
-    /// Replace whatever this intent had saved for this destination. A plan
-    /// stage that is re-run must not leave an older root's plan behind for the
-    /// apply to pick up.
     pub async fn save(
         &self,
         release_intent_id: Uuid,
@@ -67,13 +56,13 @@ impl TerraformPlanStore {
             .context("insert plan")?;
         }
 
-        // Plans nobody applied — a rejected stage, an abandoned pipeline — hold
-        // secrets and are never going to be valid again. Pruning here keeps it
-        // to one code path and no extra job.
-        sqlx::query!("DELETE FROM terraform_plans WHERE created_at < now() - interval '7 days'")
-            .execute(&mut *tx)
-            .await
-            .context("prune old plans")?;
+        sqlx::query!(
+            "DELETE FROM terraform_plans WHERE created_at < now() - make_interval(days => $1)",
+            PLAN_RETENTION_DAYS,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("prune old plans")?;
 
         tx.commit().await.context("commit save plans")?;
         Ok(())
@@ -108,9 +97,6 @@ impl TerraformPlanStore {
             .collect())
     }
 
-    /// Drop the plans once their apply has been attempted, whether it worked
-    /// or not: a plan that applied is spent, and one that failed part-way is
-    /// stale — terraform would refuse it anyway.
     pub async fn discard(
         &self,
         release_intent_id: Uuid,
@@ -127,12 +113,6 @@ impl TerraformPlanStore {
         Ok(())
     }
 
-    /// Whether this plan release belongs to a destroy plan stage (forest#286).
-    ///
-    /// Read from the intent's own pipeline definition rather than carried on
-    /// the release, so the only way to get a destroy plan is a stage that says
-    /// `destroy: true` — which `validate_pipeline` refuses to combine with
-    /// auto-approval. A release with no stage (a direct release) is never one.
     pub async fn is_destroy_plan(&self, release_id: Uuid) -> anyhow::Result<bool> {
         let row = sqlx::query!(
             r#"
@@ -154,10 +134,6 @@ impl TerraformPlanStore {
         stage_is_destroy(&stages, &stage_id)
     }
 
-    /// Whether this intent ran a plan stage against this destination. Used to
-    /// tell "no plan was ever made" (a direct release: plan and apply in one
-    /// go, as before) from "a plan was made and approved but is gone" — which
-    /// must fail rather than quietly re-plan and apply something unreviewed.
     pub async fn plan_stage_ran(
         &self,
         release_intent_id: Uuid,
@@ -180,7 +156,6 @@ impl TerraformPlanStore {
     }
 }
 
-/// Whether `stage_id` in a stored pipeline definition is a destroy plan.
 fn stage_is_destroy(stages: &serde_json::Value, stage_id: &str) -> anyhow::Result<bool> {
     use crate::services::release_pipeline::{PipelineStages, StageConfig};
 
@@ -214,7 +189,6 @@ mod tests {
     async fn a_saved_plan_round_trips_byte_for_byte() {
         let store = store().await;
         let (intent, dest) = (Uuid::now_v7(), Uuid::now_v7());
-        // Not UTF-8 on purpose: a plan file is a zip.
         let bytes = [0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0xfe];
 
         store
@@ -230,8 +204,6 @@ mod tests {
 
     #[tokio::test]
     async fn saving_again_replaces_every_root_not_just_matching_ones() {
-        // A re-run plan stage whose artifact renders fewer roots must not
-        // leave the old extra root's plan for the apply to find.
         let store = store().await;
         let (intent, dest) = (Uuid::now_v7(), Uuid::now_v7());
 

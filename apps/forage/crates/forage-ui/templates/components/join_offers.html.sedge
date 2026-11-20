@@ -1,0 +1,18 @@
+use crate::components::CsrfField;
+use crate::format::urlencode;
+component JoinOfferBanner(organisation_id: &str, organisation_name: &str, matched_domain: &str, csrf_token: &str) {
+<div class="mb-4 p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-4">
+  <div class="text-sm text-gray-700">
+    <strong class="text-gray-900">{organisation_name}</strong>
+    allows anyone with a verified
+    <span class="font-mono text-gray-900">@{matched_domain}</span>
+    address to join.
+  </div>
+  <form method="POST" action="/join-offers/{urlencode(organisation_id)}/accept" class="shrink-0">
+    <CsrfField token={csrf_token} name="_csrf" />
+    <button type="submit" class="px-3 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">
+      Join
+    </button>
+  </form>
+</div>
+}

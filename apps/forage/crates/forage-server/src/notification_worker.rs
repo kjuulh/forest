@@ -1,25 +1,51 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use forage_core::integrations::router::{DispatchTask, NotificationEvent, ReleaseContext};
 use forage_core::integrations::webhook::sign_payload;
-use forage_core::integrations::{DeliveryStatus, IntegrationStore};
+use forage_core::integrations::slack_release::{self, ReleaseView, ThreadDetail};
+use forage_core::integrations::{
+    DeliveryStatus, DestinationStatus, IntegrationStore, SlackMessageRef,
+};
+use forage_core::platform::{
+    Artifact, ForestPlatform, PipelineRunStageState, PlanOutput, ReleaseStepState,
+};
 use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 
 use crate::forest_client::GrpcForestClient;
 
-// ── Dispatcher ──────────────────────────────────────────────────────
-
-/// HTTP client for dispatching webhooks and Slack messages.
 pub struct NotificationDispatcher {
     http: reqwest::Client,
     store: Arc<dyn IntegrationStore>,
     forage_url: String,
-    /// gRPC client for querying pipeline state (optional — absent in tests).
     grpc: Option<Arc<GrpcForestClient>>,
-    /// Service token for authenticating gRPC calls to fetch pipeline state.
     service_token: String,
+    slack: crate::providers::SlackApi,
+    details: Option<Arc<dyn ReleaseDetailSource>>,
+    slack_permits: tokio::sync::Semaphore,
+}
+
+const MAX_RATE_LIMIT_WAIT_SECS: u64 = 60;
+
+/// Each Slack release dispatch holds a pooled Postgres connection for its
+/// advisory lock; this keeps them well under the pool's default of 10.
+const MAX_CONCURRENT_SLACK_RELEASES: usize = 4;
+
+/// Thread replies rendered under the release lock but posted after it is
+/// released: Slack calls can wait on rate limits, and each reply's claim is
+/// atomic on its own.
+struct PendingThread {
+    channel_id: String,
+    message_ts: String,
+    posts: Vec<slack_release::ThreadPost>,
+}
+
+#[derive(Default)]
+struct FetchedDetail {
+    artifacts: Option<Vec<forage_core::platform::Artifact>>,
+    plans: HashMap<String, forage_core::platform::PlanOutput>,
 }
 
 impl NotificationDispatcher {
@@ -28,16 +54,40 @@ impl NotificationDispatcher {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("failed to build reqwest client");
-        Self { http, store, forage_url, grpc: None, service_token: String::new() }
+        Self {
+            http,
+            store,
+            forage_url,
+            grpc: None,
+            service_token: String::new(),
+            slack: crate::providers::SlackApi::default(),
+            details: None,
+            slack_permits: tokio::sync::Semaphore::new(MAX_CONCURRENT_SLACK_RELEASES),
+        }
+    }
+
+    pub fn with_slack_api(mut self, slack: crate::providers::SlackApi) -> Self {
+        self.slack = slack;
+        self
     }
 
     pub fn with_grpc(mut self, grpc: Arc<GrpcForestClient>, service_token: String) -> Self {
+        if !service_token.is_empty() {
+            self.details = Some(Arc::new(ForestReleaseDetails {
+                grpc: grpc.clone(),
+                service_token: service_token.clone(),
+            }));
+        }
         self.grpc = Some(grpc);
         self.service_token = service_token;
         self
     }
 
-    /// Execute a dispatch task with retry (3 attempts, exponential backoff).
+    pub fn with_release_details(mut self, details: Arc<dyn ReleaseDetailSource>) -> Self {
+        self.details = Some(details);
+        self
+    }
+
     pub async fn dispatch(&self, task: &DispatchTask) {
         let (integration_id, notification_id) = match task {
             DispatchTask::Webhook {
@@ -57,7 +107,7 @@ impl NotificationDispatcher {
             } => (integration_id.clone(), notification_id.clone()),
         };
 
-        let delays = [1, 5, 25]; // seconds
+        let delays = [1, 5, 25];
         for (attempt, delay) in delays.iter().enumerate() {
             match self.try_dispatch(task).await {
                 Ok(()) => {
@@ -73,7 +123,6 @@ impl NotificationDispatcher {
                     return;
                 }
                 Err(e) => {
-                    // Don't retry errors that will never succeed
                     let non_retryable = is_non_retryable_error(&e);
                     if non_retryable {
                         tracing::error!(
@@ -81,6 +130,9 @@ impl NotificationDispatcher {
                             error = %e,
                             "non-retryable delivery error"
                         );
+                        if is_revoked_token_error(&e) {
+                            self.disable_revoked(task, &integration_id).await;
+                        }
                         let _ = self
                             .store
                             .record_delivery(
@@ -173,7 +225,6 @@ impl NotificationDispatcher {
                 message,
                 ..
             } => {
-                // If we have a bot token, use chat.postMessage/chat.update for update-in-place
                 if !access_token.is_empty() && !channel_id.is_empty() && !release_id.is_empty() {
                     self.dispatch_slack_bot(
                         integration_id,
@@ -185,7 +236,6 @@ impl NotificationDispatcher {
                     )
                     .await
                 } else {
-                    // Fallback: webhook URL (no update-in-place possible)
                     self.dispatch_slack_webhook(webhook_url, message).await
                 }
             }
@@ -199,13 +249,11 @@ impl NotificationDispatcher {
                 message: _,
                 ..
             } => {
-                // DM uses the same bot token post/update pattern, but channel = user ID.
-                // Prefix release_id so the message ref is distinct from channel messages.
                 let dm_release_id = format!("dm:{slack_user_id}:{release_id}");
                 self.dispatch_slack_bot(
                     integration_id,
                     access_token,
-                    slack_user_id, // Slack accepts user ID as channel for DMs
+                    slack_user_id,
                     &dm_release_id,
                     event_type,
                     event,
@@ -215,8 +263,6 @@ impl NotificationDispatcher {
         }
     }
 
-    /// Post or update a Slack message via the bot token API.
-    /// Merges per-destination status into the message ref and rebuilds the message.
     async fn dispatch_slack_bot(
         &self,
         integration_id: &str,
@@ -224,72 +270,134 @@ impl NotificationDispatcher {
         channel: &str,
         release_id: &str,
         event_type: &str,
-        event: &forage_core::integrations::router::NotificationEvent,
+        event: &NotificationEvent,
     ) -> Result<(), String> {
-        use forage_core::integrations::{DestinationStatus, SlackMessageRef};
-        use forage_core::integrations::router::format_slack_message;
+        let _permit = self
+            .slack_permits
+            .acquire()
+            .await
+            .map_err(|e| format!("slack permits: {e}"))?;
+        let lock = self
+            .store
+            .lock_slack_release(integration_id, release_id)
+            .await
+            .map_err(|e| format!("lock slack release: {e}"))?;
+        let rendered = self
+            .render_slack_release(
+                integration_id,
+                access_token,
+                channel,
+                release_id,
+                event_type,
+                event,
+            )
+            .await;
+        lock.release().await;
+        let Some(thread) = rendered? else {
+            return Ok(());
+        };
 
-        // Get existing ref (with accumulated destinations) if we already posted
+        for post in thread.posts {
+            if !self
+                .store
+                .claim_slack_thread_key(integration_id, release_id, &post.key)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let payload = serde_json::json!({
+                "channel": thread.channel_id,
+                "thread_ts": thread.message_ts,
+                "text": post.text,
+                "blocks": post.blocks,
+                "unfurl_links": false,
+                "unfurl_media": false,
+            });
+            if let Err(e) = self
+                .slack_call(access_token, "chat.postMessage", &payload)
+                .await
+            {
+                let _ = self
+                    .store
+                    .release_slack_thread_key(integration_id, release_id, &post.key)
+                    .await;
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn render_slack_release(
+        &self,
+        integration_id: &str,
+        access_token: &str,
+        channel: &str,
+        release_id: &str,
+        event_type: &str,
+        event: &NotificationEvent,
+    ) -> Result<Option<PendingThread>, String> {
+        let is_dm = release_id.starts_with("dm:");
+
         let existing_ref = self
             .store
             .get_slack_message_ref(integration_id, release_id)
             .await
             .unwrap_or(None);
 
-        // Merge this notification's destination into the accumulated map
+        if event_type == "release_annotated"
+            && existing_ref
+                .as_ref()
+                .is_some_and(|r| r.last_event_type != "release_annotated")
+        {
+            return Ok(None);
+        }
+
         let mut destinations = existing_ref
             .as_ref()
             .map(|r| r.destinations.clone())
             .unwrap_or_default();
-
-        if let Some(ref r) = event.release {
-            if !r.destination.is_empty() {
-                let status = match event_type {
-                    "release_started" => "started",
-                    "release_succeeded" => "succeeded",
-                    "release_failed" => "failed",
-                    _ => "started",
-                };
-                destinations.insert(
-                    r.destination.clone(),
-                    DestinationStatus {
-                        environment: r.environment.clone(),
-                        status: status.to_string(),
-                        error: r.error_message.clone(),
-                    },
-                );
-            }
+        if let Some(r) = event.release.as_ref().filter(|r| !r.destination.is_empty()) {
+            record_destination_event(&mut destinations, event_type, r, &event.timestamp);
         }
 
-        // Build the message with the full accumulated state
-        let mut message = format_slack_message(event, &destinations, &self.forage_url);
+        let emoji = self
+            .store
+            .get_slack_emoji_set(&event.organisation)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
 
-        // Query pipeline stages and insert before destinations
-        if let Some(ref r) = event.release {
-            if !r.release_intent_id.is_empty() {
-                if let Some(stages) = self
-                    .fetch_pipeline_stages(&event.organisation, &event.project, &r.release_intent_id)
-                    .await
-                {
-                    let pipeline_blocks =
-                        forage_core::integrations::router::format_pipeline_blocks(&stages);
-                    if !pipeline_blocks.is_empty() {
-                        // Insert pipeline before the destination section.
-                        // Find the last "context" block (metadata); pipeline goes right after it,
-                        // pushing destinations and errors down.
-                        let insert_at = message
-                            .blocks
-                            .iter()
-                            .rposition(|b| b["type"] == "context")
-                            .map(|i| i + 1)
-                            .unwrap_or(message.blocks.len());
-                        for (i, block) in pipeline_blocks.into_iter().enumerate() {
-                            message.blocks.insert(insert_at + i, block);
-                        }
-                    }
-                }
-            }
-        }
+        let intent_id = event
+            .release
+            .as_ref()
+            .map(|r| r.release_intent_id.as_str())
+            .unwrap_or_default();
+        let (stages, steps) = match (&self.details, intent_id.is_empty()) {
+            (Some(details), false) => details
+                .pipeline(&event.organisation, &event.project, intent_id)
+                .await?
+                .unwrap_or_default(),
+            _ => Default::default(),
+        };
+        let destination_count = existing_ref
+            .as_ref()
+            .map_or(0, |r| r.destination_count)
+            .max(event.release.as_ref().map_or(0, |r| r.destination_count));
+
+        let view = ReleaseView {
+            event,
+            destinations: &destinations,
+            stages: &stages,
+            steps: &steps,
+            forage_url: &self.forage_url,
+            emoji: &emoji,
+            expected_destinations: destination_count.max(0) as usize,
+        };
+        let message = slack_release::render_parent(&view);
+        let rendered_hash = payload_hash(&message.blocks);
+
         let release_title = event
             .release
             .as_ref()
@@ -298,125 +406,203 @@ impl NotificationDispatcher {
             .or_else(|| existing_ref.as_ref().map(|r| r.release_title.clone()))
             .unwrap_or_else(|| event.title.clone());
 
-        let blocks_payload = serde_json::json!([{
-            "color": message.color,
-            "blocks": message.blocks,
-        }]);
-
-        // The `text` field is a fallback for notifications/accessibility only.
-        // Slack renders it above attachments in some clients, causing duplication.
-        // Use a minimal fallback; the attachment blocks carry the rich content.
-        let fallback_text = format!("Release update: {}/{}", event.organisation, event.project);
-
+        let mut posted: Option<(String, String)> = None;
         if let Some(ref msg_ref) = existing_ref {
-            // Update existing message
-            let payload = serde_json::json!({
-                "channel": msg_ref.channel_id,
-                "ts": msg_ref.message_ts,
-                "text": fallback_text,
-                "attachments": blocks_payload,
-            });
-
-            let resp = self
-                .http
-                .post("https://slack.com/api/chat.update")
-                .bearer_auth(access_token)
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| format!("slack chat.update http: {e}"))?;
-
-            let body: serde_json::Value =
-                resp.json().await.map_err(|e| format!("slack chat.update parse: {e}"))?;
-
-            if body["ok"].as_bool() != Some(true) {
-                let err = body["error"].as_str().unwrap_or("unknown");
-                if err == "message_not_found" {
-                    tracing::warn!(
-                        integration_id = %integration_id,
-                        release_id = %release_id,
-                        "slack message not found, posting new one"
-                    );
-                    // Fall through to post a new one
-                } else {
-                    return Err(format!("slack chat.update: {err}"));
-                }
+            if msg_ref.rendered_hash == rendered_hash {
+                posted = Some((msg_ref.channel_id.clone(), msg_ref.message_ts.clone()));
             } else {
-                // Update the ref with merged destinations
-                let updated = SlackMessageRef {
-                    id: msg_ref.id.clone(),
-                    integration_id: integration_id.to_string(),
-                    release_id: release_id.to_string(),
-                    channel_id: msg_ref.channel_id.clone(),
-                    message_ts: msg_ref.message_ts.clone(),
-                    last_event_type: event_type.to_string(),
-                    destinations,
-                    release_title,
-                    created_at: msg_ref.created_at.clone(),
-                    updated_at: chrono::Utc::now().to_rfc3339(),
-                };
-                let _ = self.store.upsert_slack_message_ref(&updated).await;
-                return Ok(());
+                let payload = serde_json::json!({
+                    "channel": msg_ref.channel_id,
+                    "ts": msg_ref.message_ts,
+                    "text": message.text,
+                    "blocks": message.blocks,
+                    "attachments": [],
+                    "unfurl_links": false,
+                    "unfurl_media": false,
+                });
+                match self.slack_call(access_token, "chat.update", &payload).await {
+                    Ok(_) => {
+                        posted = Some((msg_ref.channel_id.clone(), msg_ref.message_ts.clone()))
+                    }
+                    Err(e) if e.contains("message_not_found") => {
+                        tracing::warn!(
+                            integration_id = %integration_id,
+                            release_id = %release_id,
+                            "slack message not found, posting new one"
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
 
-        // Try to join the channel first
-        let _ = self.slack_join_channel(access_token, channel).await;
+        let (channel_id, message_ts) = match posted {
+            Some(p) => p,
+            None => {
+                let _ = self.slack_join_channel(access_token, channel).await;
+                let payload = serde_json::json!({
+                    "channel": channel,
+                    "text": message.text,
+                    "blocks": message.blocks,
+                    "unfurl_links": false,
+                    "unfurl_media": false,
+                });
+                let body = self
+                    .slack_call(access_token, "chat.postMessage", &payload)
+                    .await?;
+                let ts = body["ts"].as_str().unwrap_or_default().to_string();
+                let posted_channel = body["channel"].as_str().unwrap_or(channel).to_string();
+                (posted_channel, ts)
+            }
+        };
 
-        // Post new message
-        let payload = serde_json::json!({
-            "channel": channel,
-            "text": fallback_text,
-            "attachments": blocks_payload,
-        });
+        if message_ts.is_empty() || release_id.is_empty() {
+            return Ok(None);
+        }
 
-        let resp = self
-            .http
-            .post("https://slack.com/api/chat.postMessage")
-            .bearer_auth(access_token)
-            .json(&payload)
-            .send()
+        let msg_ref = SlackMessageRef {
+            id: existing_ref
+                .as_ref()
+                .map(|r| r.id.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            integration_id: integration_id.to_string(),
+            release_id: release_id.to_string(),
+            channel_id: channel_id.clone(),
+            message_ts: message_ts.clone(),
+            last_event_type: event_type.to_string(),
+            destinations: destinations.clone(),
+            release_title,
+            thread_keys: Vec::new(),
+            rendered_hash,
+            destination_count,
+            created_at: existing_ref
+                .as_ref()
+                .map(|r| r.created_at.clone())
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let _ = self.store.upsert_slack_message_ref(&msg_ref).await;
+
+        let already: Vec<String> = self
+            .store
+            .get_slack_message_ref(integration_id, release_id)
             .await
-            .map_err(|e| format!("slack chat.postMessage http: {e}"))?;
+            .ok()
+            .flatten()
+            .map(|r| r.thread_keys)
+            .unwrap_or_default();
 
-        let body: serde_json::Value =
-            resp.json().await.map_err(|e| format!("slack chat.postMessage parse: {e}"))?;
-
-        if body["ok"].as_bool() != Some(true) {
-            let err = body["error"].as_str().unwrap_or("unknown");
-            return Err(format!("slack chat.postMessage: {err}"));
+        let fetched = self
+            .fetch_thread_detail(event, &stages, &already, is_dm)
+            .await;
+        let detail = ThreadDetail {
+            artifacts: fetched.artifacts.as_deref(),
+            plans: fetched.plans.iter().map(|(k, v)| (k.clone(), v)).collect(),
+        };
+        let posts = slack_release::thread_posts(&view, &detail);
+        if fetched.artifacts.is_some() && !posts.iter().any(|p| p.key == "changes") {
+            let _ = self
+                .store
+                .claim_slack_thread_key(integration_id, release_id, "changes")
+                .await;
         }
 
-        // Store the message ref with initial destinations
-        let ts = body["ts"].as_str().unwrap_or_default();
-        let posted_channel = body["channel"].as_str().unwrap_or(channel);
-
-        if !ts.is_empty() && !release_id.is_empty() {
-            let msg_ref = SlackMessageRef {
-                id: uuid::Uuid::new_v4().to_string(),
-                integration_id: integration_id.to_string(),
-                release_id: release_id.to_string(),
-                channel_id: posted_channel.to_string(),
-                message_ts: ts.to_string(),
-                last_event_type: event_type.to_string(),
-                destinations,
-                release_title,
-                created_at: chrono::Utc::now().to_rfc3339(),
-                updated_at: chrono::Utc::now().to_rfc3339(),
-            };
-            let _ = self.store.upsert_slack_message_ref(&msg_ref).await;
-        }
-
-        Ok(())
+        Ok(Some(PendingThread {
+            channel_id,
+            message_ts,
+            posts: posts
+                .into_iter()
+                .filter(|p| !already.contains(&p.key) && (!is_dm || p.for_direct_message()))
+                .collect(),
+        }))
     }
 
-    /// Try to join a Slack channel. Silently succeeds if already a member or channel is private.
+    async fn fetch_thread_detail(
+        &self,
+        event: &NotificationEvent,
+        stages: &[forage_core::platform::PipelineRunStageState],
+        already: &[String],
+        is_dm: bool,
+    ) -> FetchedDetail {
+        let mut out = FetchedDetail::default();
+        let (Some(details), Some(r)) = (&self.details, event.release.as_ref()) else {
+            return out;
+        };
+        if is_dm {
+            return out;
+        }
+        if !already.iter().any(|k| k == "changes") {
+            out.artifacts = details.artifacts(&event.organisation, &event.project).await;
+        }
+        for stage in stages.iter().filter(|s| s.stage_type == "plan") {
+            let ready = matches!(stage.status.as_str(), "AWAITING_APPROVAL" | "SUCCEEDED");
+            let key = format!("plan:{}", stage.stage_id);
+            if ready
+                && !already.contains(&key)
+                && let Some(plan) = details
+                    .plan_output(&r.release_intent_id, &stage.stage_id)
+                    .await
+            {
+                out.plans.insert(stage.stage_id.clone(), plan);
+            }
+        }
+        out
+    }
+
+    /// Calls a Slack Web API method, waiting out rate limits (HTTP 429 or
+    /// `ratelimited`) as Slack's Retry-After asks, up to a bounded total.
+    async fn slack_call(
+        &self,
+        access_token: &str,
+        method: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut waited = 0u64;
+        loop {
+            let resp = self
+                .http
+                .post(self.slack.url(method))
+                .bearer_auth(access_token)
+                .json(payload)
+                .send()
+                .await
+                .map_err(|e| format!("slack {method} http: {}", e.without_url()))?;
+            let retry_after = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            let limited = resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            let body: serde_json::Value = if limited {
+                serde_json::json!({ "ok": false, "error": "ratelimited" })
+            } else {
+                resp.json()
+                    .await
+                    .map_err(|e| format!("slack {method} parse: {e}"))?
+            };
+            if body["ok"].as_bool() == Some(true) {
+                return Ok(body);
+            }
+            let err = body["error"].as_str().unwrap_or("unknown").to_string();
+            if err == "ratelimited" {
+                let wait = retry_after.unwrap_or(1).clamp(1, 30);
+                if waited + wait <= MAX_RATE_LIMIT_WAIT_SECS {
+                    tracing::warn!(method, wait_secs = wait, "slack rate limited; waiting");
+                    tokio::time::sleep(Duration::from_secs(wait)).await;
+                    waited += wait;
+                    continue;
+                }
+            }
+            return Err(format!("slack {method}: {err}"));
+        }
+    }
+
     async fn slack_join_channel(&self, access_token: &str, channel: &str) -> Result<(), String> {
         let payload = serde_json::json!({ "channel": channel });
 
         let resp = self
             .http
-            .post("https://slack.com/api/conversations.join")
+            .post(self.slack.url("conversations.join"))
             .bearer_auth(access_token)
             .json(&payload)
             .send()
@@ -432,55 +618,12 @@ impl NotificationDispatcher {
             tracing::info!(channel = %channel, "bot joined slack channel");
         } else {
             let err = body["error"].as_str().unwrap_or("unknown");
-            // channel_not_found, method_not_supported_for_channel_type (private), already_in_channel
-            // These are all acceptable — we tried our best
             tracing::debug!(channel = %channel, error = %err, "conversations.join failed (may be private channel)");
         }
 
         Ok(())
     }
 
-    /// Fetch pipeline stages for a release intent via gRPC.
-    /// Returns None if gRPC is not configured or the call fails.
-    async fn fetch_pipeline_stages(
-        &self,
-        organisation: &str,
-        project: &str,
-        release_intent_id: &str,
-    ) -> Option<Vec<forage_core::platform::PipelineRunStageState>> {
-        let grpc = self.grpc.as_ref()?;
-        if self.service_token.is_empty() {
-            return None;
-        }
-
-        match grpc
-            .get_release_intent_states_with_token(
-                &self.service_token,
-                organisation,
-                Some(project),
-                true, // include_completed so we get the current intent
-            )
-            .await
-        {
-            Ok(intents) => {
-                // Find the matching release intent
-                intents
-                    .into_iter()
-                    .find(|i| i.release_intent_id == release_intent_id)
-                    .map(|i| i.stages)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    release_intent_id = %release_intent_id,
-                    error = %e,
-                    "failed to fetch pipeline stages"
-                );
-                None
-            }
-        }
-    }
-
-    /// Fallback: post via incoming webhook URL (no update-in-place).
     async fn dispatch_slack_webhook(
         &self,
         webhook_url: &str,
@@ -513,7 +656,159 @@ impl NotificationDispatcher {
     }
 }
 
-/// Slack API errors that will never succeed on retry.
+#[async_trait::async_trait]
+pub trait ReleaseDetailSource: Send + Sync {
+    /// `Ok(None)` when Forest has no such intent. An error fails the delivery
+    /// so it is retried: rendering without the pipeline could claim success.
+    async fn pipeline(
+        &self,
+        organisation: &str,
+        project: &str,
+        release_intent_id: &str,
+    ) -> Result<Option<(Vec<PipelineRunStageState>, Vec<ReleaseStepState>)>, String>;
+
+    async fn artifacts(&self, organisation: &str, project: &str) -> Option<Vec<Artifact>>;
+
+    async fn plan_output(&self, release_intent_id: &str, stage_id: &str) -> Option<PlanOutput>;
+}
+
+struct ForestReleaseDetails {
+    grpc: Arc<GrpcForestClient>,
+    service_token: String,
+}
+
+#[async_trait::async_trait]
+impl ReleaseDetailSource for ForestReleaseDetails {
+    async fn pipeline(
+        &self,
+        organisation: &str,
+        project: &str,
+        release_intent_id: &str,
+    ) -> Result<Option<(Vec<PipelineRunStageState>, Vec<ReleaseStepState>)>, String> {
+        let intents = self
+            .grpc
+            .get_release_intent_states_for_notifications(
+                &self.service_token,
+                organisation,
+                project,
+            )
+            .await
+            .map_err(|e| format!("fetch pipeline stages: {e}"))?;
+        Ok(intents
+            .into_iter()
+            .find(|i| i.release_intent_id == release_intent_id)
+            .map(|i| (i.stages, i.steps)))
+    }
+
+    async fn artifacts(&self, organisation: &str, project: &str) -> Option<Vec<Artifact>> {
+        self.grpc
+            .list_artifacts(&self.service_token, organisation, project)
+            .await
+            .inspect_err(|e| tracing::warn!(error = %e, "failed to list artifacts for slack thread"))
+            .ok()
+    }
+
+    async fn plan_output(&self, release_intent_id: &str, stage_id: &str) -> Option<PlanOutput> {
+        self.grpc
+            .get_plan_output(&self.service_token, release_intent_id, stage_id)
+            .await
+            .inspect_err(|e| tracing::warn!(error = %e, "failed to fetch plan output for slack thread"))
+            .ok()
+    }
+}
+
+fn record_destination_event(
+    destinations: &mut HashMap<String, DestinationStatus>,
+    event_type: &str,
+    r: &forage_core::integrations::router::ReleaseContext,
+    at: &str,
+) {
+    let status = match event_type {
+        "release_succeeded" => "succeeded",
+        "release_failed" => "failed",
+        "release_started" => "started",
+        _ => return,
+    };
+    let previous = destinations.get(&r.destination);
+    if status == "started" && previous.is_some_and(|d| d.status != "started") {
+        return;
+    }
+    let started_at = previous
+        .and_then(|d| d.started_at.clone())
+        .or_else(|| Some(at.to_string()).filter(|a| !a.is_empty()));
+    let completed_at = (status != "started")
+        .then(|| at.to_string())
+        .filter(|a| !a.is_empty());
+    destinations.insert(
+        r.destination.clone(),
+        DestinationStatus {
+            environment: r.environment.clone(),
+            status: status.to_string(),
+            error: r.error_message.clone(),
+            started_at,
+            completed_at,
+        },
+    );
+}
+
+fn payload_hash(blocks: &[serde_json::Value]) -> String {
+    use sha2::Digest;
+    let bytes = serde_json::to_vec(blocks).unwrap_or_default();
+    format!("{:x}", sha2::Sha256::digest(bytes))
+}
+
+fn is_revoked_token_error(err: &str) -> bool {
+    ["invalid_auth", "token_revoked", "account_inactive"]
+        .iter()
+        .any(|code| err.contains(code))
+}
+
+impl NotificationDispatcher {
+    /// A revoked Slack token can never deliver again: stop routing to it until
+    /// an admin reinstalls, rather than failing every future event.
+    async fn disable_revoked(&self, task: &DispatchTask, integration_id: &str) {
+        let organisation = match task {
+            DispatchTask::Slack { event, .. } | DispatchTask::SlackDm { event, .. } => {
+                &event.organisation
+            }
+            DispatchTask::Webhook { .. } => return,
+        };
+        let team_of = |i: &forage_core::integrations::Integration| match &i.config {
+            forage_core::integrations::IntegrationConfig::Slack { team_id, .. } => {
+                Some(team_id.clone())
+            }
+            _ => None,
+        };
+        let integrations = self
+            .store
+            .list_integrations(organisation)
+            .await
+            .unwrap_or_default();
+        let team = integrations
+            .iter()
+            .find(|i| i.id == integration_id)
+            .and_then(team_of)
+            .filter(|t| !t.is_empty());
+        for integration in &integrations {
+            let same_workspace = integration.id == integration_id
+                || (team.is_some() && team_of(integration) == team);
+            if !same_workspace {
+                continue;
+            }
+            if let Err(e) = self
+                .store
+                .set_integration_enabled(organisation, &integration.id, false)
+                .await
+            {
+                tracing::warn!(integration_id = %integration.id, error = %e, "failed to disable revoked slack integration");
+                continue;
+            }
+            let _ = self.store.delete_directory_matches(&integration.id).await;
+            tracing::warn!(integration_id = %integration.id, "slack token revoked; integration disabled until reinstalled");
+        }
+    }
+}
+
 fn is_non_retryable_error(err: &str) -> bool {
     const NON_RETRYABLE: &[&str] = &[
         "channel_not_found",
@@ -530,9 +825,6 @@ fn is_non_retryable_error(err: &str) -> bool {
     NON_RETRYABLE.iter().any(|code| err.contains(code))
 }
 
-// ── Proto conversion ────────────────────────────────────────────────
-
-/// Convert a proto Notification to our domain NotificationEvent.
 pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
     let notification_type = match n.notification_type() {
         forage_grpc::NotificationType::ReleaseAnnotated => "release_annotated",
@@ -550,6 +842,7 @@ pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
         environment: r.environment.clone(),
         source_username: r.source_username.clone(),
         source_user_id: r.source_user_id.clone(),
+        source_attribution: r.source_attribution.clone(),
         commit_sha: r.commit_sha.clone(),
         commit_branch: r.commit_branch.clone(),
         context_title: r.context_title.clone(),
@@ -574,17 +867,12 @@ pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
     }
 }
 
-// ── Listener component ──────────────────────────────────────────────
-
-/// Background component that listens to Forest's notification stream
-/// for all orgs with active integrations, and dispatches to configured channels.
 pub struct NotificationListener {
     pub grpc: Arc<GrpcForestClient>,
     pub store: Arc<dyn IntegrationStore>,
-    /// Service token (PAT) for authenticating with forest-server's NotificationService.
     pub service_token: String,
-    /// Base URL of the Forage web UI for deep links (e.g. "https://forage.example.com").
     pub forage_url: String,
+    pub slack: crate::providers::SlackApi,
 }
 
 impl Component for NotificationListener {
@@ -595,12 +883,10 @@ impl Component for NotificationListener {
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
         let dispatcher = Arc::new(
             NotificationDispatcher::new(self.store.clone(), self.forage_url.clone())
-                .with_grpc(self.grpc.clone(), self.service_token.clone()),
+                .with_grpc(self.grpc.clone(), self.service_token.clone())
+                .with_slack_api(self.slack.clone()),
         );
 
-        // For now, listen on the global stream (no org filter).
-        // Forest's ListenNotifications with no org filter returns all notifications
-        // the authenticated user has access to.
         let mut backoff = 1u64;
 
         loop {
@@ -620,7 +906,6 @@ impl Component for NotificationListener {
                         }
                     }
 
-                    // Wait before reconnecting, but respect cancellation
                     tokio::select! {
                         _ = cancellation_token.cancelled() => break,
                         _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
@@ -671,8 +956,14 @@ impl NotificationListener {
                         "received notification"
                     );
 
-                    let tasks = forage_core::integrations::router::route_notification_for_org(
+                    let recipients = crate::recipients::ForestRecipients {
+                        grpc: self.grpc.clone(),
+                        service_token: self.service_token.clone(),
+                    };
+                    let tasks = forage_core::integrations::router::route_all(
                         self.store.as_ref(),
+                        Some(&recipients),
+                        Some(&self.slack),
                         &event,
                     )
                     .await;

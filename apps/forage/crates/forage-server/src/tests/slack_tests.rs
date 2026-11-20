@@ -18,8 +18,6 @@ fn build_app_with_integrations() -> (
     (app, sessions, integrations)
 }
 
-// ─── Install Slack page ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn install_slack_page_returns_200() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -85,13 +83,9 @@ async fn install_slack_page_shows_manual_form_without_oauth() {
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&body);
-    // Should show manual webhook URL form
     assert!(text.contains("hooks.slack.com"));
-    // Should NOT show "Add to Slack" button (no OAuth configured)
     assert!(!text.contains("Add to Slack"));
 }
-
-// ─── Create Slack (manual webhook URL) ──────────────────────────────
 
 #[tokio::test]
 async fn create_slack_success_shows_installed_page() {
@@ -118,10 +112,9 @@ async fn create_slack_success_shows_installed_page() {
         .unwrap();
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("installed"));
-    assert!(text.contains("fgi_")); // API token shown
+    assert!(text.contains("fgi_"));
     assert!(text.contains("#deploys"));
 
-    // Verify it was created as Slack type
     let all = integrations.list_integrations("testorg").await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].name, "#deploys");
@@ -205,7 +198,6 @@ async fn create_slack_rejects_non_slack_url() {
         .await
         .unwrap();
 
-    // Should redirect back to install page with error
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("install/slack"));
@@ -253,14 +245,11 @@ async fn create_slack_rejects_empty_name() {
         .await
         .unwrap();
 
-    // Should redirect back with error
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("install/slack"));
     assert!(location.contains("error="));
 }
-
-// ─── Slack integration detail ───────────────────────────────────────
 
 #[tokio::test]
 async fn slack_integration_detail_shows_config() {
@@ -314,7 +303,6 @@ async fn slack_integration_detail_manual_mode_shows_webhook_url() {
     let (app, sessions, integrations) = build_app_with_integrations();
     let cookie = create_test_session(&sessions).await;
 
-    // Manual mode: empty team_name
     let created = integrations
         .create_integration(&CreateIntegrationInput {
             organisation: "testorg".into(),
@@ -355,8 +343,6 @@ async fn slack_integration_detail_manual_mode_shows_webhook_url() {
     assert!(text.contains("hooks.slack.com"));
 }
 
-// ─── Slack in integrations catalog ──────────────────────────────────
-
 #[tokio::test]
 async fn integrations_page_shows_slack_as_available() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -378,11 +364,8 @@ async fn integrations_page_shows_slack_as_available() {
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&body);
-    // Slack should be a clickable link to install page
     assert!(text.contains("install/slack"));
 }
-
-// ─── Slack shows in installed list ──────────────────────────────────
 
 #[tokio::test]
 async fn integrations_page_shows_installed_slack() {
@@ -427,8 +410,6 @@ async fn integrations_page_shows_installed_slack() {
     assert!(text.contains("Slack"));
 }
 
-// ─── Slack OAuth callback without session ───────────────────────────
-
 #[tokio::test]
 async fn slack_callback_without_state_returns_error() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -449,49 +430,29 @@ async fn slack_callback_without_state_returns_error() {
 }
 
 #[tokio::test]
-async fn slack_callback_with_error_redirects() {
+async fn slack_callback_with_a_bare_org_name_as_state_is_refused() {
     let (app, sessions, _) = build_app_with_integrations();
     let cookie = create_test_session(&sessions).await;
 
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/integrations/slack/callback?state=testorg&error=access_denied")
-                .header("cookie", cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-    let location = resp.headers().get("location").unwrap().to_str().unwrap();
-    assert!(location.contains("install/slack"));
-    assert!(location.contains("error="));
-    assert!(location.contains("access_denied"));
+    for uri in [
+        "/integrations/slack/callback?state=testorg&error=access_denied",
+        "/integrations/slack/callback?code=test-code&state=testorg",
+        "/integrations/slack/callback?code=test-code&state=testorg:reinstall:abc",
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("cookie", cookie.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri}");
+    }
 }
-
-#[tokio::test]
-async fn slack_callback_without_oauth_config_returns_503() {
-    let (app, sessions, _) = build_app_with_integrations();
-    let cookie = create_test_session(&sessions).await;
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/integrations/slack/callback?code=test-code&state=testorg")
-                .header("cookie", cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    // No SlackConfig set, so should return 503
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-}
-
-// ─── Reinstall Slack ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn reinstall_slack_redirects_to_oauth_error_without_slack_config() {
@@ -533,7 +494,6 @@ async fn reinstall_slack_redirects_to_oauth_error_without_slack_config() {
         .await
         .unwrap();
 
-    // No SlackConfig set → 503
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
@@ -621,4 +581,105 @@ async fn reinstall_slack_invalid_csrf_returns_403() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+async fn create_slack_integration(
+    integrations: &forage_core::integrations::InMemoryIntegrationStore,
+) -> String {
+    integrations
+        .create_integration(&CreateIntegrationInput {
+            organisation: "testorg".into(),
+            integration_type: IntegrationType::Slack,
+            name: "#deploys".into(),
+            config: IntegrationConfig::Slack {
+                team_id: "T123".into(),
+                team_name: "My Team".into(),
+                channel_id: "C456".into(),
+                channel_name: "#deploys".into(),
+                access_token: "xoxb-test".into(),
+                webhook_url: String::new(),
+            },
+            created_by: "user-123".into(),
+        })
+        .await
+        .unwrap()
+        .id
+}
+
+async fn post_emoji(app: axum::Router, cookie: String, id: &str, body: &str) -> axum::response::Response {
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/orgs/testorg/settings/integrations/{id}/emoji"))
+            .header("cookie", cookie)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn admin_saves_org_status_emoji_and_sees_them_on_the_page() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let cookie = create_test_session(&sessions).await;
+    let id = create_slack_integration(&integrations).await;
+
+    let resp = post_emoji(
+        app.clone(),
+        cookie.clone(),
+        &id,
+        "_csrf=test-csrf&running=%3Asonicfastafboi%3A&celebrate=party-parrot&queued=",
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    let set = integrations.get_slack_emoji_set("testorg").await.unwrap().unwrap();
+    assert_eq!(set.running, "sonicfastafboi");
+    assert_eq!(set.celebrate, "party-parrot");
+    assert_eq!(set.queued, "");
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/orgs/testorg/settings/integrations/{id}?saved=emoji"))
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("Status emoji saved."));
+    assert!(text.contains("value=\"sonicfastafboi\""));
+    assert!(text.contains("placeholder=\"hourglass_flowing_sand\""));
+}
+
+#[tokio::test]
+async fn invalid_status_emoji_is_refused_without_saving() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let cookie = create_test_session(&sessions).await;
+    let id = create_slack_integration(&integrations).await;
+
+    let resp = post_emoji(app, cookie, &id, "_csrf=test-csrf&running=%3Cscript%3E").await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert!(resp.headers()["location"].to_str().unwrap().contains("error="));
+    assert!(integrations.get_slack_emoji_set("testorg").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn status_emoji_need_an_admin_and_a_valid_csrf_token() {
+    let (app, sessions, integrations) = build_app_with_integrations();
+    let id = create_slack_integration(&integrations).await;
+
+    let member = create_test_session_member(&sessions).await;
+    let resp = post_emoji(app.clone(), member, &id, "_csrf=test-csrf&running=loading").await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let admin = create_test_session(&sessions).await;
+    let resp = post_emoji(app, admin, &id, "_csrf=wrong&running=loading").await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(integrations.get_slack_emoji_set("testorg").await.unwrap().is_none());
 }

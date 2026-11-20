@@ -60,6 +60,7 @@ nav:
       - Authentication: getting-started/authentication.md
       - Your First Project: getting-started/first-project.md
       - Your First Release: getting-started/first-release.md
+      - Using Forest with Claude Code: getting-started/claude-code.md
   - Concepts:
       - concepts/index.md
       - Projects: concepts/projects.md

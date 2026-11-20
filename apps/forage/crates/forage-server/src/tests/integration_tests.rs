@@ -18,8 +18,6 @@ fn build_app_with_integrations() -> (
     (app, sessions, integrations)
 }
 
-// ─── List integrations ──────────────────────────────────────────────
-
 #[tokio::test]
 async fn integrations_page_returns_200_for_admin() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -88,7 +86,6 @@ async fn integrations_page_shows_existing_integrations() {
     let (app, sessions, integrations) = build_app_with_integrations();
     let cookie = create_test_session(&sessions).await;
 
-    // Create a webhook integration
     integrations
         .create_integration(&CreateIntegrationInput {
             organisation: "testorg".into(),
@@ -123,8 +120,6 @@ async fn integrations_page_shows_existing_integrations() {
     assert!(text.contains("Production alerts"));
     assert!(text.contains("Webhook"));
 }
-
-// ─── Install webhook page ───────────────────────────────────────────
 
 #[tokio::test]
 async fn install_webhook_page_returns_200() {
@@ -170,8 +165,6 @@ async fn install_webhook_page_returns_403_for_non_admin() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── Create webhook ─────────────────────────────────────────────────
-
 #[tokio::test]
 async fn create_webhook_success_shows_installed_page() {
     let (app, sessions, integrations) = build_app_with_integrations();
@@ -191,17 +184,15 @@ async fn create_webhook_success_shows_installed_page() {
         .await
         .unwrap();
 
-    // Renders the "installed" page directly (with API token shown once)
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("installed"));
-    assert!(text.contains("fgi_")); // API token shown
+    assert!(text.contains("fgi_"));
     assert!(text.contains("my-hook"));
 
-    // Verify it was created
     let all = integrations.list_integrations("testorg").await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].name, "my-hook");
@@ -248,7 +239,6 @@ async fn create_webhook_rejects_http_url() {
         .await
         .unwrap();
 
-    // Should redirect back to install page with error
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("install/webhook"));
@@ -276,8 +266,6 @@ async fn create_webhook_non_admin_returns_403() {
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
-
-// ─── Integration detail ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn integration_detail_returns_200() {
@@ -342,8 +330,6 @@ async fn integration_detail_not_found_returns_404() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-// ─── Toggle integration ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn toggle_integration_disables_and_enables() {
     let (app, sessions, integrations) = build_app_with_integrations();
@@ -364,7 +350,6 @@ async fn toggle_integration_disables_and_enables() {
         .await
         .unwrap();
 
-    // Disable
     let body = format!("_csrf=test-csrf&enabled=false");
     let resp = app
         .oneshot(
@@ -389,8 +374,6 @@ async fn toggle_integration_disables_and_enables() {
         .unwrap();
     assert!(!integ.enabled);
 }
-
-// ─── Delete integration ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_integration_removes_it() {
@@ -472,12 +455,9 @@ async fn delete_integration_invalid_csrf_returns_403() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    // Verify it was NOT deleted
     let all = integrations.list_integrations("testorg").await.unwrap();
     assert_eq!(all.len(), 1);
 }
-
-// ─── Update notification rules ──────────────────────────────────────
 
 #[tokio::test]
 async fn update_rule_toggles_notification_type() {
@@ -499,7 +479,6 @@ async fn update_rule_toggles_notification_type() {
         .await
         .unwrap();
 
-    // Disable release_failed
     let body = format!(
         "_csrf=test-csrf&notification_type=release_failed&enabled=false"
     );
@@ -528,15 +507,12 @@ async fn update_rule_toggles_notification_type() {
         .unwrap();
     assert!(!failed_rule.enabled);
 
-    // Other rules should still be enabled
     let started_rule = rules
         .iter()
         .find(|r| r.notification_type == "release_started")
         .unwrap();
     assert!(started_rule.enabled);
 }
-
-// ─── Delivery log ──────────────────────────────────────────────────
 
 #[tokio::test]
 async fn detail_page_shows_delivery_log() {
@@ -558,7 +534,6 @@ async fn detail_page_shows_delivery_log() {
         .await
         .unwrap();
 
-    // Record a successful and a failed delivery
     integrations
         .record_delivery(&created.id, "notif-aaa", DeliveryStatus::Delivered, None)
         .await
@@ -593,7 +568,6 @@ async fn detail_page_shows_delivery_log() {
         .unwrap();
     let text = String::from_utf8_lossy(&body);
 
-    // Should show the deliveries section
     assert!(text.contains("Recent deliveries"));
     assert!(text.contains("Delivered"));
     assert!(text.contains("Failed"));

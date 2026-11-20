@@ -39,54 +39,34 @@ use crate::{
     state::State,
 };
 
+mod binary_download;
 mod interceptor;
 pub mod release_watch;
 
-/// Starting per-stream HTTP/2 window (DATA-505). Adaptive sizing grows it from
-/// here based on the measured bandwidth-delay product; 4 MiB is enough to keep
-/// a transatlantic link busy from the first chunk instead of ramping from
-/// hyper's 2 MiB default.
 const DOWNLOAD_STREAM_WINDOW: u32 = 4 * 1024 * 1024;
 
-/// Starting connection-level HTTP/2 window. Must comfortably exceed the stream
-/// window times the number of concurrent downloads, or the shared connection
-/// becomes the bottleneck the per-stream window no longer is.
 const DOWNLOAD_CONNECTION_WINDOW: u32 = 32 * 1024 * 1024;
 
-/// Write-coalescing buffer for streamed downloads. The registry currently
-/// sends 1 MiB messages, which pass straight through a buffer this size
-/// (`BufWriter` bypasses itself for writes larger than its capacity), so this
-/// only earns its keep if a server chooses smaller chunks — at which point it
-/// stops us issuing one `write(2)` per message.
-const DOWNLOAD_WRITE_BUFFER: usize = 256 * 1024;
-
-/// A binary streamed to disk rather than buffered in memory.
-///
-/// The sha256 is computed incrementally *during* the transfer, so verification
-/// costs no extra pass over the file and the whole artifact never has to fit
-/// in RAM.
+#[derive(Debug)]
 pub struct StreamedBinary {
-    /// Tempfile holding the bytes. The caller owns it: verify the sha, then
-    /// rename it into place (or drop it).
     pub temp_path: std::path::PathBuf,
-    /// Lowercase hex sha256 of everything received.
     pub sha256_hex: String,
     pub size_bytes: u64,
 }
 
-/// Convert a `tonic::Status` into a clean `anyhow::Error`.
-///
-/// When the server returned a human-readable message (e.g.
-/// "member already exists in this organisation"), surface that verbatim.
-/// When the message is empty (some auth-layer rejections and stream-side
-/// errors come back with no body), fall back to the status code so the
-/// user gets a meaningful hint instead of the literal text "empty string".
+pub struct BinaryRef<'a> {
+    pub organisation: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub os: &'a str,
+    pub arch: &'a str,
+}
+
 fn grpc_err(status: tonic::Status) -> anyhow::Error {
     let msg = status.message();
     if !msg.is_empty() {
         return anyhow::anyhow!("{msg}");
     }
-    // No message body — synthesise something useful from the code.
     let code = status.code();
     let hint: &str = match code {
         tonic::Code::Unauthenticated => "unauthenticated — run `forest auth login` and try again",
@@ -100,8 +80,6 @@ fn grpc_err(status: tonic::Status) -> anyhow::Error {
     anyhow::anyhow!("gRPC {code:?}: {hint}")
 }
 
-/// `grpc_err` for `forest state`: a refusal there is almost always "you are a
-/// member but not an admin", so say that, and which organisation.
 fn state_err(status: tonic::Status, organisation: &str) -> anyhow::Error {
     if status.code() == tonic::Code::PermissionDenied {
         return anyhow::anyhow!(
@@ -134,6 +112,7 @@ pub struct GrpcClient {
     release_pipeline_client: OnceCell<ReleasePipelineServiceClient<AuthMiddleware<Channel>>>,
     event_client: OnceCell<EventServiceClient<AuthMiddleware<Channel>>>,
     terraform_state_client: OnceCell<TerraformStateServiceClient<AuthMiddleware<Channel>>>,
+    download_streams: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl GrpcClient {
@@ -243,8 +222,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    // --- v2 component registry methods ---
-
     pub async fn begin_component_upload(
         &self,
         organisation: &str,
@@ -272,8 +249,6 @@ impl GrpcClient {
         arch: &str,
         sha256: &str,
         binary_content: &[u8],
-        // Some(label) shows a transient progress bar (interactive only); the
-        // gRPC layer owns its lifecycle. DATA-312.
         progress_label: Option<&str>,
     ) -> anyhow::Result<()> {
         use futures::StreamExt as _;
@@ -281,11 +256,9 @@ impl GrpcClient {
         let mut client = self.registry_client().await?;
 
         let bar = progress_label.map(|l| crate::ui::bytes_bar(l, binary_content.len() as u64));
-        // Cloneable handle ticked from inside the (Send + 'static) stream.
         let pb = bar.as_ref().and_then(|b| b.handle());
 
-        // Stream: first message is metadata, subsequent messages are chunks
-        let chunk_size = 1024 * 1024; // 1MB chunks
+        let chunk_size = 1024 * 1024;
         let mut messages = vec![UploadBinaryRequest {
             msg: Some(forest_grpc_interface::upload_binary_request::Msg::Metadata(
                 UploadBinaryMetadata {
@@ -339,11 +312,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Server liveness plus build provenance.
-    ///
-    /// An older server predates the provenance fields and leaves them empty,
-    /// which is why the caller renders them as "unknown" rather than assuming
-    /// they are present.
     pub async fn server_status(&self) -> anyhow::Result<GetStatusResponse> {
         let channel = self.auth_channel(self.channel().await?);
         let mut client =
@@ -372,8 +340,6 @@ impl GrpcClient {
         Ok(res.into_inner().manifest_json)
     }
 
-    /// Stream the tool catalogue for an organisation (§1a.2c).
-    /// Each entry has shape ∈ {HYBRID, TOOL_BINARY, TOOL_EXTERNAL}.
     pub async fn list_org_tools(&self, organisation: &str) -> anyhow::Result<Vec<OrgToolEntry>> {
         let mut client = self.registry_client().await?;
         let mut stream = client
@@ -391,156 +357,46 @@ impl GrpcClient {
         Ok(out)
     }
 
-    pub async fn download_component_binary(
-        &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-        // Some(label) shows a transient byte spinner (interactive only). The
-        // total isn't known up front, so it's a spinner, not a bar. DATA-312.
-        progress_label: Option<&str>,
-    ) -> anyhow::Result<Vec<u8>> {
-        let mut client = self.registry_client().await?;
-
-        let mut stream = client
-            .download_binary(DownloadBinaryRequest {
-                organisation: organisation.into(),
-                name: name.into(),
-                version: version.into(),
-                os: os.into(),
-                arch: arch.into(),
-            })
-            .await
-            .map_err(grpc_err)?
-            .into_inner();
-
-        let bar = progress_label.map(|l| crate::ui::transfer(l));
-        let mut binary = Vec::new();
-        while let Some(chunk) = stream.message().await.map_err(grpc_err)? {
-            binary.extend_from_slice(&chunk.chunk);
-            if let Some(bar) = &bar {
-                bar.inc(chunk.chunk.len() as u64);
-            }
-        }
-
-        if let Some(bar) = bar {
-            bar.clear();
-        }
-        Ok(binary)
-    }
-
-    /// Stream a component binary straight to a tempfile in `dest_dir`,
-    /// hashing as it goes (DATA-505).
-    ///
-    /// Preferred over [`Self::download_component_binary`] for anything that
-    /// ends up on disk: that one accumulates the entire artifact in a `Vec`
-    /// (peak RSS ≈ artifact size, plus reallocation churn) and forces the
-    /// caller into a second full pass to hash it. This keeps memory flat at
-    /// one chunk regardless of artifact size, which is what makes it safe to
-    /// run several downloads concurrently.
-    ///
-    /// `dest_dir` should be on the same filesystem as the final destination so
-    /// the caller's install step can be a plain `rename(2)`.
-    ///
-    /// `expected_size` (from the component manifest, when published) upgrades
-    /// the progress display from an open-ended spinner to a real bar. On
-    /// error the tempfile is removed before returning.
     pub async fn download_component_binary_to_file(
         &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
+        binary: &BinaryRef<'_>,
         dest_dir: &Path,
+        expected_sha256: Option<&str>,
         expected_size: Option<u64>,
         progress_label: Option<&str>,
     ) -> anyhow::Result<StreamedBinary> {
-        use sha2::{Digest, Sha256};
-        use tokio::io::AsyncWriteExt as _;
-
-        let mut client = self.registry_client().await?;
-
-        let mut stream = client
-            .download_binary(DownloadBinaryRequest {
-                organisation: organisation.into(),
-                name: name.into(),
-                version: version.into(),
-                os: os.into(),
-                arch: arch.into(),
-            })
-            .await
-            .map_err(grpc_err)?
-            .into_inner();
-
-        tokio::fs::create_dir_all(dest_dir)
-            .await
-            .with_context(|| format!("creating download dir {}", dest_dir.display()))?;
-        let rand: u64 = rand::random();
-        let temp_path = dest_dir.join(format!(".incoming.{rand:016x}"));
-
-        let bar = progress_label.map(|label| match expected_size {
-            Some(total) if total > 0 => crate::ui::bytes_bar(label, total),
-            _ => crate::ui::transfer(label),
-        });
-
-        // Everything after the tempfile exists goes through this so a failure
-        // never strands a partial `.incoming.*` in the cache directory.
-        let result = async {
-            let file = tokio::fs::File::create(&temp_path)
-                .await
-                .with_context(|| format!("creating tempfile {}", temp_path.display()))?;
-            let mut writer = tokio::io::BufWriter::with_capacity(DOWNLOAD_WRITE_BUFFER, file);
-
-            let mut hasher = Sha256::new();
-            let mut size_bytes: u64 = 0;
-
-            while let Some(msg) = stream.message().await.map_err(grpc_err)? {
-                let chunk = msg.chunk;
-                if chunk.is_empty() {
-                    continue;
-                }
-                hasher.update(&chunk);
-                writer
-                    .write_all(&chunk)
+        let client = self.registry_client().await?;
+        let open = |range: binary_download::RangeRequest| {
+            let mut client = client.clone();
+            let request = DownloadBinaryRequest {
+                organisation: binary.organisation.into(),
+                name: binary.name.into(),
+                version: binary.version.into(),
+                os: binary.os.into(),
+                arch: binary.arch.into(),
+                offset: range.offset,
+                length: range.length,
+                expected_sha256: range.expected_sha256.unwrap_or_default(),
+            };
+            async move {
+                Ok(client
+                    .download_binary(request)
                     .await
-                    .with_context(|| format!("writing {}", temp_path.display()))?;
-                size_bytes += chunk.len() as u64;
-                if let Some(bar) = &bar {
-                    bar.inc(chunk.len() as u64);
-                }
+                    .map_err(grpc_err)?
+                    .into_inner())
             }
+        };
 
-            writer
-                .flush()
-                .await
-                .with_context(|| format!("flushing {}", temp_path.display()))?;
-            let file = writer.into_inner();
-            file.sync_all()
-                .await
-                .with_context(|| format!("fsyncing {}", temp_path.display()))?;
-
-            Ok::<_, anyhow::Error>(StreamedBinary {
-                temp_path: temp_path.clone(),
-                sha256_hex: hex::encode(hasher.finalize()),
-                size_bytes,
-            })
-        }
-        .await;
-
-        if let Some(bar) = bar {
-            bar.clear();
-        }
-
-        match result {
-            Ok(streamed) => Ok(streamed),
-            Err(e) => {
-                tokio::fs::remove_file(&temp_path).await.ok();
-                Err(e)
-            }
-        }
+        binary_download::download_to_file(
+            open,
+            &self.download_streams,
+            binary_download::Tuning::default(),
+            dest_dir,
+            expected_sha256,
+            expected_size,
+            progress_label,
+        )
+        .await
     }
 
     pub async fn upload_component_file(
@@ -630,11 +486,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Unpublish a previously-published version (TASKS/025). Returns
-    /// `true` if a new event was recorded; `false` on idempotent no-op
-    /// (version was already unpublished). The CLI uses this to drive
-    /// `forest admin unpublish` and to differentiate the success message
-    /// from the "nothing to do" path.
     pub async fn unpublish_component_version(
         &self,
         organisation: &str,
@@ -657,10 +508,6 @@ impl GrpcClient {
         Ok(res.into_inner().unpublished)
     }
 
-    /// Best-effort abort of an in-flight upload (TASKS/023). Called by
-    /// `AbortOnDrop` when the CLI publish flow exits before commit. The
-    /// server is required to treat unknown / already-committed / already-
-    /// aborted uploads as no-op success, so this is safe to invoke any time.
     pub async fn abort_component_upload(
         &self,
         upload_context: &str,
@@ -748,8 +595,6 @@ impl GrpcClient {
 
         drop(handle.tx);
 
-        // Make sure we've received a final response from the server
-        // FIXME: this may block forever if there are multiple producers
         upload_file_handle.await??;
 
         tracing::info!("commiting upload: {}", staging_id);
@@ -774,24 +619,8 @@ impl GrpcClient {
             .get_or_try_init(move || async move {
                 let channel = Channel::from_shared(self.host.clone())?
                     .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    // HTTP/2 flow control, DATA-505. hyper's defaults are a
-                    // 2 MiB stream window and a 5 MiB connection window with
-                    // adaptive sizing OFF, which hard-caps a single download
-                    // stream at 2 MiB/RTT and this whole channel at 5 MiB/RTT
-                    // — every gRPC client in the CLI shares this one
-                    // connection. On a 100 ms link that was ~20 MB/s per
-                    // download no matter how fast the pipe or the registry
-                    // was.
-                    //
-                    // `http2_adaptive_window` lets hyper size the window from
-                    // the measured bandwidth-delay product instead, using the
-                    // values below as the starting point. Cost is bounded
-                    // buffering (a window's worth per in-flight stream), which
-                    // is why the download limiter keeps the in-flight count
-                    // small — see `crate::download`.
                     .initial_stream_window_size(Some(DOWNLOAD_STREAM_WINDOW))
                     .initial_connection_window_size(Some(DOWNLOAD_CONNECTION_WINDOW))
-                    .http2_adaptive_window(true)
                     .connect()
                     .await?;
 
@@ -892,8 +721,6 @@ impl GrpcClient {
 
         Ok(client.clone())
     }
-
-    // ── terraform@1 state (understory-io/forest#282) ───────────────────
 
     pub async fn issue_terraform_state_credential(
         &self,
@@ -1020,6 +847,7 @@ impl GrpcClient {
         redirect_uris: Vec<String>,
         scopes: Vec<String>,
         grant_types: Vec<String>,
+        public: bool,
     ) -> anyhow::Result<CreateOAuthAppResponse> {
         let mut client = self.oauth_apps_client().await?;
         let resp = client
@@ -1031,6 +859,7 @@ impl GrpcClient {
                 redirect_uris,
                 scopes,
                 grant_types,
+                public,
             })
             .await
             .map_err(grpc_err)
@@ -1067,6 +896,19 @@ impl GrpcClient {
         Ok(resp.into_inner().app)
     }
 
+    pub async fn update_oauth_app(
+        &self,
+        request: UpdateOAuthAppRequest,
+    ) -> anyhow::Result<Option<OAuthApp>> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .update_o_auth_app(request)
+            .await
+            .map_err(grpc_err)
+            .context("update oauth app")?;
+        Ok(resp.into_inner().app)
+    }
+
     pub async fn rotate_oauth_app_secret(
         &self,
         organisation_id: &str,
@@ -1100,8 +942,6 @@ impl GrpcClient {
             .context("delete oauth app")?;
         Ok(())
     }
-
-    // ── Organisations ───────────────────────────────────────────────
 
     pub async fn create_organisation(
         &self,
@@ -1162,8 +1002,6 @@ impl GrpcClient {
             .context("list my organisations")?;
         Ok(resp.into_inner())
     }
-
-    // -- Organisation Members -----------------------------------------------------
 
     pub async fn add_organisation_member(
         &self,
@@ -1253,7 +1091,6 @@ impl GrpcClient {
         Ok(client.clone())
     }
 
-    /// Unauthenticated users client (login, register, refresh_token).
     async fn users_client(&self) -> anyhow::Result<UsersServiceClient<Channel>> {
         let client = self
             .users_client
@@ -1266,7 +1103,6 @@ impl GrpcClient {
         Ok(client.clone())
     }
 
-    /// Authenticated users client (get_user, update, delete, PATs, etc.).
     async fn auth_users_client(
         &self,
     ) -> anyhow::Result<UsersServiceClient<AuthMiddleware<Channel>>> {
@@ -1280,8 +1116,6 @@ impl GrpcClient {
 
         Ok(client.clone())
     }
-
-    // ── Users / Auth ─────────────────────────────────────────────────
 
     pub async fn register(
         &self,
@@ -1660,11 +1494,6 @@ impl GrpcClient {
             .context("release annotation")
     }
 
-    /// Tell the server the deploy this annotation announced never happened.
-    ///
-    /// Creates no release — see `ReportReleaseFailed` in releases.proto for why
-    /// a failed release that never ran must not enter the release history. All
-    /// this does is close out the pending notification with a reason.
     pub async fn report_release_failed(
         &self,
         slug: &str,
@@ -1688,10 +1517,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Same as `get_release_annotation_by_slug` but also returns the
-    /// artifact's owning project (org + project). The CLI's annotation
-    /// model intentionally drops the project info, but `release show`
-    /// needs it to scope subsequent intent-state lookups.
     pub async fn get_release_annotation_with_project_by_slug(
         &self,
         slug: &str,
@@ -1773,7 +1598,6 @@ impl GrpcClient {
 
         let resp = response.into_inner();
 
-        // All intents share the same release_intent_id
         let release_intent_id = resp
             .intents
             .first()
@@ -1793,10 +1617,6 @@ impl GrpcClient {
         })
     }
 
-    /// Follow a release just started, printing its stages and logs, until it
-    /// is terminal or parks on a plan approval. A parked release waits for a
-    /// human, so following it further would hang the command that asked for
-    /// the approval.
     pub async fn wait_release(&self, release_intent_id: Uuid) -> anyhow::Result<WatchOutcome> {
         let outcome = self
             .watch_release(
@@ -1814,7 +1634,6 @@ impl GrpcClient {
                         );
                     }
                     Some(forest_grpc_interface::wait_release_event::Event::LogLine(log)) => {
-                        // Print log lines to appropriate output stream
                         match forest_grpc_interface::LogChannel::try_from(log.channel) {
                             Ok(forest_grpc_interface::LogChannel::Stderr) => {
                                 eprintln!("{}: {}", log.destination, log.line);
@@ -1919,11 +1738,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Partial update: each Some() field is replaced, None is left alone.
-    ///
-    /// `forest publish` uses this to push README + description + blessed
-    /// metadata (from forest.cue) in one round trip. See
-    /// specs/features/009-project-metadata.md.
     pub async fn update_project(
         &self,
         organisation: &str,
@@ -1941,10 +1755,54 @@ impl GrpcClient {
                 readme,
                 description,
                 metadata,
+                visibility: None,
             })
             .await
             .map_err(grpc_err)
             .context("update project (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn set_organisation_visibility(
+        &self,
+        organisation: &str,
+        visibility: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.organisation_client().await?;
+
+        client
+            .set_organisation_visibility(SetOrganisationVisibilityRequest {
+                organisation: organisation.to_string(),
+                visibility: visibility.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("set organisation visibility (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn set_project_visibility(
+        &self,
+        organisation: &str,
+        project: &str,
+        visibility: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .update_project(UpdateProjectRequest {
+                organisation: organisation.to_string(),
+                project: project.to_string(),
+                readme: None,
+                description: None,
+                metadata: None,
+                visibility: Some(visibility.to_string()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("set project visibility (grpc)")?;
 
         Ok(())
     }
@@ -1988,9 +1846,6 @@ impl GrpcClient {
             .destinations
             .into_iter()
             .map(|r| {
-                // `r.metadata` holds only the values the server was willing to
-                // send; `r.sensitive_keys` names the ones it withheld. Fetch
-                // those one at a time with `reveal_destination_metadata`.
                 let sensitive_keys = r.sensitive_keys;
                 Destination::new(
                     &r.organisation,
@@ -2028,9 +1883,6 @@ impl GrpcClient {
             .map_err(grpc_err)
             .context("create destination (grpc)")?;
 
-        // Projects the new destination was added to without asking. Empty from
-        // a server that predates the field, which is indistinguishable from
-        // "none" — the warning is advisory either way.
         Ok(response.into_inner().widened_projects)
     }
 
@@ -2059,8 +1911,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Fetches one withheld metadata value. Deliberately per-key: there is no
-    /// call that returns every secret on a destination at once.
     pub async fn reveal_destination_metadata(
         &self,
         organisation: &str,
@@ -2096,8 +1946,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    // ── Destination States ────────────────────────────────────────────
-
     pub async fn get_destination_states(
         &self,
         organisation: &str,
@@ -2116,9 +1964,6 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    /// Ask the server to compare what this project last deployed with what is
-    /// running, per destination (forest#286). Synchronous: it runs a
-    /// refresh-only plan per destination before answering.
     pub async fn check_drift(
         &self,
         organisation: &str,
@@ -2160,8 +2005,6 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    /// Every release signal reported for a release intent: named observations
-    /// about a release on one destination, such as flux@1's `reconcile`.
     pub async fn list_signals(
         &self,
         release_intent_id: Uuid,
@@ -2179,12 +2022,6 @@ impl GrpcClient {
         Ok(resp.into_inner().signals)
     }
 
-    /// Approve a plan stage that is parked in `AWAITING_APPROVAL`.
-    ///
-    /// The server-side half of plan-before-apply has existed since the plan
-    /// stage landed; this is the CLI reaching it. Without it a pipeline with
-    /// `auto_approve: false` can be started and planned but never finished
-    /// from a terminal (DATA-655).
     pub async fn approve_plan_stage(
         &self,
         release_intent_id: Uuid,
@@ -2202,7 +2039,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Reject a plan stage, cancelling it and everything downstream of it.
     pub async fn reject_plan_stage(
         &self,
         release_intent_id: Uuid,
@@ -2222,13 +2058,6 @@ impl GrpcClient {
         Ok(())
     }
 
-    /// Same WaitRelease stream as `wait_release`, but routes every event
-    /// through `on_event` instead of printing directly. Used by
-    /// `forest release show` so it can render history into structured
-    /// per-destination sections (and respect `--format json`).
-    /// Read a release's `WaitRelease` stream, handing every event to
-    /// `on_event`, until `mode` says to stop (see [`release_watch`]) or the
-    /// server closes it because the release is terminal.
     pub async fn watch_release<F>(
         &self,
         release_intent_id: Uuid,
@@ -2323,8 +2152,6 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    // ── Environments ─────────────────────────────────────────────────
-
     pub async fn list_environments(&self, organisation: &str) -> anyhow::Result<Vec<Environment>> {
         let mut client = self.environment_client().await?;
         let resp = client
@@ -2418,8 +2245,6 @@ impl GrpcClient {
 
         Ok(())
     }
-
-    // ── Auto-Release Policies ────────────────────────────────────────
 
     async fn trigger_client(
         &self,
@@ -2575,8 +2400,6 @@ impl GrpcClient {
         Ok(resp.into_inner().triggers)
     }
 
-    // ── Policies ─────────────────────────────────────────────────────
-
     async fn policy_client(&self) -> anyhow::Result<PolicyServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .policy_client
@@ -2727,8 +2550,6 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    // ── Release Pipelines ─────────────────────────────────────────────
-
     async fn release_pipeline_client(
         &self,
     ) -> anyhow::Result<ReleasePipelineServiceClient<AuthMiddleware<Channel>>> {
@@ -2856,8 +2677,6 @@ impl GrpcClient {
         Ok(resp.into_inner().pipelines)
     }
 
-    // ── Notifications ────────────────────────────────────────────────
-
     pub async fn listen_notifications(
         &self,
         organisation: Option<&str>,
@@ -2934,8 +2753,6 @@ impl GrpcClient {
 
         Ok(resp.into_inner().preference)
     }
-
-    // ── Events ────────────────────────────────────────────────────────
 
     async fn event_client(&self) -> anyhow::Result<EventServiceClient<AuthMiddleware<Channel>>> {
         let client = self
@@ -3014,12 +2831,9 @@ impl GrpcClient {
         Ok(resp.into_inner().cursor)
     }
 
-    // ── Event Subscriptions ───────────────────────────────────────────
-
     async fn event_subscription_client(
         &self,
     ) -> anyhow::Result<EventSubscriptionServiceClient<AuthMiddleware<Channel>>> {
-        // No OnceCell needed — subscription management is infrequent
         let channel = self.auth_channel(self.channel().await?);
         Ok(EventSubscriptionServiceClient::new(channel))
     }
@@ -3106,7 +2920,6 @@ pub struct WaitReleaseResult {
     pub destinations: Vec<WaitReleaseDestinationResult>,
 }
 
-/// What a watch of a release stream saw, and why it stopped.
 pub struct WatchOutcome {
     pub result: WaitReleaseResult,
     pub end: release_watch::WatchEnd,
@@ -3114,12 +2927,10 @@ pub struct WatchOutcome {
 }
 
 impl WaitReleaseResult {
-    /// Returns true if all destinations succeeded
     pub fn all_succeeded(&self) -> bool {
         self.destinations.iter().all(|d| d.status.is_success())
     }
 
-    /// Returns true if any destination failed
     pub fn any_failed(&self) -> bool {
         self.destinations.iter().any(|d| d.status.is_failure())
     }
@@ -3158,9 +2969,6 @@ impl GrpcClientState for State {
         GRPC.get_or_init(move || {
             tracing::trace!("creating grpc client");
 
-            // Server URL resolution (TASKS/019-context.md §1.3):
-            //   1. --forest-server / FOREST_SERVER (explicit override)
-            //   2. The resolved context's server URL.
             let host = if let Some(s) = self.config.forest_server.clone().filter(|s| !s.is_empty())
             {
                 s
@@ -3200,6 +3008,9 @@ impl GrpcClientState for State {
                 release_pipeline_client: OnceCell::const_new(),
                 event_client: OnceCell::const_new(),
                 terraform_state_client: OnceCell::const_new(),
+                download_streams: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                    self.config.max_downloads_in_flight(),
+                )),
             }
         })
         .clone()
@@ -3298,9 +3109,6 @@ impl From<crate::models::project::Project> for forest_grpc_interface::Project {
         Self {
             organisation: value.organisation,
             project: value.project,
-            // README / description / metadata are fetched separately via
-            // GetProject; CLI-side `models::project::Project` is a slim
-            // identifier pair and doesn't carry the wider project payload.
             readme: String::new(),
             description: String::new(),
             metadata: Some(Default::default()),

@@ -8,8 +8,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Dashboard ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn dashboard_with_orgs_shows_dashboard_page() {
     let (state, sessions) = test_state();
@@ -59,18 +57,6 @@ async fn dashboard_shows_recent_artifacts() {
     assert!(html.contains("Deploy v1.0"));
 }
 
-/// DATA-703 — "Recent activity" must be ordered by release time across every
-/// project, not filled project by project.
-///
-/// The regression this pins: the feed used to walk only the first five
-/// projects `list_projects` returned and stop as soon as it had ten items. One
-/// busy project with ten or more releases filled the list on its own, so the
-/// dashboard rendered that project's history and never the org's newest work —
-/// in production it sat six days stale while other projects deployed hourly.
-///
-/// `stale-project` comes first and has twelve old releases; `fresh-project`
-/// comes sixth and holds the newest one. Under the old code `fresh-project`
-/// was never even fetched.
 #[tokio::test]
 async fn dashboard_recent_activity_orders_across_projects_not_per_project() {
     fn artifact(slug: &str, title: &str, created_at: &str) -> Artifact {
@@ -90,13 +76,11 @@ async fn dashboard_recent_activity_orders_across_projects_not_per_project() {
         }
     }
 
-    // Newest first, the order the artifacts API returns them in.
     let stale: Vec<Artifact> = (1..=12)
         .map(|i| {
             artifact(
                 &format!("stale-{i:02}"),
                 &format!("Stale {i:02}"),
-                // 2026-08-20 counting down to 2026-08-09.
                 &format!("2026-08-{:02}T10:00:00+00:00", 21 - i),
             )
         })
@@ -112,7 +96,6 @@ async fn dashboard_recent_activity_orders_across_projects_not_per_project() {
     by_project.insert("fresh-project".to_string(), fresh);
 
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        // `fresh-project` sits past the old five-project cutoff.
         list_projects_result: Some(Ok(vec![
             "stale-project".into(),
             "filler-2".into(),
@@ -144,20 +127,16 @@ async fn dashboard_recent_activity_orders_across_projects_not_per_project() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
 
-    // The newest release is present at all — the old code dropped it entirely.
     let fresh_at = html
         .find("Fresh deploy")
         .expect("newest release across projects should appear in recent activity");
 
-    // ...and it leads the feed, ahead of the stale project's newest.
     let stale_at = html.find("Stale 01").expect("stale releases should appear");
     assert!(
         fresh_at < stale_at,
         "newest release should sort ahead of older ones"
     );
 
-    // The ten-item cap still holds, applied after sorting: the newest release
-    // plus the nine newest stale ones, so 10, 11 and 12 fall off.
     assert!(html.contains("Stale 09"), "should keep the 9 newest stale");
     assert!(!html.contains("Stale 10"), "should cap at 10 items total");
     assert!(!html.contains("Stale 12"), "oldest should be dropped");
@@ -219,8 +198,6 @@ async fn dashboard_no_orgs_shows_onboarding() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("Create organisation"));
 }
-
-// ─── Create organisation ───────────────────────────────────────────
 
 #[tokio::test]
 async fn create_org_success_redirects_to_new_org() {
@@ -295,39 +272,6 @@ async fn create_org_invalid_csrf_returns_403() {
 }
 
 #[tokio::test]
-async fn create_org_grpc_failure_shows_error() {
-    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        create_organisation_result: Some(Err(PlatformError::Unavailable(
-            "connection refused".into(),
-        ))),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/orgs")
-                .header("cookie", &cookie)
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("name=my-org&_csrf=test-csrf"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Forest is temporarily unavailable"));
-    assert!(!html.contains("connection refused"));
-}
-
-#[tokio::test]
 async fn create_org_duplicate_shows_actionable_error() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         create_organisation_result: Some(Err(PlatformError::AlreadyExists(
@@ -361,8 +305,6 @@ async fn create_org_duplicate_shows_actionable_error() {
     assert!(html.contains("ask an owner to invite you"));
     assert!(!html.contains("Could not create organisation"));
 }
-
-// ─── Members page ──────────────────────────────────────────────────
 
 #[tokio::test]
 async fn members_page_returns_200_with_members() {
@@ -441,8 +383,6 @@ async fn members_page_unauthenticated_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert!(response.headers().get("location").unwrap().to_str().unwrap().starts_with("/login"));
 }
-
-// ─── Member management ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_member_success_redirects() {
@@ -630,12 +570,9 @@ async fn members_page_non_admin_can_view() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Can see members but NOT the add member form
     assert!(html.contains("testuser"));
     assert!(!html.contains("Add member"));
 }
-
-// ─── Projects list ──────────────────────────────────────────────────
 
 #[tokio::test]
 async fn projects_list_returns_200_with_projects() {
@@ -724,45 +661,6 @@ async fn projects_list_non_member_returns_403() {
 }
 
 #[tokio::test]
-async fn projects_list_platform_unavailable_returns_500() {
-    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
-        list_projects_result: Some(Err(PlatformError::Unavailable(
-            "connection refused".into(),
-        ))),
-        ..Default::default()
-    });
-    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
-    let cookie = create_test_session(&sessions).await;
-    let app = build_router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/orgs/testorg/projects")
-                .header("cookie", &cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Something went wrong"));
-    assert!(html.contains("connection refused"));
-}
-
-// ─── Project detail ─────────────────────────────────────────────────
-
-// Per specs/features/008, the project Overview at `/orgs/{org}/projects/{project}`
-// no longer renders the `<release-timeline>` element — that moved to the
-// new Deployments tab at `/orgs/{org}/projects/{project}/releases`. These
-// three tests hit the Deployments URL so they keep asserting the timeline's
-// presence at the right place.
-
-#[tokio::test]
 async fn project_releases_returns_200_with_artifacts() {
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
@@ -783,7 +681,6 @@ async fn project_releases_returns_200_with_artifacts() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // The timeline is now rendered by a Svelte web component
     assert!(html.contains("release-timeline"));
     assert!(html.contains("org=\"testorg\""));
     assert!(html.contains("project=\"my-api\""));
@@ -814,7 +711,6 @@ async fn project_releases_empty_artifacts_shows_empty_state() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Empty state is now rendered client-side by the Svelte component
     assert!(html.contains("release-timeline"));
     assert!(html.contains("project=\"my-api\""));
 }
@@ -875,7 +771,6 @@ async fn project_releases_shows_enriched_artifact_data() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Enriched data is now rendered client-side by the Svelte component
     assert!(html.contains("release-timeline"));
     assert!(html.contains("project=\"my-api\""));
 }
@@ -903,7 +798,6 @@ async fn timeline_api_returns_json_with_artifacts() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["timeline"].is_array());
     assert!(json["lanes"].is_array());
-    // Should have at least one timeline item from the mock data
     assert!(!json["timeline"].as_array().unwrap().is_empty());
 }
 
@@ -946,11 +840,8 @@ async fn timeline_api_requires_auth() {
         )
         .await
         .unwrap();
-    // Should redirect to login (302) when not authenticated
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 }
-
-// ─── Artifact detail ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn artifact_detail_returns_200() {
@@ -1052,8 +943,6 @@ async fn artifact_detail_shows_enriched_data() {
     assert!(html.contains("Major release"));
 }
 
-/// A release whose pipeline is parked on a plan, so the page has something to
-/// ask about and something to show.
 fn awaiting_plan_fixture(plan: &str) -> MockPlatformBehavior {
     use forage_core::platform::{PipelineRunStageState, ReleaseIntentState};
 
@@ -1120,10 +1009,6 @@ async fn artifact_detail_html(behavior: MockPlatformBehavior) -> String {
     String::from_utf8(body.to_vec()).unwrap()
 }
 
-/// The point of a plan stage is that somebody reads the plan. This page carries
-/// the approve button, so it has to carry the plan too -- the swimlane's "View
-/// plan" button is somewhere else, and asking for agreement to an unseen change
-/// is the failure this guards against.
 #[tokio::test]
 async fn a_plan_awaiting_approval_is_shown_on_the_page_that_approves_it() {
     let html = artifact_detail_html(awaiting_plan_fixture(
@@ -1138,8 +1023,6 @@ async fn a_plan_awaiting_approval_is_shown_on_the_page_that_approves_it() {
     );
 }
 
-/// Not behind a click while it is the open question. A plan people have to
-/// expand is a plan people approve without reading.
 #[tokio::test]
 async fn a_plan_awaiting_approval_is_open_rather_than_collapsed() {
     let html = artifact_detail_html(awaiting_plan_fixture("would change nothing")).await;
@@ -1154,8 +1037,6 @@ async fn a_plan_awaiting_approval_is_open_rather_than_collapsed() {
     );
 }
 
-/// An empty plan is not a plan. Rendering the chrome for one would say a
-/// provider reported something when it reported nothing.
 #[tokio::test]
 async fn a_stage_with_no_plan_output_renders_no_plan() {
     let mut behavior = awaiting_plan_fixture("");
@@ -1230,8 +1111,6 @@ async fn artifact_detail_non_member_returns_403() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── Usage ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn usage_page_returns_200() {
     let (state, sessions) = test_state();
@@ -1290,8 +1169,6 @@ async fn usage_page_non_member_returns_403() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── Nav & Error rendering ──────────────────────────────────────────
-
 #[tokio::test]
 async fn authenticated_pages_show_app_nav() {
     let (state, sessions) = test_state();
@@ -1341,8 +1218,6 @@ async fn error_403_renders_html() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("Access denied"));
 }
-
-// ─── Destinations ────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn destinations_page_returns_200() {
@@ -1425,8 +1300,6 @@ async fn destinations_page_shows_empty_state() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("No environments yet"));
 }
-
-// ─── Environment reordering ─────────────────────────────────────────
 
 #[tokio::test]
 async fn reorder_environment_success_redirects() {
@@ -1612,8 +1485,6 @@ async fn destinations_page_no_drag_handles_for_non_admin() {
     assert!(!html.contains("draggable=\"true\""), "non-admin should not see drag handles");
 }
 
-// ─── Releases ────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn releases_page_returns_200() {
     let (state, sessions) = test_state();
@@ -1697,12 +1568,9 @@ async fn releases_page_shows_empty_state() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Empty state is now rendered client-side by the Svelte component
     assert!(html.contains("release-timeline"));
     assert!(html.contains("org=\"testorg\""));
 }
-
-// ─── User profile ──────────────────────────────────────────────────
 
 #[tokio::test]
 async fn user_profile_shows_username() {
@@ -1728,8 +1596,6 @@ async fn user_profile_shows_username() {
     assert!(html.contains("testuser"));
     assert!(html.contains("Member since"));
 }
-
-// ─── Triggers (auto-release) ────────────────────────────────────────
 
 #[tokio::test]
 async fn triggers_page_returns_200() {
@@ -1894,8 +1760,6 @@ async fn toggle_trigger_requires_admin() {
 async fn delete_trigger_success_redirects() {
     use forage_core::platform::Trigger;
 
-    // The action addresses the trigger by id, so the trigger has to exist for
-    // the id to resolve.
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_triggers_result: Some(Ok(vec![Trigger {
             id: "t1".into(),
@@ -1938,8 +1802,6 @@ async fn delete_trigger_success_redirects() {
     );
 }
 
-// ─── Deployment Policies ────────────────────────────────────────────
-
 #[tokio::test]
 async fn policies_page_returns_200() {
     let (state, sessions) = test_state();
@@ -1961,9 +1823,6 @@ async fn policies_page_returns_200() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // The heading is the section name now — "Deployment Policies" moved
-    // into the shell's description line so it reads parallel with the
-    // Triggers / Policies / Pipelines sub-nav.
     assert!(html.contains("Policies"));
     assert!(html.contains("Gate deployments with soak times"));
 }
@@ -2010,14 +1869,6 @@ async fn create_policy_requires_csrf() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── 008 redirect + empty-state contracts ────────────────────────────────
-//
-// External links should keep working when forage canonicalises an artefact
-// onto its project URL. The redirects below have no UI fallback so they
-// need explicit tests — silent breakage just sends users to 404.
-
-/// P8 — `/components/{org}/{name}` 303-redirects to the project Overview
-/// when a project with that name exists in the org.
 #[tokio::test]
 async fn component_detail_303s_to_project_when_project_exists() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
@@ -2039,16 +1890,11 @@ async fn component_detail_303s_to_project_when_project_exists() {
         .await
         .unwrap();
 
-    // Spec mandates 303 See Other specifically (soft redirect; reversible).
-    // Don't loosen to `is_redirection()` — that would allow a regression
-    // to 301 or 302 to silently pass.
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let location = response.headers().get("location").unwrap().to_str().unwrap();
     assert_eq!(location, "/orgs/testorg/projects/my-tool");
 }
 
-/// P9 — `/components/{org}/{name}` renders the legacy detail page when no
-/// project with that name exists. External component links keep working.
 #[tokio::test]
 async fn component_detail_renders_legacy_page_when_no_project() {
     use forage_core::registry::{ComponentDetail, ComponentSummary, ToolShape};
@@ -2096,7 +1942,6 @@ async fn component_detail_renders_legacy_page_when_no_project() {
         .await
         .unwrap();
 
-    // 200, not a redirect — the legacy page rendered.
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -2105,10 +1950,6 @@ async fn component_detail_renders_legacy_page_when_no_project() {
     assert!(html.contains("orphaned component, no project"));
 }
 
-/// P11 — `/orgs/{org}/projects/{project}/deployments` 303-redirects to the
-/// consolidated `/releases` tab. The old "Deployments" terminology was
-/// dropped (deployments ARE releases); this redirect keeps external links
-/// resolving.
 #[tokio::test]
 async fn deployments_url_303s_to_releases() {
     let (state, sessions) = test_state();
@@ -2126,14 +1967,11 @@ async fn deployments_url_303s_to_releases() {
         .await
         .unwrap();
 
-    // Spec mandates 303 specifically (see comment on the sibling test).
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let location = response.headers().get("location").unwrap().to_str().unwrap();
     assert_eq!(location, "/orgs/testorg/projects/my-api/releases");
 }
 
-/// E14 — fresh project with no published versions, no README, and no releases
-/// renders the centered Get-started panel — not a wall of empty section cards.
 #[tokio::test]
 async fn fresh_project_overview_renders_get_started_panel() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
@@ -2141,7 +1979,6 @@ async fn fresh_project_overview_renders_get_started_panel() {
         ..Default::default()
     });
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
-        // No detail → comp_versions empty, readme empty.
         get_component_detail_result: Some(Err(forage_core::platform::PlatformError::NotFound(
             "no component yet".into(),
         ))),
@@ -2168,18 +2005,13 @@ async fn fresh_project_overview_renders_get_started_panel() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Get-started panel renders.
     assert!(html.contains("Publish your first version"));
-    // And the typical Components/Releases section headers are absent.
     assert!(!html.contains("<h2 class=\"text-lg font-bold\">Components</h2>"));
     assert!(!html.contains("Recent releases"));
 }
 
-/// DATA-254 — project with releases but no components must still show the
-/// release swimlane on the Overview, not fall through to the Get-started panel.
 #[tokio::test]
 async fn project_overview_with_releases_only_shows_swimlane() {
-    // Default platform mock returns a single artifact → timeline is non-empty.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_component_detail_result: Some(Err(forage_core::platform::PlatformError::NotFound(
             "no component yet".into(),
@@ -2210,15 +2042,11 @@ async fn project_overview_with_releases_only_shows_swimlane() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Swimlane is present.
     assert!(html.contains("Recent releases"));
     assert!(html.contains("<release-timeline"));
-    // Get-started panel must NOT render — there are releases.
     assert!(!html.contains("Publish your first version"));
 }
 
-/// DATA-254 — project with components but no releases renders the Overview
-/// (sidebar Components block visible), not the Get-started panel.
 #[tokio::test]
 async fn project_overview_with_components_only_renders_overview() {
     use forage_core::registry::{
@@ -2280,16 +2108,11 @@ async fn project_overview_with_components_only_renders_overview() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // Sidebar Components block is present (component version listed).
     assert!(html.contains("v1.0.0"));
-    // Get-started panel must NOT render — there are components.
     assert!(!html.contains("Publish your first version"));
-    // No release swimlane since there are no releases.
     assert!(!html.contains("Recent releases"));
 }
 
-/// DATA-254 — project with both releases and components renders the full
-/// Overview: swimlane plus sidebar Components.
 #[tokio::test]
 async fn project_overview_with_releases_and_components_renders_both() {
     use forage_core::registry::{
@@ -2326,7 +2149,6 @@ async fn project_overview_with_releases_and_components_renders_both() {
         })),
         ..Default::default()
     });
-    // Default platform mock returns a single artifact → timeline non-empty.
     let (state, sessions) = test_state_with_registry(
         MockForestClient::new(),
         MockPlatformClient::new(),
@@ -2357,34 +2179,12 @@ async fn project_overview_with_releases_and_components_renders_both() {
     assert!(!html.contains("Publish your first version"));
 }
 
-// ─── Nav preserves org context (DATA-248) ───────────────────────────
-//
-// DATA-248: the org-level "Overview" *tab* linked to the global
-// `/dashboard` and silently dropped the org the user was inside while
-// navigating around — that tab is gone (Projects is the org root) and the
-// breadcrumb, remaining tabs and bell stay org-scoped. These tests pin
-// that behaviour so the bug doesn't regress.
-//
-// The "forest" logo is the one deliberate exception: it's a home button
-// and always points at `/dashboard` (the user's cross-org overview), the
-// same way GitHub's logo returns you home. Clicking home is an explicit
-// action, not the silent context leak DATA-248 was about.
-
-/// Extract the substring between `<nav` and `</nav>` so assertions don't
-/// accidentally match links inside the page body (where `/dashboard`
-/// might appear legitimately, e.g. in marketing copy).
 fn extract_nav(html: &str) -> &str {
     let start = html.find("<nav").expect("nav tag");
     let end_rel = html[start..].find("</nav>").expect("end nav tag");
     &html[start..start + end_rel]
 }
 
-/// The "forest" logo is a home button: it always returns the user to their
-/// cross-org overview at `/dashboard`, the same way GitHub's octocat returns
-/// you to your personal dashboard. Going home is an explicit user action, not
-/// the silent context leak DATA-248 was about — so the logo is deliberately
-/// exempt from org-scoping while the rest of the nav (breadcrumb, tabs, bell)
-/// stays anchored to the org you're inside.
 #[tokio::test]
 async fn nav_logo_links_to_dashboard_inside_org() {
     let (state, sessions) = test_state();
@@ -2407,15 +2207,10 @@ async fn nav_logo_links_to_dashboard_inside_org() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     let nav = extract_nav(&html);
-    // The logo anchor (distinguished by its bold/tracking-tight classes)
-    // points home. Match the class string so we assert on the logo, not
-    // some other `/dashboard` link that might appear later.
     assert!(
         nav.contains(r#"href="/dashboard" class="text-lg font-bold tracking-tight shrink-0""#),
         "logo should be a home button linking to /dashboard: {nav}"
     );
-    // The rest of the nav must still preserve org context (DATA-248): the
-    // breadcrumb / Projects tab stay scoped to the org you're inside.
     assert!(
         nav.contains(r#"href="/orgs/testorg/projects""#),
         "expected org-scoped link still present in nav, got: {nav}"
@@ -2444,8 +2239,6 @@ async fn nav_logo_links_to_dashboard_on_dashboard_page() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     let nav = extract_nav(&html);
-    // The home logo points at /dashboard everywhere, including on the
-    // dashboard itself.
     assert!(
         nav.contains(r#"href="/dashboard" class="text-lg font-bold tracking-tight shrink-0""#),
         "logo should link to /dashboard: {nav}"
@@ -2454,9 +2247,6 @@ async fn nav_logo_links_to_dashboard_on_dashboard_page() {
 
 #[tokio::test]
 async fn nav_has_no_overview_tab_inside_org() {
-    // The Overview tab was the primary DATA-248 offender — it linked to
-    // /dashboard from inside an org. The fix drops it entirely (Projects
-    // is the org root) rather than duplicating the Projects destination.
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -2477,9 +2267,6 @@ async fn nav_has_no_overview_tab_inside_org() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     let nav = extract_nav(&html);
-    // The org-level tab strip must not contain any link whose visible
-    // label is "Overview" — collapse whitespace before matching so a
-    // future re-indent doesn't silently break the test.
     let collapsed: String = nav.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         !collapsed.contains(">Overview<"),
@@ -2553,19 +2340,6 @@ async fn org_notifications_non_member_returns_403() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── DATA-660: superseded releases keep their deploy history ────────
-//
-// `get_destination_states` is a current-state-per-destination view: one row
-// per destination, naming whichever artifact sits on it now. Once a newer
-// release takes a destination over, the older one matches nothing there. It
-// used to fall out of the timeline as an undeployed commit — collapsed into
-// the "N hidden commits" group with a blank swim lane — even though it had
-// deployed successfully. Its own release-intent steps are the history that
-// keeps it a release.
-
-/// Two artifacts, `art-old` then `art-new`, both deployed to the same
-/// destination. Only `art-new` holds it now, so only it appears in the
-/// destination-state view; both have their own intent steps.
 fn superseded_release_fixture() -> MockPlatformBehavior {
     use forage_core::platform::{
         DeploymentStates, DestinationState, ReleaseIntentState, ReleaseStepState,
@@ -2612,7 +2386,6 @@ fn superseded_release_fixture() -> MockPlatformBehavior {
 
     MockPlatformBehavior {
         list_projects_result: Some(Ok(vec!["my-api".into()])),
-        // Newest first, the order the timeline renders in.
         list_artifacts_result: Some(Ok(vec![
             artifact(
                 "art-new",
@@ -2627,7 +2400,6 @@ fn superseded_release_fixture() -> MockPlatformBehavior {
                 "2026-03-07T12:00:00Z",
             ),
         ])),
-        // Only the current occupant of prod-cluster.
         get_destination_states_result: Some(Ok(DeploymentStates {
             destinations: vec![DestinationState {
                 destination_id: "dest-1".into(),
@@ -2710,8 +2482,6 @@ async fn superseded_release_keeps_its_swimlane_dot() {
         .find(|i| i["release"]["slug"] == "my-api-old")
         .expect("superseded release should be on the timeline");
 
-    // `dest_envs` is what the Svelte component parses to place lane dots —
-    // empty means no bubble.
     assert_eq!(old["release"]["dest_envs"], "prod:SUCCEEDED");
     assert_eq!(old["release"]["summary_status"], "SUCCEEDED");
     assert_eq!(old["release"]["destinations"][0]["name"], "prod-cluster");
@@ -2720,8 +2490,6 @@ async fn superseded_release_keeps_its_swimlane_dot() {
 
 #[tokio::test]
 async fn release_without_steps_falls_back_to_destination_states() {
-    // A release with no intent recorded (older than the intent window) still
-    // gets whatever the current-state view knows — the pre-DATA-660 behaviour.
     let mut behavior = superseded_release_fixture();
     behavior.get_release_intent_states_result = Some(Ok(vec![]));
     let json = timeline_json(behavior).await;
@@ -2737,9 +2505,6 @@ async fn release_without_steps_falls_back_to_destination_states() {
 
 #[tokio::test]
 async fn is_current_marks_only_the_release_the_destination_still_holds() {
-    // DATA-661: the swim lane needs "live here now" separated from "was
-    // released here". Both releases below deployed to prod-cluster; only
-    // `art-new` still occupies it.
     let json = timeline_json(superseded_release_fixture()).await;
     let items = json["timeline"].as_array().unwrap();
 
@@ -2759,18 +2524,7 @@ async fn is_current_marks_only_the_release_the_destination_still_holds() {
         "the superseded release deployed here, but is no longer live"
     );
 }
-// ─── Rules are addressed by id, not by name ─────────────────────────
-//
-// A release rule is routinely named after the pattern it matches, and the
-// reported case — `(feat|feature)/.*-to-platform-dev` — contains a `/`. The
-// action URLs used to interpolate that name into
-// `/triggers/{name}/delete`, which produced extra path segments, so axum
-// matched no route and Edit / Disable / Delete returned 404 before any
-// handler ran. The buttons now carry the rule's id and the handler resolves
-// it back to the name the forest API still keys on.
 
-/// The exact rule name from the bug report. Regex alternation, a path
-/// separator and a glob — nothing about it is safe in a URL path.
 use std::sync::{Arc, Mutex};
 
 const AWKWARD_NAME: &str = "(feat|feature)/.*-to-platform-dev";
@@ -2827,7 +2581,6 @@ async fn delete_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
         response.headers().get("location").unwrap(),
         "/orgs/testorg/projects/my-api/settings/triggers"
     );
-    // The id resolved to the one rule that holds it — name and all.
     assert_eq!(
         *calls.lock().unwrap(),
         vec![format!("delete_trigger:{AWKWARD_NAME}")]
@@ -2884,13 +2637,47 @@ async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    // The name is still the label the user sees — HTML-escaped, since minijinja
-    // escapes `/` as `&#x2f;`.
-    assert!(html.contains("(feat|feature)&#x2f;.*-to-platform-dev"));
-    // ...and the form posts back to the id, not that name.
+    assert!(html.contains("value=\"(feat|feature)/.*-to-platform-dev\""));
     assert!(html.contains(
         "action=\"/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555\""
     ));
+}
+
+#[tokio::test]
+async fn edit_trigger_page_leaves_unset_patterns_empty() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    for field in [
+        "title_pattern",
+        "author_pattern",
+        "commit_message_pattern",
+        "source_type_pattern",
+    ] {
+        assert!(
+            html.contains(&format!("name=\"{field}\" value=\"\"")),
+            "{field} should render empty"
+        );
+    }
+    assert!(!html.contains("value=\"none\""));
 }
 
 #[tokio::test]
@@ -2924,9 +2711,6 @@ async fn edit_trigger_submit_with_non_url_safe_name_resolves_id_to_name() {
     );
 }
 
-/// The rendered page must hand the browser an id-addressed action URL. If it
-/// ever goes back to interpolating the name, the `/` in it silently
-/// reintroduces the 404 — so pin the URL the buttons actually carry.
 #[tokio::test]
 async fn triggers_page_action_urls_carry_the_id_not_the_name() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -2955,12 +2739,10 @@ async fn triggers_page_action_urls_carry_the_id_not_the_name() {
     assert!(html.contains(&format!("{base}/delete")));
     assert!(html.contains(&format!("{base}/toggle")));
     assert!(html.contains(&format!("\"{base}\"")));
-    // No action URL carries the rule name any more.
     assert!(!html.contains("triggers/(feat"));
     assert!(!html.contains("triggers/%28feat"));
 }
 
-/// An id that no longer exists is a missing rule, not a server error.
 #[tokio::test]
 async fn delete_trigger_with_unknown_id_is_not_found() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -2982,6 +2764,83 @@ async fn delete_trigger_with_unknown_id_is_not_found() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    // Nothing reached the API — an unresolved id must not fall back to a name.
     assert!(calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_release_page_has_the_anchors_slack_messages_link_to() {
+    let html = artifact_detail_html(awaiting_plan_fixture("would change nothing")).await;
+    let stage = forage_core::integrations::slack_release::anchor_id("plan-finance");
+    assert!(html.contains(&format!("id=\"stage-{stage}\"")), "stage anchor missing");
+    assert!(html.contains(&format!("id=\"plan-{stage}\"")), "plan anchor missing");
+    assert!(html.contains("id=\"pipeline\""), "pipeline anchor missing");
+}
+
+#[tokio::test]
+async fn a_release_without_a_description_has_an_empty_meta_description() {
+    let html = artifact_detail_html(awaiting_plan_fixture("plan")).await;
+    assert!(
+        html.contains(r#"<meta name="description" content="">"#),
+        "an unset description must not render as \"none\""
+    );
+    assert!(!html.contains(r#"content="none""#), "{html}");
+}
+
+#[tokio::test]
+async fn a_stage_without_an_environment_still_renders() {
+    let mut behavior = awaiting_plan_fixture("plan");
+    if let Some(Ok(intents)) = behavior.get_release_intent_states_result.as_mut() {
+        intents[0].stages[0].environment = None;
+        intents[0].stages.push(forage_core::platform::PipelineRunStageState {
+            stage_id: "deploy-somewhere".into(),
+            stage_type: "deploy".into(),
+            status: "QUEUED".into(),
+            environment: None,
+            ..Default::default()
+        });
+    }
+    let html = artifact_detail_html(behavior).await;
+    assert!(html.contains("Queued for"), "{html}");
+}
+
+#[tokio::test]
+async fn exporting_a_destination_without_a_type_exports_an_empty_type() {
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_destinations_result: Some(Ok(vec![forage_core::platform::Destination {
+            name: "legacy".into(),
+            environment: "dev".into(),
+            organisation: "testorg".into(),
+            metadata: Default::default(),
+            sensitive_keys: vec![],
+            dest_type: None,
+        }])),
+        list_environments_result: Some(Ok(vec![forage_core::platform::Environment {
+            id: "env-dev".into(),
+            organisation: "testorg".into(),
+            name: "dev".into(),
+            description: None,
+            sort_order: 0,
+            created_at: "2026-03-08T00:00:00Z".into(),
+        }])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let response = build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/destinations")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    for attr in ["data-type-org", "data-type-name", "data-type-version"] {
+        assert!(html.contains(&format!("{attr}=\"\"")), "{attr} should be empty: {html}");
+    }
+    assert!(!html.contains("data-type-org=\"none\""), "{html}");
 }

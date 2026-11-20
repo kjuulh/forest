@@ -7,13 +7,15 @@ edition = "2024"
 forage-core = { path = "../forage-core" }
 forage-db = { path = "../forage-db" }
 forage-grpc = { path = "../forage-grpc", features = ["client", "server"] }
+forage-ui = { path = "../forage-ui" }
+sedge-rt.workspace = true
+sedx.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
-minijinja.workspace = true
 serde.workspace = true
 sqlx.workspace = true
 serde_json.workspace = true
@@ -53,3 +55,11 @@ qrcode.workspace = true
 image.workspace = true
 pulldown-cmark = "0.12"
 ammonia = "4"
+regex = "1"
+rsa = { version = "0.9", features = ["sha2"] }
+
+[build-dependencies]
+sedge-gen.workspace = true
+
+[dev-dependencies]
+insta = "1"

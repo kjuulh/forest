@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT state_id, lock_id, operation, who, info, tf_version, tf_created, path,\n                       principal, release_id, replica, acquired_at\n                FROM terraform_state_locks\n                WHERE state_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "state_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lock_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "lock_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "who",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "who"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "info",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "info"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tf_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "tf_version"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "tf_created",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "tf_created"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "principal",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "principal"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "release_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "release_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "replica",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "replica"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "acquired_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "acquired_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "7e5116bde7e074d20f1494840fa94b414eb0e70af41e15e5dd72b119452c4911"
+}

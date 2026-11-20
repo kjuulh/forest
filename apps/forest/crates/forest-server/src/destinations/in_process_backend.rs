@@ -13,11 +13,6 @@ use crate::{
     temp_dir::{GuardedTempDirectory, TempDirectories},
 };
 
-/// In-process backend for destination handlers.
-///
-/// Uses the server's existing registries and database directly, allowing
-/// the same destination handler code (from forest-runner) to run inside
-/// the forest-server process without gRPC.
 pub struct InProcessBackend {
     artifact_files: ArtifactStagingRegistry,
     db: PgPool,
@@ -27,7 +22,6 @@ pub struct InProcessBackend {
     project_id: uuid::Uuid,
     environment: String,
     release_identity: Option<forest_runner::backend::ReleaseIdentity>,
-    /// Keep temp directory guards alive for the lifetime of this backend.
     temp_guards: Mutex<Vec<GuardedTempDirectory>>,
 }
 
@@ -64,7 +58,6 @@ impl InProcessBackend {
 }
 
 impl InProcessBackend {
-    /// Build a `DestinationConfig` from a `forest_models::Destination`.
     pub fn config_from_destination(dest: &forest_models::Destination) -> DestinationConfig {
         DestinationConfig {
             name: dest.name.clone(),
@@ -153,9 +146,7 @@ impl DestinationBackend for InProcessBackend {
 
     async fn create_temp_dir(&self) -> anyhow::Result<PathBuf> {
         let guarded = self.temp.create_emphemeral_temp().await?;
-        // Deref<Target=PathBuf> gives us the path
         let path = (*guarded).clone();
-        // Keep the guard alive so the temp dir isn't cleaned up
         self.temp_guards.lock().unwrap().push(guarded);
         Ok(path)
     }

@@ -1,4 +1,3 @@
-// Hand-mirrored from forest.component.cue; replaced by codegen output once wired.
 #![allow(clippy::upper_case_acronyms)]
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -26,7 +25,6 @@ pub struct CheckoutOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Shallow-clone a git repository into a destination directory.
     fn checkout(
         &self,
         spec: &Spec,

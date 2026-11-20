@@ -16,8 +16,6 @@ impl UserService {
         self.repo.pool()
     }
 
-    // ── Authentication ───────────────────────────────────────────────
-
     pub async fn register(
         &self,
         username: &str,
@@ -76,13 +74,6 @@ impl UserService {
         })
     }
 
-    /// Create a user from an OAuth provider — no password, email is marked
-    /// verified at creation because the provider already vouched for it.
-    ///
-    /// `provider` is the protobuf-format provider name as stored in the
-    /// `identities` table (e.g. "oauth_provider_github"). For
-    /// `verification_source` we use the short form ("oauth_github") via
-    /// [`oauth_verification_source`].
     pub async fn register_oauth_user(
         &self,
         username: &str,
@@ -227,8 +218,6 @@ impl UserService {
         Ok(())
     }
 
-    // ── User CRUD ────────────────────────────────────────────────────
-
     pub async fn get_user(&self, user_id: Uuid) -> anyhow::Result<Option<UserProfile>> {
         let user = self.repo.get_user_by_id(self.db(), user_id).await?;
         let Some(user) = user else {
@@ -287,12 +276,6 @@ impl UserService {
         }
     }
 
-    /// Resolve a user from a linked external account.
-    ///
-    /// The join email cannot make: people commit from addresses their
-    /// Forest account has never seen, but the linked GitHub identity is
-    /// exact. Keyed on the provider's stable id rather than a login,
-    /// because logins get renamed and ids don't.
     pub async fn get_user_by_provider_identity(
         &self,
         providers: &[String],
@@ -355,7 +338,6 @@ impl UserService {
         offset: i64,
         search: Option<&str>,
     ) -> anyhow::Result<UserList> {
-        // Fetch one extra row to determine if there's a next page.
         let fetch_limit = page_size + 1;
 
         let mut users = match search {
@@ -384,8 +366,6 @@ impl UserService {
             has_more,
         })
     }
-
-    // ── User stats ────────────────────────────────────────────────────
 
     pub async fn get_user_stats(&self, user_id: Uuid) -> anyhow::Result<UserStats> {
         let release_stats = sqlx::query!(
@@ -436,8 +416,6 @@ impl UserService {
         })
     }
 
-    // ── Password management ──────────────────────────────────────────
-
     pub async fn change_password(
         &self,
         user_id: Uuid,
@@ -481,8 +459,6 @@ impl UserService {
         Ok(())
     }
 
-    // ── Email management ─────────────────────────────────────────────
-
     pub async fn add_email(&self, user_id: Uuid, email: &str) -> anyhow::Result<()> {
         self.repo.add_user_email(self.db(), user_id, email).await?;
         Ok(())
@@ -501,8 +477,6 @@ impl UserService {
             .await?;
         Ok(())
     }
-
-    // ── OAuth / identity linking ─────────────────────────────────────
 
     pub async fn link_oauth_provider(
         &self,
@@ -525,10 +499,6 @@ impl UserService {
             )
             .await?;
 
-        // If the linked OAuth identity vouches for an email that's already
-        // verified on the user, promote its verification_source from
-        // magic_link to oauth_<provider>. The provider has just attested
-        // ownership — strictly stronger than a magic-link click.
         if let Some(email) = provider_email {
             let new_source = oauth_verification_source(provider);
             self.repo
@@ -539,15 +509,6 @@ impl UserService {
     }
 
     pub async fn unlink_oauth_provider(&self, user_id: Uuid, provider: &str) -> anyhow::Result<()> {
-        // Block disconnect when it would leave the account with no usable
-        // sign-in method. A user can sign in if they either have a password
-        // (`provider_native_credentials` row) or at least one identity row
-        // for a provider other than the one being unlinked. Magic links are
-        // one-time tokens, not a persistent credential, so they don't count.
-        //
-        // Check and delete in a single transaction so a concurrent unlink
-        // for a different provider can't pull the rug between check and
-        // delete.
         let mut tx = self.repo.begin().await?;
 
         let has_password = self
@@ -583,8 +544,6 @@ impl UserService {
             .await?;
         Ok(identity.map(|i| i.user_id))
     }
-
-    // ── OAuth state ──────────────────────────────────────────────────
 
     pub async fn create_oauth_state(
         &self,
@@ -630,8 +589,6 @@ impl UserService {
             data: row.data,
         }))
     }
-
-    // ── Personal access tokens ───────────────────────────────────────
 
     pub async fn create_personal_access_token(
         &self,
@@ -709,9 +666,6 @@ impl UserService {
         Ok(())
     }
 
-    /// Delete a PAT only if it belongs to `user_id`. Returns the number
-    /// of rows deleted — callers can treat 0 as "not found or not yours"
-    /// without distinguishing the two (avoids enumeration of token ids).
     pub async fn delete_personal_access_token_for_user(
         &self,
         token_id: Uuid,
@@ -723,8 +677,6 @@ impl UserService {
             .await?;
         Ok(n)
     }
-
-    // ── MFA ──────────────────────────────────────────────────────────
 
     pub async fn setup_mfa(
         &self,
@@ -749,12 +701,10 @@ impl UserService {
         Ok(())
     }
 
-    /// Check if a user has verified MFA enabled.
     pub async fn get_mfa_for_user(&self, user_id: Uuid) -> anyhow::Result<Option<NativeMfaRow>> {
         self.repo.get_native_mfa(self.db(), user_id).await
     }
 
-    /// Touch the last_used_at timestamp on an MFA record.
     pub async fn touch_mfa(&self, mfa_id: Uuid) -> anyhow::Result<()> {
         self.repo
             .touch_native_mfa(self.db(), mfa_id)
@@ -763,30 +713,12 @@ impl UserService {
     }
 }
 
-// ─── Errors ──────────────────────────────────────────────────────────
-
-/// Typed user-service errors. Carried through `anyhow::Error` and downcast
-/// at the gRPC boundary to map to the appropriate `tonic::Status`.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum UserServiceError {
-    /// Returned by `unlink_oauth_provider` when unlinking would leave the
-    /// user with no remaining sign-in method (no password and no other
-    /// linked identity). Message is the stable error code used by callers.
     #[error("last_auth_method")]
     LastAuthMethod,
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────
-
-/// Derive the `verification_source` string for an OAuth-vouched email
-/// from the protobuf-format provider name stored in `identities.provider`.
-///
-/// The protobuf enum name comes through the gRPC layer as
-/// `"oauth_provider_github"` / `"oauth_provider_google"` — we strip the
-/// `oauth_provider_` prefix to land on the cleaner `"oauth_github"` /
-/// `"oauth_google"` form documented in the migration. Unknown providers
-/// fall back to `"oauth_<provider>"` verbatim rather than silently
-/// dropping information.
 pub fn oauth_verification_source(provider: &str) -> String {
     let short = provider.strip_prefix("oauth_provider_").unwrap_or(provider);
     format!("oauth_{short}")
@@ -813,8 +745,6 @@ mod helper_tests {
         assert_eq!(oauth_verification_source("custom_idp"), "oauth_custom_idp");
     }
 }
-
-// ─── Return types ────────────────────────────────────────────────────
 
 pub struct RegisteredUser {
     pub user_id: Uuid,
@@ -860,9 +790,6 @@ pub struct UserOAuthConnection {
     pub provider_user_id: String,
     pub provider_email: Option<String>,
     pub linked_at: chrono::DateTime<chrono::Utc>,
-    /// Provider-specific extras stored in `identities.provider_data`.
-    /// `display_name` is convention: callers writing a row may populate
-    /// `{"display_name": "kjuulh", "login": "kjuulh", "avatar_url": "..."}`.
     pub provider_data: Option<serde_json::Value>,
 }
 
@@ -900,8 +827,6 @@ pub struct PersonalAccessTokenInfo {
     pub last_used: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
-
-// ─── State trait ─────────────────────────────────────────────────────
 
 pub trait UserServiceState {
     fn user_service(&self) -> UserService;

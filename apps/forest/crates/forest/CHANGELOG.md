@@ -1,5 +1,125 @@
 # Changelog
 
+## [0.3.18](https://github.com/understory-io/forest/compare/v0.3.17...v0.3.18) (2026-11-14)
+
+
+### Features
+
+* **forage:** org-level Slack + GitHub connections for individual release notifications ([#338](https://github.com/understory-io/forest/issues/338)) ([e5ca53f](https://github.com/understory-io/forest/commit/e5ca53fb8eba577fbf191f8dd62e7273b4cb62c7))
+* **forage:** visibility settings for organisations and components ([#336](https://github.com/understory-io/forest/issues/336)) ([2c9d82b](https://github.com/understory-io/forest/commit/2c9d82bc68683dfae8343c44830c6a6733722c29))
+* **registry:** read-only public components and organisations, so non-members can depend on them ([#335](https://github.com/understory-io/forest/issues/335)) ([8c6dd99](https://github.com/understory-io/forest/commit/8c6dd991aae45ee02fbfdd5c3bb18f72624ccccd))
+* **service-release:** pass arbitrary --set values to prepare ([#333](https://github.com/understory-io/forest/issues/333)) ([46eda77](https://github.com/understory-io/forest/commit/46eda776a2ece0ec9ad93059027898f0249889d1))
+
+
+### Bug Fixes
+
+* **self:** update notice names the binary that is behind ([#337](https://github.com/understory-io/forest/issues/337)) ([1153947](https://github.com/understory-io/forest/commit/1153947f3b41b2be07936ffe3bb8b0f4452d1bdc))
+
+## [0.3.17](https://github.com/understory-io/forest/compare/v0.3.16...v0.3.17) (2026-10-22)
+
+
+### Features
+
+* pipeline-first release create, enforced branch/soak policies, runtime version ranges, and the forest Claude Code skill ([#328](https://github.com/understory-io/forest/issues/328)) ([b5175bd](https://github.com/understory-io/forest/commit/b5175bd6c2c51388cfb739b49006efec746a8309))
+* **self:** publish and opt into forest's own prereleases ([#329](https://github.com/understory-io/forest/issues/329)) ([9e3a2aa](https://github.com/understory-io/forest/commit/9e3a2aaa0c42b1ba4caf87fe37f0f42761970dcd))
+
+
+### Bug Fixes
+
+* **deps:** stop trusting emSign ECC Root CA - G3 in the compiled-in webpki roots ([#331](https://github.com/understory-io/forest/issues/331)) ([09f84dc](https://github.com/understory-io/forest/commit/09f84dc2704d56074322845e46385d74ffdaea8f))
+
+## [0.3.16](https://github.com/understory-io/forest/compare/v0.3.15...v0.3.16) (2026-10-20)
+
+
+### Features
+
+* **global:** `FOREST_PRERELEASE=1` follows prereleases for every unpinned tool ([#326](https://github.com/understory-io/forest/issues/326)) ([54ead1e](https://github.com/understory-io/forest/commit/54ead1e0bf7423f8e291cb103009653f1e5526d1))
+
+## [0.3.15](https://github.com/understory-io/forest/compare/v0.3.14...v0.3.15) (2026-10-20)
+
+
+### Features
+
+* **components:** `forest components version` for prebuilt builds, and fixes from the agentctl prerelease review ([#325](https://github.com/understory-io/forest/issues/325)) ([d3535da](https://github.com/understory-io/forest/commit/d3535da70b45bc308a754d8c539e9d66ac4e2362))
+* **global:** follow a tool's prereleases only when asked, with `add --prerelease` ([#324](https://github.com/understory-io/forest/issues/324)) ([74a78e1](https://github.com/understory-io/forest/commit/74a78e12286f5c6922531ad62354b36719a46764))
+
+
+### Bug Fixes
+
+* **registry:** send a download's first message with the first bytes, so range fan-out starts at TTFB ([#320](https://github.com/understory-io/forest/issues/320)) ([1fde57c](https://github.com/understory-io/forest/commit/1fde57c91200c438e76a172cc8e179dfd86d067a))
+
+## [0.3.14](https://github.com/understory-io/forest/compare/v0.3.13...v0.3.14) (2026-10-19)
+
+
+### Features
+
+* **auth:** let an OAuth app publish components with a client-credentials token, and nothing else ([#307](https://github.com/understory-io/forest/issues/307)) ([d240bc1](https://github.com/understory-io/forest/commit/d240bc12621d447ac8dba01a889801045627442e))
+* **auth:** let an OAuth app sign a person in with a device code (RFC 8628) ([#317](https://github.com/understory-io/forest/issues/317)) ([566b8a5](https://github.com/understory-io/forest/commit/566b8a59141c5581c857c4e34be78a0bbb388b11))
+* **auth:** public OAuth clients (PKCE, loopback), and introspecting user-delegated tokens instead of sessions ([#313](https://github.com/understory-io/forest/issues/313)) ([77bc41c](https://github.com/understory-io/forest/commit/77bc41c0044cce51a9f8bcc5e040259610aeae13))
+* **auth:** token introspection for resource servers, and the data gateway's scopes ([#311](https://github.com/understory-io/forest/issues/311)) ([8c7674c](https://github.com/understory-io/forest/commit/8c7674c22b0353d797fd69f0281a3e7bd035066d))
+* **cli:** `forest organisation oauth-app update` changes an app from the CLI ([79aa1e7](https://github.com/understory-io/forest/commit/79aa1e7746516d5e01aacc1a6d6be245600a10d0))
+* **cli:** `forest organisation oauth-app update` changes an app from the CLI ([#318](https://github.com/understory-io/forest/issues/318)) ([79aa1e7](https://github.com/understory-io/forest/commit/79aa1e7746516d5e01aacc1a6d6be245600a10d0))
+* **forage:** add a maintenance mode that answers 503 while keeping health probes up ([#305](https://github.com/understory-io/forest/issues/305)) ([e960fba](https://github.com/understory-io/forest/commit/e960fba77a0e585837be4879279145976df3d935))
+* **forage:** introspect a person's token as well as an app's ([#312](https://github.com/understory-io/forest/issues/312)) ([b41b4b5](https://github.com/understory-io/forest/commit/b41b4b597c19d2008b6fe752e13fb3be70e32f1b))
+* **forage:** project Settings hub — browse Triggers/Policies/Pipelines with a back button ([#260](https://github.com/understory-io/forest/issues/260)) ([54092cc](https://github.com/understory-io/forest/commit/54092cc4aa82af31babf87f93838454de79f6ad6))
+* **forage:** redesign the release swimlane, and delete the renderer it replaced ([#264](https://github.com/understory-io/forest/issues/264)) ([7716620](https://github.com/understory-io/forest/commit/77166202d49292ab581e1f132b46d4d6bc5900f8))
+* **forage:** render gate stages, and stop generating provider bindings forage never uses (DATA-775) ([#258](https://github.com/understory-io/forest/issues/258)) ([ad075be](https://github.com/understory-io/forest/commit/ad075bee05a921473551239ce6337fb1c5d154d3))
+* **forage:** report how long each page takes, per route, over OTLP ([#267](https://github.com/understory-io/forest/issues/267)) ([b40261e](https://github.com/understory-io/forest/commit/b40261e4a4b331d6bceab04faea5b845eb95ea0c))
+* **forage:** restore organisation rule settings ([a78ab89](https://github.com/understory-io/forest/commit/a78ab8949cbfaca1d7570e98b0c9d7c306a8c098))
+* **forage:** wire up the supersede-pending policy (DATA-823) ([#263](https://github.com/understory-io/forest/issues/263)) ([cdc65d1](https://github.com/understory-io/forest/commit/cdc65d1ca61c629a637bba5196027fcd14ca50ff))
+* **forest:** skip-to-latest — supersede older pending releases (DATA-817) ([#261](https://github.com/understory-io/forest/issues/261)) ([0d5534d](https://github.com/understory-io/forest/commit/0d5534da199d32e9d2ec9137663c58b90c7271cb))
+* **pipelines:** a gate stage that waits for evidence, not a duration ([#252](https://github.com/understory-io/forest/issues/252)) ([#254](https://github.com/understory-io/forest/issues/254)) ([5c5fa66](https://github.com/understory-io/forest/commit/5c5fa66b3eb6ac8dead31a63a0497e3148a273bd))
+* prepare Mire event-store migration ([fb7cc51](https://github.com/understory-io/forest/commit/fb7cc51380c034558f5087d731329a33f34894f3))
+* **provider:** let a provider report signals on the stream it already has ([#252](https://github.com/understory-io/forest/issues/252)) ([#255](https://github.com/understory-io/forest/issues/255)) ([7f91e95](https://github.com/understory-io/forest/commit/7f91e954b6af52a38b1f2c6c543e843068468c5c))
+* **registry:** fetch a large binary as parallel byte ranges, and let the configured HTTP/2 windows apply ([45dff62](https://github.com/understory-io/forest/commit/45dff626fdec7cc3326e0b8a3f45fbbca0d50888))
+* **registry:** fetch a large binary as parallel byte ranges, and let the configured HTTP/2 windows apply ([#319](https://github.com/understory-io/forest/issues/319)) ([45dff62](https://github.com/understory-io/forest/commit/45dff626fdec7cc3326e0b8a3f45fbbca0d50888))
+* **signals:** a release can be told what happened to it ([#252](https://github.com/understory-io/forest/issues/252)) ([#253](https://github.com/understory-io/forest/issues/253)) ([07cf19c](https://github.com/understory-io/forest/commit/07cf19c4e44ec79094f32e3d1f9ba266916f3e71))
+* **terraform@1:** assume a role when the destination names one (DATA-732) ([9529edb](https://github.com/understory-io/forest/commit/9529edb4387483cc56e37d21cd24bf9601166c8f))
+* **terraform@1:** destroy plan stages and a drift check ([#286](https://github.com/understory-io/forest/issues/286)) ([#299](https://github.com/understory-io/forest/issues/299)) ([794a4ed](https://github.com/understory-io/forest/commit/794a4ed60ff171a8de1d7fecb508bf09868a29ed))
+* **terraform@1:** reach a project's state outside a release ([#282](https://github.com/understory-io/forest/issues/282)) ([#295](https://github.com/understory-io/forest/issues/295)) ([0ca01da](https://github.com/understory-io/forest/commit/0ca01da576b9dd73ce5cd1ead9be1cf4f3ddc041))
+
+
+### Bug Fixes
+
+* **ci:** pull minio from Chainguard; quay now refuses anonymous pulls ([#297](https://github.com/understory-io/forest/issues/297)) ([8ff3860](https://github.com/understory-io/forest/commit/8ff386001e4b3dae75d853a7882dc43350d0b473))
+* **ci:** track rust:1.98-trixie, a tag that exists (DATA-739) ([950b979](https://github.com/understory-io/forest/commit/950b979ab854f96c098becdec15275f547eb3322))
+* **cli:** name the server publish uploads to, and accept --forest-server after the subcommand ([#301](https://github.com/understory-io/forest/issues/301)) ([1dc0370](https://github.com/understory-io/forest/commit/1dc03703c7d8ab9eaf52c65bc6efefa3f708c078))
+* **cli:** show a plan parked awaiting approval and exit, instead of waiting on the approver ([#302](https://github.com/understory-io/forest/issues/302)) ([52685f3](https://github.com/understory-io/forest/commit/52685f38f257a80cdc26673ccdd728dec847bd9d))
+* **codegen:** serde defaults for defaulted structs, lists, maps and enums ([#287](https://github.com/understory-io/forest/issues/287)) ([#290](https://github.com/understory-io/forest/issues/290)) ([a8539cd](https://github.com/understory-io/forest/commit/a8539cd5f652f49848de4cfd4fc39873f994ab22))
+* **destinations:** an undeclared project no longer widens onto kinds it never renders ([#288](https://github.com/understory-io/forest/issues/288)) ([#291](https://github.com/understory-io/forest/issues/291)) ([8257d3c](https://github.com/understory-io/forest/commit/8257d3c0a662cb570e260d9dedfd436cd2f6f5e2))
+* **flux@1:** retry a GitOps push that lost a race with another release ([#306](https://github.com/understory-io/forest/issues/306)) ([1a55582](https://github.com/understory-io/forest/commit/1a555826d87d5b3c94bceafe5c4f50f6b7e7d4a9))
+* **flux@1:** say when the reconcile webhook failed, retry it, and stop logging its token ([#298](https://github.com/understory-io/forest/issues/298)) ([#300](https://github.com/understory-io/forest/issues/300)) ([58fb48a](https://github.com/understory-io/forest/commit/58fb48a797d68c637f28543e701c4028be90e40f))
+* **forage:** a swimlane bubble answers for itself, and halve the JS bundle ([#265](https://github.com/understory-io/forest/issues/265)) ([0911b7b](https://github.com/understory-io/forest/commit/0911b7b7251b860422cd3a22dca85e7fab6b5504))
+* **forage:** address release rules by id, not by name ([#259](https://github.com/understory-io/forest/issues/259)) ([2e118ba](https://github.com/understory-io/forest/commit/2e118bad8d66d4fc80c60ea04ec925b967b887b1))
+* **forage:** give a failed stage's error a block, not a cell in the row ([#271](https://github.com/understory-io/forest/issues/271)) ([6bc4139](https://github.com/understory-io/forest/commit/6bc4139c06384c05260abcfb86633df66e7dde68))
+* **forage:** give the request-duration histogram buckets scaled for seconds ([#268](https://github.com/understory-io/forest/issues/268)) ([a221b12](https://github.com/understory-io/forest/commit/a221b1209185e315f4ec30b5fda053f76596241d))
+* **forage:** report the build time as RFC 3339 when CI stamps Unix seconds ([#304](https://github.com/understory-io/forest/issues/304)) ([9dde283](https://github.com/understory-io/forest/commit/9dde2832486c1284b256b6b3e1a4904dc5dd8c94))
+* **forage:** say why an organisation could not be created, not just that it failed ([#303](https://github.com/understory-io/forest/issues/303)) ([0862ff4](https://github.com/understory-io/forest/commit/0862ff4f01b589ac78111953bbad1bc7f1d40aa9))
+* **forage:** show the plan on the page that asks you to approve it ([#270](https://github.com/understory-io/forest/issues/270)) ([f47c433](https://github.com/understory-io/forest/commit/f47c43339ab9aa0de3f24a1d432f7816529efa4c))
+* **forage:** the swim lane says a placement failed and links to why ([#272](https://github.com/understory-io/forest/issues/272)) ([a01055d](https://github.com/understory-io/forest/commit/a01055d9c1a1a19f60a2a386b19774643e4b8461))
+* **forest-server:** pin OpenTofu, and document config-driven adoption ([#283](https://github.com/understory-io/forest/issues/283)) ([#289](https://github.com/understory-io/forest/issues/289)) ([e70a4f5](https://github.com/understory-io/forest/commit/e70a4f59bb77db54636216e7432274d4c98e9b6d))
+* **forest:** give each acceptance test its own database pool ([bdf677f](https://github.com/understory-io/forest/commit/bdf677fbb6f814198f3335b427eb849e4c85b2fe))
+* **forest:** look up a binary in a given search path, not by overwriting PATH ([f0b77cc](https://github.com/understory-io/forest/commit/f0b77ccdf20b6e8dfb06c99b3c88bb3319642653))
+* **forest:** make the test suite compile again ([1ae3ff0](https://github.com/understory-io/forest/commit/1ae3ff047b587b4e77e57a1216797e84056ee165))
+* **forest:** name the branch the flux git test pushes to ([2546797](https://github.com/understory-io/forest/commit/2546797a91ac60a41835bb40bb97f5c21d2d9eb8))
+* **forest:** publish names the context it publishes to, not the active one ([#309](https://github.com/understory-io/forest/issues/309)) ([de69341](https://github.com/understory-io/forest/commit/de69341fcb7df8314416c607b1c4ef477629db2f))
+* **forest:** pull minio from quay, the registry that still serves it ([2a73fd8](https://github.com/understory-io/forest/commit/2a73fd834742af3757c52f8e716009781660e1d6))
+* **forest:** regenerate the sqlx offline cache, and delete the stale copy at the workspace root ([126a50f](https://github.com/understory-io/forest/commit/126a50f6056b99f32f81bb0badd7bcd1e164a372))
+* **forest:** stop the cache reporting a miss for an entry that just landed ([e1a04b2](https://github.com/understory-io/forest/commit/e1a04b2a45cd05f2e3f72397b830043b2891be43))
+* install a rustls provider and add mire-migrate for the cutover (DATA-739) ([90ee45b](https://github.com/understory-io/forest/commit/90ee45b863fe12aa5acfb4535b0016ae3b8c3151))
+* **service-release:** install deno for components with deno hooks ([#308](https://github.com/understory-io/forest/issues/308)) ([ff285e6](https://github.com/understory-io/forest/commit/ff285e66b6e2f79c6949d88f23af2d43323d7eaf))
+* **terraform@1:** apply the plan that was approved, not a fresh one ([#284](https://github.com/understory-io/forest/issues/284)) ([#292](https://github.com/understory-io/forest/issues/292)) ([bd11eaa](https://github.com/understory-io/forest/commit/bd11eaad7440a6488320f5637ec899c5b02fd291))
+* **terraform@1:** one state per destination, without moving any existing state ([#285](https://github.com/understory-io/forest/issues/285)) ([#294](https://github.com/understory-io/forest/issues/294)) ([9516605](https://github.com/understory-io/forest/commit/95166053e915dfb8e14dad440adba296deeaaea2))
+* **terraform@1:** the state server checks the credential it issues ([#281](https://github.com/understory-io/forest/issues/281)) ([#293](https://github.com/understory-io/forest/issues/293)) ([7c28e21](https://github.com/understory-io/forest/commit/7c28e211d75c8b0474279a95e7008271562fd70b))
+
+
+### Performance Improvements
+
+* **ci:** stop paying 32 cores for work that is not happening ([#274](https://github.com/understory-io/forest/issues/274)) ([9cde291](https://github.com/understory-io/forest/commit/9cde29141f4416b4247f497abc743bd6d53c8770))
+* **forage:** start the timeline request while the bundle is still downloading ([#266](https://github.com/understory-io/forest/issues/266)) ([188d74c](https://github.com/understory-io/forest/commit/188d74cf5d14251a00c05ced9a8bda1ad8de027c))
+* **forest-server:** stop the acceptance suite paying production password cost ([#280](https://github.com/understory-io/forest/issues/280)) ([f6fc6a8](https://github.com/understory-io/forest/commit/f6fc6a85d8340c75f0e70dcd119043b1955c6e71))
+* **forest:** fetch every annotation's destinations in one query ([#269](https://github.com/understory-io/forest/issues/269)) ([f881bae](https://github.com/understory-io/forest/commit/f881baeb26bc49811adffb188aeadc249f3ddc40))
+
 ## [0.3.13](https://github.com/understory-io/forest/compare/v0.3.12...v0.3.13) (2026-09-07)
 
 

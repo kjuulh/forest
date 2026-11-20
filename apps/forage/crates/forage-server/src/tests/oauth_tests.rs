@@ -6,8 +6,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Google OAuth Start ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn google_oauth_start_redirects_to_google() {
     let (state, _sessions) = test_state_with_google_oauth();
@@ -66,7 +64,6 @@ async fn google_oauth_start_sets_state_cookie() {
 
 #[tokio::test]
 async fn google_oauth_start_returns_503_when_not_configured() {
-    // Default test_state has no google_oauth_config
     let app = test_app();
 
     let response = app
@@ -81,8 +78,6 @@ async fn google_oauth_start_returns_503_when_not_configured() {
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ─── Google OAuth Callback ──────────────────────────────────────────
 
 #[tokio::test]
 async fn google_callback_existing_user_redirects_to_dashboard() {
@@ -109,7 +104,6 @@ async fn google_callback_existing_user_redirects_to_dashboard() {
         .unwrap();
     assert_eq!(location, "/dashboard");
 
-    // Should set a session cookie
     let cookies: Vec<_> = response
         .headers()
         .get_all("set-cookie")
@@ -202,11 +196,6 @@ async fn google_callback_missing_state_cookie_returns_403() {
 
 #[tokio::test]
 async fn google_callback_with_error_redirects_to_login() {
-    // OAuth 2.0 RFC 6749 §4.1.2.1 requires the provider to return the
-    // original `state` alongside any error. We now validate state
-    // before reading other query params (adversarial review #3), so
-    // this test sends the state cookie + matching state param to
-    // exercise the realistic error path.
     let (state, _sessions) = test_state_with_google_oauth();
     let app = build_router(state);
 
@@ -233,9 +222,6 @@ async fn google_callback_with_error_redirects_to_login() {
 
 #[tokio::test]
 async fn google_callback_with_error_and_no_state_is_rejected() {
-    // Spec-violating providers (or attackers) sending an error without
-    // the state parameter should fail at CSRF validation. Closes the
-    // info-leak path adversarial review #3 documented.
     let (state, _sessions) = test_state_with_google_oauth();
     let app = build_router(state);
 
@@ -254,9 +240,6 @@ async fn google_callback_with_error_and_no_state_is_rejected() {
 
 #[tokio::test]
 async fn google_callback_with_empty_state_cookie_returns_403() {
-    // Defense in depth: an injected empty-value state cookie combined
-    // with a missing `?state=` query parameter (both empty strings)
-    // must not bypass CSRF. Closes adversarial review pass 2 MEDIUM-1.
     let (state, _sessions) = test_state_with_google_oauth();
     let app = build_router(state);
 
@@ -303,8 +286,6 @@ async fn google_callback_forest_unavailable_shows_error() {
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ─── Complete Profile ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn complete_profile_renders_for_new_user() {
@@ -408,8 +389,6 @@ async fn complete_profile_submit_invalid_username_shows_error() {
     assert!(html.contains("Choose your username"));
 }
 
-// ─── Template visibility ────────────────────────────────────────────
-
 #[tokio::test]
 async fn login_page_shows_google_button_when_configured() {
     let (state, _sessions) = test_state_with_google_oauth();
@@ -476,13 +455,6 @@ async fn signup_page_shows_google_button_when_configured() {
     assert!(html.contains("Continue with Google"));
 }
 
-// ─── GitHub callback parity tests ────────────────────────────────────
-//
-// The GitHub callback shares its structure with Google's. The
-// link-flow path is covered in account_link_tests.rs; these tests
-// cover the bare login error paths and CSRF edge cases that adversarial
-// review pass 2 NIT-3 flagged as Google-only.
-
 #[tokio::test]
 async fn github_callback_with_error_and_valid_state_redirects_to_login() {
     let (state, _sessions) = test_state_with_github_oauth();
@@ -541,20 +513,11 @@ async fn github_callback_with_empty_state_cookie_returns_403() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── return_to round-trip through the OAuth state store (DATA-251) ──
-
-/// Drive the full Google sign-in flow end-to-end:
-///   start with `?return_to=/device?user_code=…` → persists state row →
-///   callback consumes the row → final redirect points at the original
-///   intent, not `/dashboard`.
 #[tokio::test]
 async fn google_oauth_flow_round_trips_return_to() {
     let (state, _sessions) = test_state_with_google_oauth();
     let app = build_router(state);
 
-    // 1. Start the flow with a return_to. We can't observe the random
-    //    state token directly, so we pull it back from the Set-Cookie
-    //    header (the cookie value IS the state token).
     let start_response = app
         .clone()
         .oneshot(
@@ -578,9 +541,6 @@ async fn google_oauth_flow_round_trips_return_to() {
         .expect("forage_oauth_state cookie")
         .to_string();
 
-    // 2. Hit the callback with the same state — same browser would replay
-    //    the cookie. The state-store row is keyed by the state token, so
-    //    the return_to we stored at step 1 should now drive the redirect.
     let callback_response = app
         .oneshot(
             Request::builder()
@@ -611,9 +571,6 @@ async fn google_oauth_flow_round_trips_return_to() {
     );
 }
 
-/// New-OAuth-user case: the redirect must forward return_to through the
-/// /auth/complete-profile step so the device approval still happens
-/// after the user picks a username.
 #[tokio::test]
 async fn google_oauth_new_user_forwards_return_to_through_complete_profile() {
     let mock = MockForestClient::with_behavior(MockBehavior {
@@ -686,9 +643,6 @@ async fn google_oauth_new_user_forwards_return_to_through_complete_profile() {
     );
 }
 
-/// After a new OAuth user picks a username, the complete-profile submit
-/// must redirect to the carried-through `return_to`, not /dashboard.
-/// Closes the second half of the new-user device-login chain.
 #[tokio::test]
 async fn complete_profile_submit_honours_return_to() {
     let (state, sessions) = test_state_with_google_oauth();

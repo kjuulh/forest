@@ -14,7 +14,7 @@ Forage is the managed platform and registry for [Forest](https://src.rawpotion.i
 
 - **Language**: Rust
 - **Web Framework**: Axum
-- **Templating**: MiniJinja (server-side rendered)
+- **Templating**: sedge (typed templates compiled to Rust, server-side rendered; git.kjuulh.io/kjuulh/sedge)
 - **Styling**: Tailwind CSS (via standalone CLI)
 - **Database**: PostgreSQL (via SQLx, compile-time checked queries)
 - **Build System**: Forest + Mise for task running
@@ -32,9 +32,13 @@ Forage is the managed platform and registry for [Forest](https://src.rawpotion.i
 │   │   ├── src/
 │   │   │   ├── main.rs
 │   │   │   ├── routes/        # Axum route handlers
-│   │   │   ├── templates/     # MiniJinja templates
+│   │   │   ├── views/         # Page view models and the generated sedge module
 │   │   │   └── state.rs       # Application state
+│   │   ├── templates/pages/   # One .html.sedge per page
 │   │   └── Cargo.toml
+│   ├── forage-ui/             # Shared sedge components and layouts (Shell, ProjectSettings, OrgSettings)
+│   │   ├── templates/         # components/*.html.sedge, layouts/*.html.sedge
+│   │   └── src/               # Typed props (Tone, Chrome, NavItem…) and formatting
 │   ├── forage-core/           # Business logic, pure functions
 │   │   ├── src/
 │   │   │   ├── lib.rs
@@ -47,10 +51,6 @@ Forage is the managed platform and registry for [Forest](https://src.rawpotion.i
 │       │   ├── lib.rs
 │       │   └── migrations/
 │       └── Cargo.toml
-├── templates/                 # Shared MiniJinja templates
-│   ├── base.html.jinja
-│   ├── pages/
-│   └── components/
 ├── static/                    # Static assets (CSS, JS, images)
 ├── specs/                     # VSDD specification documents
 └── tests/                     # Integration tests
@@ -86,7 +86,7 @@ Follow the VSDD pipeline **religiously**. No shortcuts, no skipping phases.
 - Use `snake_case` for all Rust identifiers
 - Prefer `thiserror` for error types in libraries, `anyhow` in binaries
 - All database queries use SQLx compile-time checking
-- Templates use MiniJinja with `.html.jinja` extension
+- Pages are sedge templates (`crates/forage-server/templates/pages/*.html.sedge`) rendering a typed view model from `src/views/`; anything two pages repeat is a forage-ui component. No inline `<script>`/`<style>`/`on*=` (sedge rejects them): behaviour goes in `static/js/*.js` loaded via `state.templates.asset_href` in the Shell's `scripts` slot, confirms use `data-confirm`, copy buttons `data-copy`. Every page has route tests and an insta snapshot of `<main>`.
 - Routes are organized by feature in `routes/` modules
 - All public API endpoints return proper HTTP status codes
 - Configuration via environment variables with sensible defaults

@@ -1,0 +1,20 @@
+use crate::policies::PolicyKind;
+component PolicyKindChip(kind: PolicyKind, class: &str) {
+<span class="{kind.chip_classes()} px-1.5 py-0.5 rounded{if class.is_empty() { "" } else { " " }}{class}">{kind.label()}</span>
+}
+component EnvironmentSelect(name: &str, environments: &[String], selected: &str, id: &str, disabled: bool) {
+<select name={name} id={if id.is_empty() { None } else { Some(*id) }} disabled={*disabled} class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+  {if !selected.is_empty() && !environments.iter().any(|e| e.as_str() == *selected) {
+    <option value={*selected} selected>{selected} (no longer an environment)</option>
+  }}
+  {for env in environments.iter() {
+    <option value={env} selected={env.as_str() == *selected}>{env}</option>
+  }}
+</select>
+}
+component PolicyFields(kind: PolicyKind, active: bool, children: Html) {
+<div id={kind.fields_id()} class={if *active { None } else { Some("hidden") }}>{children}</div>
+}
+component PipelineBuilder(target: &str, readonly: bool) {
+<pipeline-builder data-target={target} data-readonly={if *readonly { Some("true") } else { None }}></pipeline-builder>
+}

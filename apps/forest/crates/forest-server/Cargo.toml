@@ -39,13 +39,12 @@ thiserror.workspace = true
 serde = { version = "1.0.197", features = ["derive"] }
 uuid = { version = "1.7.0", features = ["v4", "v7", "serde"] }
 inquire = "0.9.0"
-tokio-util = "0.7.15"
+tokio-util = { version = "0.7.15", features = ["rt"] }
+libc = "0.2"
 sqlx.workspace = true
 serde_json = "1.0.145"
 petname = "2.0.2"
 regex = "1.12.2"
-# DNS TXT lookups for org-domain ownership verification (DATA-252).
-# Pure Rust resolver — no native deps required.
 hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
 indexmap = "2"
 chrono = "0.4"
@@ -77,7 +76,6 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"
-# `ServiceExt::oneshot`, to drive the terraform state backend's router in-process.
 tower = { workspace = true, features = ["util"] }
 tokio-stream = "0.1"
 proptest = "1.11"

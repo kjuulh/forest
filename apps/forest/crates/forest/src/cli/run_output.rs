@@ -1,17 +1,3 @@
-//! Rendering for `forest run <command>` output.
-//!
-//! A component command returns a single JSON value (its "result"). For machines
-//! and for nested invocations that JSON *is* the contract and must be emitted
-//! verbatim; for a human at the terminal it is noise. This module bridges the
-//! two: it honours `--format` and, in the human-facing formats, reinterprets a
-//! recognised result shape (today: a build summary) into a tidy table, falling
-//! back to pretty JSON when the shape is unknown.
-//!
-//! Only the *outermost* forest invocation renders. When forest spawns a
-//! component it stamps the child with [`INVOCATION_ENV`]; if a component
-//! re-invokes `forest run`, that inner process sees the marker and forces raw
-//! JSON so its parent gets a parseable result. See [`super::super::services::component_binary`].
-
 use std::fmt::Write as _;
 
 use indicatif::HumanBytes;
@@ -20,9 +6,6 @@ use tabled::{Table, Tabled, settings::Style};
 use crate::cli::output::OutputFormat;
 use crate::services::component_binary::parent_invocation_id;
 
-/// Print a component command's `result` to stdout, honouring `--format`.
-///
-/// A `null` result (the component emitted nothing) prints nothing.
 pub fn print(format: OutputFormat, result: &serde_json::Value) -> anyhow::Result<()> {
     if result.is_null() {
         return Ok(());
@@ -32,9 +15,6 @@ pub fn print(format: OutputFormat, result: &serde_json::Value) -> anyhow::Result
     Ok(())
 }
 
-/// A nested invocation always emits JSON regardless of the requested format, so
-/// the parent process can parse the result. The outermost layer honours the
-/// requested format.
 fn effective_format(requested: OutputFormat, nested: bool) -> OutputFormat {
     if nested {
         OutputFormat::Json
@@ -44,23 +24,17 @@ fn effective_format(requested: OutputFormat, nested: bool) -> OutputFormat {
 }
 
 fn render_result(format: OutputFormat, result: &serde_json::Value) -> anyhow::Result<String> {
-    // JSON is the machine contract: emit the result verbatim, no reinterpretation.
     if matches!(format, OutputFormat::Json) {
         return Ok(format!("{}\n", serde_json::to_string_pretty(result)?));
     }
 
-    // Human-facing formats: reinterpret a recognised shape if we can.
     if let Some(summary) = BuildSummaryView::from_value(result) {
         return Ok(summary.render(format));
     }
 
-    // Unknown shape — keep the data, just don't pretend we understood it.
     Ok(format!("{}\n", serde_json::to_string_pretty(result)?))
 }
 
-/// A recognised build-summary result (emitted by `forest-contrib/build-*`).
-/// Mirrors `forest_build_core::BuildSummary` structurally so we stay decoupled
-/// from that crate and degrade gracefully if the shape ever drifts.
 struct BuildSummaryView {
     name: String,
     version: String,
@@ -85,10 +59,6 @@ struct ArtifactRow {
 }
 
 impl BuildSummaryView {
-    /// Recognise a build summary by its structure. Returns `None` (→ fall back
-    /// to JSON) unless every artifact carries the full `os/arch/path/size`
-    /// shape, so unrelated `{ "artifacts": [...] }` payloads aren't mistaken
-    /// for one.
     fn from_value(v: &serde_json::Value) -> Option<Self> {
         let obj = v.as_object()?;
         let raw = obj.get("artifacts")?.as_array()?;
@@ -104,8 +74,6 @@ impl BuildSummaryView {
             });
         }
 
-        // Require a `name` to claim the shape — guards against an empty/foreign
-        // `artifacts: []` slipping through as a "build summary".
         let name = obj.get("name")?.as_str()?.to_string();
         let version = obj
             .get("version")
@@ -125,7 +93,6 @@ impl BuildSummaryView {
             OutputFormat::Pretty => self.render_pretty(),
             OutputFormat::Text => self.render_text(),
             OutputFormat::Name => self.render_name(),
-            // JSON is handled before reinterpretation in `render_result`.
             OutputFormat::Json => unreachable!("json is emitted verbatim, not reinterpreted"),
         }
     }
@@ -161,7 +128,6 @@ impl BuildSummaryView {
         out
     }
 
-    /// Tab-separated, raw byte sizes — for piping. `os/arch \t bytes \t path`.
     fn render_text(&self) -> String {
         let mut out = String::new();
         for a in &self.artifacts {
@@ -170,7 +136,6 @@ impl BuildSummaryView {
         out
     }
 
-    /// Artifact paths, one per line — the most useful column for `xargs`.
     fn render_name(&self) -> String {
         let mut out = String::new();
         for a in &self.artifacts {
@@ -216,7 +181,6 @@ mod tests {
     #[test]
     fn json_format_emits_result_verbatim() {
         let out = render_result(OutputFormat::Json, &build_summary()).unwrap();
-        // round-trips to the same value — nothing reinterpreted or dropped
         let back: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(back, build_summary());
     }
@@ -228,7 +192,6 @@ mod tests {
         assert!(out.contains("(2 artifacts)"));
         assert!(out.contains("linux/amd64"));
         assert!(out.contains("macos/arm64"));
-        // friendly byte names, not raw integers
         assert!(out.contains("MiB"));
         assert!(!out.contains("12300000"));
     }
@@ -255,7 +218,6 @@ mod tests {
 
     #[test]
     fn foreign_artifacts_payload_is_not_mistaken_for_build_summary() {
-        // has `artifacts` but they lack the os/arch/path/size shape
         let v = json!({ "artifacts": [{ "url": "https://x" }] });
         assert!(BuildSummaryView::from_value(&v).is_none());
     }

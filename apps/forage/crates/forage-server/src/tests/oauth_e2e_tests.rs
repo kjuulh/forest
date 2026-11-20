@@ -1,12 +1,3 @@
-//! Real-socket end-to-end test for the public OAuth flow (M5 / item C).
-//!
-//! Unlike the `tower::oneshot` route tests, this binds the actual Forage router
-//! to a real TCP port and drives it with `reqwest` — exercising real HTTP
-//! transport, form-encoding, 3xx handling, and JSON deserialization, the way an
-//! off-the-shelf OAuth client would. The forest-server side is mocked (its gRPC
-//! wire is covered by forest's accept tests), so this isolates the HTTP/OAuth
-//! contract Forage exposes.
-
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
@@ -27,7 +18,6 @@ fn code_from_location(loc: &str) -> Option<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_http_client_completes_authorization_code_flow() {
-    // Arrange: a seeded app, a logged-in session, the real router on a port.
     let oauth = Arc::new(MockOAuthAppsClient::new());
     oauth.seed_app(
         CID,
@@ -49,8 +39,6 @@ async fn real_http_client_completes_authorization_code_flow() {
         .build()
         .unwrap();
 
-    // 1. Consent approval (the browser step). A real client redirects the user
-    //    here; we stand in for the authenticated browser via the session cookie.
     let binding = crate::routes::oauth::consent_binding("test-csrf", CID, REDIRECT, "profile email");
     let consent = http
         .post(format!("{base}/oauth/authorize"))
@@ -81,7 +69,6 @@ async fn real_http_client_completes_authorization_code_flow() {
     assert!(loc.contains("state=xyz-123"));
     let code = code_from_location(&loc).expect("authorization code in redirect");
 
-    // 2. Token exchange — real form POST, real JSON parse (what a client does).
     let token_resp = http
         .post(format!("{base}/oauth/token"))
         .form(&[
@@ -102,7 +89,6 @@ async fn real_http_client_completes_authorization_code_flow() {
     assert!(tokens["expires_in"].as_i64().unwrap() > 0);
     assert_eq!(tokens["scope"], "profile email");
 
-    // 3. Userinfo with the issued bearer token.
     let ui = http
         .get(format!("{base}/oauth/userinfo"))
         .bearer_auth(&access)
@@ -113,7 +99,6 @@ async fn real_http_client_completes_authorization_code_flow() {
     let claims: serde_json::Value = ui.json().await.unwrap();
     assert_eq!(claims["sub"], "user-1");
 
-    // 4. Userinfo without a token → 401 with a Bearer challenge.
     let unauth = http
         .get(format!("{base}/oauth/userinfo"))
         .send()

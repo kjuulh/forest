@@ -21,7 +21,6 @@ use crate::{
     user_state::{UserState, UserStateLoader, UserStateLoaderState, compute_refresh_after},
 };
 
-/// How often (in seconds) the interceptor validates the token against the server.
 const VALIDATION_INTERVAL_SECS: i64 = 60;
 
 fn validated_stamp_path() -> PathBuf {
@@ -45,7 +44,6 @@ pub struct AuthMiddlewareLayer {
     host: String,
     refresh_channel: Arc<OnceCell<Channel>>,
     refresh_lock: Arc<Mutex<()>>,
-    /// In-process cache so we only hit the temp file once per process lifetime.
     last_validated: Arc<AtomicI64>,
 }
 
@@ -95,7 +93,6 @@ where
     }
 
     fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
-        // See: https://docs.rs/tower/latest/tower/trait.Service.html#be-careful-when-cloning-inner-services
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
@@ -106,7 +103,6 @@ where
         let last_validated = self.last_validated.clone();
 
         Box::pin(async move {
-            // If FOREST_TOKEN is set (e.g. in CI), use it directly — no refresh or validation.
             if let Ok(pat) = std::env::var("FOREST_TOKEN") {
                 if !pat.is_empty() {
                     let mut req = req;
@@ -125,17 +121,14 @@ where
                 .map_err(|e| -> BoxError { format!("user is not logged in: {e}").into() })?
                 .ok_or_else(|| -> BoxError { "user is not logged in".into() })?;
 
-            // Check if token needs refreshing (at the midpoint of token lifetime)
             let needs_refresh = match user_state.refresh_after {
                 Some(refresh_after) => chrono::Utc::now().timestamp() >= refresh_after,
-                None => true, // No expiry stored (legacy state) — refresh to be safe
+                None => true,
             };
 
             if needs_refresh {
-                // Acquire in-process lock to prevent concurrent refresh attempts.
                 let _guard = refresh_lock.lock().await;
 
-                // Re-read state: another request may have already refreshed while we waited.
                 let (locked_state, file_lock) = loader
                     .read_locked()
                     .await
@@ -161,22 +154,16 @@ where
                         }
                         Err(e) => {
                             tracing::warn!("token refresh failed: {e:#}");
-                            // Continue with the existing token — it may still be valid
-                            // even though the refresh window has passed.
                             user_state = current;
                         }
                     }
                 } else {
-                    // Another request already refreshed.
                     user_state = current;
                 }
             } else {
-                // Token is within its expected lifetime — periodically validate it
-                // against the server to catch revocations or key rotations.
                 let now = chrono::Utc::now().timestamp();
                 let mut last = last_validated.load(Ordering::Relaxed);
                 if last == 0 {
-                    // First call in this process — seed from the temp file.
                     last = read_last_validated();
                     last_validated.store(last, Ordering::Relaxed);
                 }
@@ -239,8 +226,6 @@ where
     }
 }
 
-/// Validate the current access token by calling the server's TokenInfo RPC.
-/// Returns Ok(()) if the token is valid, Err if it's rejected.
 async fn validate_token(
     host: &str,
     channel: &Arc<OnceCell<Channel>>,
@@ -329,9 +314,6 @@ pub trait AuthMiddlewareLayerState {
 
 impl AuthMiddlewareLayerState for State {
     fn auth_interceptor(&self) -> AuthMiddlewareLayer {
-        // Resolve the server URL the same way the gRPC client does
-        // (TASKS/019-context.md §1.3): explicit FOREST_SERVER override
-        // wins, otherwise fall back to the active context.
         let host = if let Some(s) = self.config.forest_server.clone().filter(|s| !s.is_empty()) {
             s
         } else {

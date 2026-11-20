@@ -6,10 +6,9 @@ use axum::{Form, Router};
 use axum::extract::Multipart;
 use chrono::Utc;
 use forage_core::integrations::SlackUserLink;
-use minijinja::context;
 use serde::Deserialize;
 
-use super::{error_page, internal_error};
+use super::{error_page, internal_error, record_error, report_error};
 use crate::auth::{self, MaybeSession, Session};
 use crate::state::AppState;
 use axum_extra::extract::CookieJar;
@@ -43,6 +42,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/settings/account/notifications",
             post(update_notification_preference),
+        )
+        .route(
+            "/settings/account/notifications/reset",
+            post(reset_notification_preference),
         )
         .route(
             "/settings/account/slack/connect",
@@ -96,13 +99,11 @@ pub fn router() -> Router<AppState> {
         .route("/settings/account/mfa/disable", post(mfa_disable))
 }
 
-// ─── Signup ─────────────────────────────────────────────────────────
-
 async fn signup_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Query(params): Query<ReturnToParams>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
@@ -125,14 +126,13 @@ async fn signup_submit(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Form(form): Form<SignupForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt_owned = form.return_to.clone();
     let rt = auth::safe_return_to(rt_owned.as_deref());
     if maybe.session.is_some() {
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    // Validate
     if let Err(e) = validate_username(&form.username) {
         return render_signup(&state, &form.username, &form.email, "", Some(e.0), rt);
     }
@@ -153,25 +153,18 @@ async fn signup_submit(
         );
     }
 
-    // Register via forest-server
     match state
         .forest_client
         .register(&form.username, &form.email, &form.password)
         .await
     {
         Ok(RegisterResult::VerificationRequired) => {
-            // Forest withheld tokens. Drive the verification email and
-            // show the "check your inbox" page. No session created.
-            // Pass return_to so a device-login flow survives the
-            // email-verify detour and gets back to /device after the
-            // user signs in.
             if let Err(e) = enqueue_verification_email(&state, &form.email, rt).await {
-                tracing::error!(error = %e, "failed to enqueue verification email after signup");
+                let _ = record_error("enqueue verification email after signup", &e);
             }
             render_verify_email_check_inbox(&state, &form.email)
         }
         Ok(RegisterResult::Success(tokens)) => {
-            // Fetch user info for the session cache
             let user_cache = match state
                 .forest_client
                 .get_user(&tokens.access_token)
@@ -192,7 +185,7 @@ async fn signup_submit(
                             })
                             .collect(),
                         Err(e) => {
-                            tracing::warn!(error = %e, "failed to fetch orgs during signup");
+                            let _ = record_error("fetch organisations during signup", &e);
                             vec![]
                         }
                     };
@@ -205,7 +198,7 @@ async fn signup_submit(
                     })
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "failed to fetch user during signup");
+                    let _ = record_error("fetch user during signup", &e);
                     None
                 }
             };
@@ -228,12 +221,12 @@ async fn signup_submit(
                     let dest = rt.unwrap_or("/dashboard");
                     Ok((cookie, Redirect::to(dest)).into_response())
                 }
-                Err(_) => render_signup(
+                Err(e) => render_signup(
                     &state,
                     &form.username,
                     &form.email,
                     "",
-                    Some("Internal error. Please try again.".into()),
+                    Some(report_error("create signup session", &e)),
                     rt,
                 ),
             }
@@ -246,23 +239,12 @@ async fn signup_submit(
             Some("Username or email already registered".into()),
             rt,
         ),
-        Err(forage_core::auth::AuthError::Unavailable(msg)) => {
-            tracing::error!("forest-server unavailable: {msg}");
-            render_signup(
-                &state,
-                &form.username,
-                &form.email,
-                "",
-                Some("Service temporarily unavailable. Please try again.".into()),
-                rt,
-            )
-        }
         Err(e) => render_signup(
             &state,
             &form.username,
             &form.email,
             "",
-            Some(e.to_string()),
+            Some(report_error("register user", &e)),
             rt,
         ),
     }
@@ -275,33 +257,10 @@ fn render_signup(
     _password: &str,
     error: Option<String>,
     return_to: Option<&str>,
-) -> Result<Response, axum::http::StatusCode> {
-    let html = state
-        .templates
-        .render(
-            "pages/signup.html.jinja",
-            context! {
-                title => "Sign Up - Forest",
-                description => "Create your Forest account",
-                is_auth_page => true,
-                username => username,
-                email => email,
-                error => error,
-                has_google_oauth => state.google_oauth_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_magic_link => state.magic_link_store.is_some(),
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(Html(html).into_response())
+) -> Result<Response, Response> {
+    let page = crate::views::auth::SignupPage::new(state, username, email, error, return_to);
+    Ok(Html(crate::views::pages::signup::render(&page)).into_response())
 }
-
-// ─── Login ──────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct ReturnToParams {
@@ -312,7 +271,7 @@ async fn login_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Query(params): Query<ReturnToParams>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
@@ -335,7 +294,7 @@ async fn login_submit(
     State(state): State<AppState>,
     maybe: MaybeSession,
     Form(form): Form<LoginForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     let return_to = form.return_to.clone();
     let rt = auth::safe_return_to(return_to.as_deref());
 
@@ -378,7 +337,7 @@ async fn login_submit(
                             })
                             .collect(),
                         Err(e) => {
-                            tracing::warn!(error = %e, "failed to fetch orgs during login");
+                            let _ = record_error("fetch organisations during login", &e);
                             vec![]
                         }
                     };
@@ -391,7 +350,7 @@ async fn login_submit(
                     })
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "failed to fetch user during login");
+                    let _ = record_error("fetch user during login", &e);
                     None
                 }
             };
@@ -415,16 +374,15 @@ async fn login_submit(
                     let dest = rt.unwrap_or("/dashboard");
                     Ok((cookie, Redirect::to(dest)).into_response())
                 }
-                Err(_) => render_login(
+                Err(e) => render_login(
                     &state,
                     &form.identifier,
-                    Some("Internal error. Please try again.".into()),
+                    Some(report_error("create login session", &e)),
                     rt,
                 ),
             }
         }
         Ok(LoginResult::MfaRequired { mfa_session_token }) => {
-            // Store the MFA session token in a short-lived cookie and show the challenge page.
             use axum::http::header::SET_COOKIE;
             use axum::http::HeaderValue;
 
@@ -432,38 +390,19 @@ async fn login_submit(
                 "forage_mfa_session={}; HttpOnly; SameSite=Lax; Path=/login; Max-Age=300",
                 mfa_session_token
             );
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => None::<String>,
-                        return_to => rt,
-                    },
-                )
-                .map_err(|e| {
-                    tracing::error!("template error: {e:#}");
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-
-            let mut response = Html(html).into_response();
+            let page = crate::views::auth::MfaChallengePage::new(&state, None, rt);
+            let mut response =
+                Html(crate::views::pages::mfa_challenge::render(&page)).into_response();
             if let Ok(val) = HeaderValue::from_str(&cookie_value) {
                 response.headers_mut().insert(SET_COOKIE, val);
             }
             Ok(response)
         }
         Ok(LoginResult::EmailNotVerified) => {
-            // Forest is enforcing email verification. Re-trigger a
-            // verification email and show the resend page (idempotent
-            // behavior if the user has already received one — rate
-            // limit handles the rest).
             let email_for_resend = form.identifier.clone();
             if email_for_resend.contains('@') {
                 if let Err(e) = enqueue_verification_email(&state, &email_for_resend, rt).await {
-                    tracing::warn!(error = %e, "failed to enqueue verification email on login block");
+                    let _ = record_error("enqueue verification email on login block", &e);
                 }
             }
             render_verify_email_check_inbox(&state, &email_for_resend)
@@ -474,20 +413,14 @@ async fn login_submit(
             Some("Invalid email/username or password".into()),
             rt,
         ),
-        Err(forage_core::auth::AuthError::Unavailable(msg)) => {
-            tracing::error!("forest-server unavailable: {msg}");
-            render_login(
-                &state,
-                &form.identifier,
-                Some("Service temporarily unavailable. Please try again.".into()),
-                rt,
-            )
-        }
-        Err(e) => render_login(&state, &form.identifier, Some(e.to_string()), rt),
+        Err(e) => render_login(
+            &state,
+            &form.identifier,
+            Some(report_error("password login", &e)),
+            rt,
+        ),
     }
 }
-
-// ─── MFA challenge (login flow) ──────────────────────────────────────
 
 #[derive(Deserialize)]
 struct MfaForm {
@@ -500,7 +433,7 @@ async fn login_mfa_submit(
     State(state): State<AppState>,
     jar: CookieJar,
     Form(form): Form<MfaForm>,
-) -> Result<Response, axum::http::StatusCode> {
+) -> Result<Response, Response> {
     use axum::http::header::SET_COOKIE;
     use axum::http::HeaderValue;
 
@@ -511,7 +444,7 @@ async fn login_mfa_submit(
         .map(|c| c.value().to_string())
         .ok_or_else(|| {
             tracing::warn!("MFA submit without mfa_session cookie");
-            axum::http::StatusCode::BAD_REQUEST
+            StatusCode::BAD_REQUEST.into_response()
         })?;
 
     let tokens = match state
@@ -521,40 +454,20 @@ async fn login_mfa_submit(
     {
         Ok(t) => t,
         Err(forage_core::auth::AuthError::InvalidCredentials) => {
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => Some("Invalid or expired code. Please try again."),
-                        return_to => rt,
-                    },
-                )
-                .map_err(|e| {
-                    tracing::error!("template error: {e:#}");
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            return Ok(Html(html).into_response());
+            let page = crate::views::auth::MfaChallengePage::new(
+                &state,
+                Some("Invalid or expired code. Please try again.".into()),
+                rt,
+            );
+            return Ok(Html(crate::views::pages::mfa_challenge::render(&page)).into_response());
         }
         Err(e) => {
-            tracing::error!("MFA verify error: {e}");
-            let html = state
-                .templates
-                .render(
-                    "pages/mfa_challenge.html.jinja",
-                    context! {
-                        title => "Two-factor authentication - Forest",
-                        description => "Enter your authenticator code to continue",
-                        is_auth_page => true,
-                        error => Some(e.to_string()),
-                        return_to => rt,
-                    },
-                )
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
-            return Ok(Html(html).into_response());
+            let page = crate::views::auth::MfaChallengePage::new(
+                &state,
+                Some(report_error("verify login MFA", &e)),
+                rt,
+            );
+            return Ok(Html(crate::views::pages::mfa_challenge::render(&page)).into_response());
         }
     };
 
@@ -581,7 +494,7 @@ async fn login_mfa_submit(
             })
         }
         Err(e) => {
-            tracing::warn!(error = %e, "failed to fetch user after MFA");
+            let _ = record_error("fetch user after MFA", &e);
             None
         }
     };
@@ -602,7 +515,6 @@ async fn login_mfa_submit(
     match state.sessions.create(session_data).await {
         Ok(session_id) => {
             let session_cookie = auth::session_cookie(&session_id, true);
-            // Clear the MFA session cookie
             let clear_mfa = "forage_mfa_session=; HttpOnly; SameSite=Lax; Path=/login; Max-Age=0";
             let dest = rt.unwrap_or("/dashboard");
             let mut response = (session_cookie, Redirect::to(dest)).into_response();
@@ -611,7 +523,7 @@ async fn login_mfa_submit(
             }
             Ok(response)
         }
-        Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => Err(internal_error(&state, "create MFA login session", &e)),
     }
 }
 
@@ -620,32 +532,10 @@ fn render_login(
     identifier: &str,
     error: Option<String>,
     return_to: Option<&str>,
-) -> Result<Response, axum::http::StatusCode> {
-    let html = state
-        .templates
-        .render(
-            "pages/login.html.jinja",
-            context! {
-                title => "Sign In - Forest",
-                description => "Sign in to your Forest account",
-                is_auth_page => true,
-                identifier => identifier,
-                error => error,
-                has_google_oauth => state.google_oauth_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_magic_link => state.magic_link_store.is_some(),
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(Html(html).into_response())
+) -> Result<Response, Response> {
+    let page = crate::views::auth::LoginPage::new(state, identifier, error, return_to);
+    Ok(Html(crate::views::pages::login::render(&page)).into_response())
 }
-
-// ─── Logout ─────────────────────────────────────────────────────────
 
 async fn logout_submit(
     State(state): State<AppState>,
@@ -655,15 +545,12 @@ async fn logout_submit(
     if !auth::validate_csrf(&session, &form._csrf) {
         return Err(error_page(&state, StatusCode::FORBIDDEN, "Invalid request", "CSRF validation failed. Please try again."));
     }
-    // Best-effort logout on forest-server
     if let Ok(Some(data)) = state.sessions.get(&session.session_id).await {
         let _ = state.forest_client.logout(&data.refresh_token).await;
     }
     let _ = state.sessions.delete(&session.session_id).await;
     Ok((auth::clear_session_cookie(), Redirect::to("/")))
 }
-
-// ─── Tokens ─────────────────────────────────────────────────────────
 
 async fn tokens_page(
     State(state): State<AppState>,
@@ -675,33 +562,33 @@ async fn tokens_page(
         .await
         .unwrap_or_default();
 
-    let html = state
-        .templates
-        .render(
-            "pages/tokens.html.jinja",
-            context! {
-                title => "API Tokens - Forest",
-                description => "Manage your personal access tokens",
-                user => context! { username => session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                tokens => tokens.iter().map(|t| context! {
-                    token_id => t.token_id,
-                    name => t.name,
-                    created_at => t.created_at,
-                    last_used => t.last_used,
-                    expires_at => t.expires_at,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                created_token => None::<String>,
-                active_tab => "tokens",
-            },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+    Ok(render_tokens(&state, &session, tokens, None))
+}
 
-    Ok(Html(html).into_response())
+fn render_tokens(
+    state: &AppState,
+    session: &Session,
+    tokens: Vec<forage_core::auth::PersonalAccessToken>,
+    created_token: Option<String>,
+) -> Response {
+    let page = crate::views::account::TokensPage {
+        chrome: crate::views::account::chrome(
+            state,
+            session,
+            crate::views::account::first_org(session),
+            "API Tokens - Forest",
+            "Manage your personal access tokens",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        created_token,
+        tokens,
+    };
+    let html = Html(crate::views::pages::tokens::render(&page));
+    if page.created_token.is_some() {
+        ([(axum::http::header::CACHE_CONTROL, "no-store")], html).into_response()
+    } else {
+        html.into_response()
+    }
 }
 
 #[derive(Deserialize)]
@@ -738,33 +625,7 @@ async fn create_token_submit(
         .await
         .unwrap_or_default();
 
-    let html = state
-        .templates
-        .render(
-            "pages/tokens.html.jinja",
-            context! {
-                title => "API Tokens - Forest",
-                description => "Manage your personal access tokens",
-                user => context! { username => session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                tokens => tokens.iter().map(|t| context! {
-                    token_id => t.token_id,
-                    name => t.name,
-                    created_at => t.created_at,
-                    last_used => t.last_used,
-                    expires_at => t.expires_at,
-                }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                created_token => Some(created.raw_token),
-                active_tab => "tokens",
-            },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
-
-    Ok(Html(html).into_response())
+    Ok(render_tokens(&state, &session, tokens, Some(created.raw_token)))
 }
 
 async fn delete_token_submit(
@@ -787,8 +648,6 @@ async fn delete_token_submit(
 
     Ok(Redirect::to("/settings/tokens").into_response())
 }
-
-// ─── Account settings ────────────────────────────────────────────────
 
 #[derive(Deserialize, Default)]
 struct AccountPageQuery {
@@ -821,14 +680,13 @@ async fn account_page(
         .list_linked_identities(&session.access_token, &session.user.user_id)
         .await
         .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to fetch linked identities");
+            let _ = record_error("fetch linked identities", &e);
             vec![]
         });
 
     let linked_accounts =
         forage_core::auth::merge_linked_identities(forest_identities, &slack_links);
 
-    // Fetch fresh user info to get current mfa_enabled state.
     let mfa_enabled = state
         .forest_client
         .get_user(&session.access_token)
@@ -846,11 +704,99 @@ async fn account_page(
         mfa_enabled,
         flash_message(query.flash.as_deref()),
         error_message(query.error.as_deref()),
+        slack_dm_context(&state, &session, &prefs, &slack_links).await,
     )
 }
 
-/// Translate a `?flash=...` query parameter into a user-facing message.
-/// Returning `None` keeps the banner hidden.
+/// The member's individual Slack notification settings: what they inherit
+/// from their organisations, what they chose themselves, and how each
+/// connected workspace would reach them.
+async fn slack_dm_context(
+    state: &AppState,
+    session: &Session,
+    prefs: &[forage_core::platform::NotificationPreference],
+    slack_links: &[SlackUserLink],
+) -> Option<crate::views::account::SlackDm> {
+    use crate::views::account::{DmRoute, DmRow, SlackDm};
+    use forage_core::integrations::baseline::{
+        notification_type_to_forest, explicit_slack_preferences, MappingStatus, PersonalPreference,
+        DM_NOTIFICATION_TYPES,
+    };
+    use forage_core::integrations::direct::{resolve_directory_match, slack_teams, RecipientProfile};
+
+    let explicit = explicit_slack_preferences(prefs);
+    let mut teams = Vec::new();
+    if let Some(store) = state.integration_store.as_ref() {
+        for org in &session.user.orgs {
+            for team in slack_teams(store.as_ref(), &org.name).await {
+                teams.push((org.name.clone(), team));
+            }
+        }
+    }
+
+    let profile = RecipientProfile {
+        user_id: session.user.user_id.clone(),
+        username: session.user.username.clone(),
+        emails: session.user.emails.clone(),
+        github_user_ids: vec![],
+    };
+    let now = chrono::Utc::now();
+    let mut routes = Vec::new();
+    for (org, team) in &teams {
+        let team_name = match &team.integration.config {
+            forage_core::integrations::IntegrationConfig::Slack { team_name, .. } => team_name.clone(),
+            _ => String::new(),
+        };
+        let (route_state, label) = if slack_links.iter().any(|l| l.team_id == team.team_id) {
+            ("reachable", "Your personal Slack link".to_string())
+        } else if !team.baseline.directory_mapping {
+            ("off", "Not reached until you link Slack yourself".to_string())
+        } else {
+            match (state.slack_directory.as_ref(), state.integration_store.as_ref()) {
+                (Some(slack), Some(store)) => {
+                    match resolve_directory_match(store.as_ref(), slack.as_ref(), team, &profile, now, false).await {
+                        Ok(MappingStatus::Matched { .. }) => {
+                            ("reachable", "The Slack account matching your verified email (organisation baseline)".to_string())
+                        }
+                        Ok(other) => ("gap", format!("Not reached: {}. Link Slack yourself below.", other.describe())),
+                        Err(_) => ("unknown", "Couldn't check with Slack right now".to_string()),
+                    }
+                }
+                _ => ("unknown", "Couldn't check with Slack right now".to_string()),
+            }
+        };
+        routes.push(DmRoute {
+            org: org.clone(),
+            team_name,
+            reachable: route_state == "reachable",
+            label,
+        });
+    }
+
+    let rows: Vec<_> = DM_NOTIFICATION_TYPES
+        .iter()
+        .map(|nt| {
+            let personal = PersonalPreference::from_explicit(explicit.get(*nt).copied());
+            let defaults: std::collections::BTreeSet<bool> =
+                teams.iter().map(|(_, t)| t.baseline.org_default(nt)).collect();
+            let org_default = match (defaults.len(), defaults.iter().next()) {
+                (0, _) => "none",
+                (1, Some(true)) => "on",
+                (1, Some(false)) => "off",
+                _ => "varies",
+            };
+            DmRow {
+                key: notification_type_to_forest(nt).unwrap_or_default().to_string(),
+                label: super::integrations::notification_type_label(nt).to_string(),
+                mode: personal,
+                org_default,
+            }
+        })
+        .collect();
+
+    (!teams.is_empty()).then_some(SlackDm { rows, routes })
+}
+
 fn flash_message(flash: Option<&str>) -> Option<&'static str> {
     match flash? {
         "linked_github" => Some("GitHub account linked."),
@@ -860,7 +806,6 @@ fn flash_message(flash: Option<&str>) -> Option<&'static str> {
     }
 }
 
-/// Translate a `?error=...` query parameter into a user-facing message.
 fn error_message(error: Option<&str>) -> Option<&'static str> {
     match error? {
         "access_denied_github" => Some("GitHub authorisation was cancelled."),
@@ -900,70 +845,54 @@ fn render_account(
     session: &Session,
     error: Option<&str>,
     notification_prefs: &[forage_core::platform::NotificationPreference],
-    slack_links: &[SlackUserLink],
+    _slack_links: &[SlackUserLink],
     linked_accounts: &[forage_core::auth::LinkedIdentity],
     mfa_enabled: bool,
     flash: Option<&str>,
     oauth_error: Option<&str>,
+    slack_dm: Option<crate::views::account::SlackDm>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/account.html.jinja",
-            context! {
-                title => "Account Settings - Forest",
-                description => "Manage your account settings",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                    profile_picture_url => &session.user.profile_picture_url,
-                    mfa_enabled => mfa_enabled,
-                    emails => session.user.emails.iter().map(|e| context! {
-                        email => &e.email,
-                        verified => e.verified,
-                    }).collect::<Vec<_>>(),
-                },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                error => error,
-                active_tab => "account",
-                enabled_prefs => notification_prefs.iter()
-                    .filter(|p| p.enabled)
-                    .map(|p| format!("{}|{}", p.notification_type, p.channel))
-                    .collect::<Vec<_>>(),
-                has_slack_oauth => state.slack_config.is_some(),
-                has_github_oauth => state.github_oauth_config.is_some(),
-                has_google_oauth => state.google_oauth_config.is_some(),
-                slack_links => slack_links.iter().map(|l| context! {
-                    id => &l.id,
-                    team_id => &l.team_id,
-                    team_name => &l.team_name,
-                    slack_user_id => &l.slack_user_id,
-                    slack_username => &l.slack_username,
-                }).collect::<Vec<_>>(),
-                linked_accounts => linked_accounts.iter().map(|l| context! {
-                    provider => l.provider.as_str(),
-                    provider_display => l.provider.display_name(),
-                    external_id => &l.external_id,
-                    display_name => &l.display_name,
-                    email => &l.email,
-                    avatar_url => &l.avatar_url,
-                    subtitle => &l.subtitle,
-                    linked_at => &l.linked_at,
-                    disconnect_key => &l.disconnect_key,
-                }).collect::<Vec<_>>(),
-                has_github_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::GitHub),
-                has_google_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::Google),
-                flash => flash,
-                oauth_error => oauth_error,
-            },
-        )
-        .map_err(|e| {
-            internal_error(state, "template error", &e)
-        })?;
+    use crate::views::account::{
+        back_link, chrome, first_org, AccountPage, CliPreference, LinkedAccount, LinkedAccounts,
+    };
+    use forage_core::auth::LinkedProvider;
 
-    Ok(Html(html).into_response())
+    let has_github_oauth = state.github_oauth_config.is_some();
+    let has_google_oauth = state.google_oauth_config.is_some();
+    let has_slack_oauth = state.slack_config.is_some();
+    let linked = (has_github_oauth || has_google_oauth || has_slack_oauth || !linked_accounts.is_empty())
+        .then(|| LinkedAccounts {
+            accounts: linked_accounts.iter().map(LinkedAccount::from_identity).collect(),
+            link_github: has_github_oauth
+                && !linked_accounts.iter().any(|l| l.provider == LinkedProvider::GitHub),
+            link_google: has_google_oauth
+                && !linked_accounts.iter().any(|l| l.provider == LinkedProvider::Google),
+            add_slack: has_slack_oauth,
+        });
+    let (back_href, back_label) = back_link(first_org(session));
+    let page = AccountPage {
+        chrome: chrome(
+            state,
+            session,
+            first_org(session),
+            "Account Settings - Forest",
+            "Manage your account settings",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        username: session.user.username.clone(),
+        profile_picture_url: session.user.profile_picture_url.clone(),
+        emails: session.user.emails.clone(),
+        mfa_enabled,
+        back_href,
+        back_label,
+        error: error.map(Into::into),
+        flash: flash.map(Into::into),
+        oauth_error: oauth_error.map(Into::into),
+        linked,
+        slack_dm,
+        cli_prefs: CliPreference::all(notification_prefs),
+    };
+    Ok(Html(crate::views::pages::account::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -987,7 +916,7 @@ async fn update_username_submit(
     }
 
     if let Err(e) = validate_username(&form.username) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -996,7 +925,6 @@ async fn update_username_submit(
         .await
     {
         Ok(updated_user) => {
-            // Update cached username in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.username = updated_user.username;
@@ -1009,11 +937,22 @@ async fn update_username_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to update username: {e}");
-            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], &[], false, None, None)
+            let message = report_error("update username", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1041,11 +980,11 @@ async fn change_password_submit(
     }
 
     if form.new_password != form.new_password_confirm {
-        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], &[], false, None, None, None);
     }
 
     if let Err(e) = validate_password(&form.new_password) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -1060,11 +999,22 @@ async fn change_password_submit(
     {
         Ok(()) => Ok(Redirect::to("/settings/account").into_response()),
         Err(forage_core::auth::AuthError::InvalidCredentials) => {
-            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to change password: {e}");
-            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], &[], false, None, None)
+            let message = report_error("change password", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1090,7 +1040,7 @@ async fn add_email_submit(
     }
 
     if let Err(e) = validate_email(&form.email) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None, None);
     }
 
     match state
@@ -1099,7 +1049,6 @@ async fn add_email_submit(
         .await
     {
         Ok(result) => {
-            // Update cached emails in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.emails.push(UserEmail {
@@ -1112,23 +1061,32 @@ async fn add_email_submit(
                     .update(&session.session_id, session_data)
                     .await;
             }
-            // Drive the verification flow for the newly added email if
-            // forest signaled it.
             if result.email_verification_required {
                 if let Err(e) =
                     enqueue_verification_email(&state, &result.email.email, None).await
                 {
-                    tracing::warn!(error = %e, "failed to enqueue verification email on add_email");
+                    let _ = record_error("enqueue verification email on add email", &e);
                 }
             }
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None)
+            render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None, None)
         }
         Err(e) => {
-            tracing::error!("failed to add email: {e}");
-            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], &[], false, None, None)
+            let message = report_error("add email", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
@@ -1159,7 +1117,6 @@ async fn remove_email_submit(
         .await
     {
         Ok(()) => {
-            // Update cached emails in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.emails.retain(|e| e.email != form.email);
@@ -1172,13 +1129,22 @@ async fn remove_email_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(e) => {
-            tracing::error!("failed to remove email: {e}");
-            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None)
+            let message = report_error("remove email", &e);
+            render_account(
+                &state,
+                &session,
+                Some(&message),
+                &[],
+                &[],
+                &[],
+                false,
+                None,
+                None,
+                None,
+            )
         }
     }
 }
-
-// ─── Resend verification email (account settings) ───────────────────
 
 #[derive(Deserialize)]
 struct ResendVerificationForm {
@@ -1186,14 +1152,6 @@ struct ResendVerificationForm {
     email: String,
 }
 
-/// Resend a verification email for an unverified address on the
-/// session user's account. Triggered by the "Try sending again" button
-/// next to each unverified email in /settings/account.
-///
-/// Ownership check is critical: we only resend for emails that already
-/// belong to the caller — otherwise this becomes a free "trigger an
-/// email to anyone" endpoint and forest's email-verification token
-/// (issued by forage) leaks signal about who has an account.
 async fn resend_verification_submit(
     State(state): State<AppState>,
     session: Session,
@@ -1208,11 +1166,6 @@ async fn resend_verification_submit(
         ));
     }
 
-    // The submitted email must belong to the caller AND must currently
-    // be unverified — verified emails don't need a resend, and a
-    // resend request for one that's not on the account is a likely
-    // probe / tampered form. The error message is generic to avoid
-    // leaking which case triggered (not-yours vs already-verified).
     let owned_unverified = session
         .user
         .emails
@@ -1226,11 +1179,7 @@ async fn resend_verification_submit(
     }
 
     if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
-        tracing::warn!(
-            error = %e,
-            user_id = %session.user.user_id,
-            "resend verification email failed to enqueue"
-        );
+        let _ = record_error("resend verification email", &e);
         return Ok(Redirect::to(
             "/settings/account?error=verification_resend_failed",
         )
@@ -1243,8 +1192,6 @@ async fn resend_verification_submit(
     );
     Ok(Redirect::to("/settings/account?flash=verification_resent").into_response())
 }
-
-// ─── MFA setup / disable (account settings) ──────────────────────────
 
 async fn mfa_setup_start(
     State(state): State<AppState>,
@@ -1268,27 +1215,24 @@ async fn mfa_setup_start(
 
     let qr_svg = generate_qr_svg(&setup.provisioning_uri);
 
-    let html = state
-        .templates
-        .render(
-            "pages/mfa_setup.html.jinja",
-            context! {
-                title => "Set up two-factor authentication - Forest",
-                description => "Scan the QR code with your authenticator app",
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => o.name, role => o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                mfa_id => &setup.mfa_id,
-                provisioning_uri => &setup.provisioning_uri,
-                secret => &setup.secret,
-                qr_svg => qr_svg,
-                active_tab => "account",
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::account::MfaSetupPage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            crate::views::account::first_org(&session),
+            "Set up two-factor authentication - Forest",
+            "Scan the QR code with your authenticator app",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        mfa_id: setup.mfa_id,
+        secret: setup.secret,
+        qr_svg: (!qr_svg.is_empty()).then(|| sedge_rt::Trusted(qr_svg)),
+    };
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Html(crate::views::pages::mfa_setup::render(&page)),
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -1317,12 +1261,11 @@ async fn mfa_verify_setup(
         .verify_mfa_setup(&session.access_token, &form.mfa_id, &form.code)
         .await
         .map_err(|e| {
-            // Re-render the setup page with an error rather than a bare 500
             let msg = match &e {
                 forage_core::auth::AuthError::InvalidCredentials => {
                     "Invalid code. Please check your authenticator app and try again.".to_string()
                 }
-                other => other.to_string(),
+                other => report_error("verify MFA setup", other),
             };
             error_page(&state, StatusCode::BAD_REQUEST, "Verification failed", &msg)
         })?;
@@ -1359,7 +1302,7 @@ async fn mfa_disable(
                 forage_core::auth::AuthError::InvalidCredentials => {
                     "Invalid code. Please enter your current authenticator code.".to_string()
                 }
-                other => other.to_string(),
+                other => report_error("disable MFA", other),
             };
             error_page(&state, StatusCode::BAD_REQUEST, "Could not disable MFA", &msg)
         })?;
@@ -1367,7 +1310,6 @@ async fn mfa_disable(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Generate a simple SVG QR code from a provisioning URI using the qrcode crate.
 fn generate_qr_svg(data: &str) -> String {
     use qrcode::{QrCode, EcLevel};
     use qrcode::render::svg;
@@ -1382,14 +1324,40 @@ fn generate_qr_svg(data: &str) -> String {
     }
 }
 
-// ─── Notification preferences ────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct UpdateNotificationPreferenceForm {
     _csrf: String,
     notification_type: String,
     channel: String,
     enabled: String,
+}
+
+#[derive(Deserialize)]
+struct ResetNotificationPreferenceForm {
+    _csrf: String,
+    notification_type: String,
+    channel: String,
+}
+
+async fn reset_notification_preference(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<ResetNotificationPreferenceForm>,
+) -> Result<Response, Response> {
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Forbidden",
+            "Invalid CSRF token.",
+        ));
+    }
+    state
+        .platform_client
+        .reset_notification_preference(&session.access_token, &form.notification_type, &form.channel)
+        .await
+        .map_err(|e| internal_error(&state, "reset notification preference", &e))?;
+    Ok(Redirect::to("/settings/account#notifications").into_response())
 }
 
 async fn update_notification_preference(
@@ -1422,8 +1390,6 @@ async fn update_notification_preference(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-// ─── Slack user enrollment ────────────────────────────────────────────
-
 async fn slack_connect(
     State(state): State<AppState>,
     session: Session,
@@ -1441,15 +1407,39 @@ async fn slack_connect(
         "{}/settings/account/slack/callback",
         slack_config.redirect_host
     );
+    let states = state.oauth_state_store.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Slack not configured",
+            "Slack linking needs the OAuth state store.",
+        )
+    })?;
+    let nonce = super::org_connections::new_nonce();
+    states
+        .create(
+            SLACK_LINK_STATE,
+            &nonce,
+            Some(&session.user.user_id),
+            chrono::Utc::now() + chrono::Duration::minutes(10),
+        )
+        .await
+        .map_err(|e| internal_error(&state, "slack link state", &e))?;
     let url = format!(
-        "https://slack.com/oauth/v2/authorize?client_id={}&user_scope=identity.basic&redirect_uri={}&state={}",
+        "{}?client_id={}&user_scope=identity.basic&redirect_uri={}&state={}",
+        state.slack_authorize_url,
         urlencoding::encode(&slack_config.client_id),
         urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&session.user.user_id),
+        urlencoding::encode(&nonce),
     );
 
     Ok(Redirect::to(&url))
 }
+
+/// A personal Slack link overrides the org directory route, so a link planted
+/// through a forged callback would redirect someone's DMs: bind it to a
+/// single-use nonce rather than the (guessable) user id.
+const SLACK_LINK_STATE: &str = "slack_link";
 
 #[derive(Deserialize)]
 struct SlackUserCallbackQuery {
@@ -1463,9 +1453,8 @@ async fn slack_user_callback(
     session: Session,
     Query(query): Query<SlackUserCallbackQuery>,
 ) -> Result<Response, Response> {
-    // Handle user-denied case
-    if let Some(err) = query.error {
-        tracing::warn!("Slack user OAuth denied: {err}");
+    if query.error.is_some() {
+        tracing::warn!("Slack user OAuth denied");
         return Ok(Redirect::to("/settings/account").into_response());
     }
 
@@ -1478,9 +1467,16 @@ async fn slack_user_callback(
         )
     })?;
 
-    // Verify state matches our user_id to prevent CSRF
     let state_param = query.state.unwrap_or_default();
-    if state_param != session.user.user_id {
+    let started_by = match state.oauth_state_store.as_ref() {
+        Some(states) => states
+            .consume(SLACK_LINK_STATE, &state_param)
+            .await
+            .map_err(|e| internal_error(&state, "slack link state", &e))?
+            .and_then(|f| f.return_to),
+        None => None,
+    };
+    if started_by.as_deref() != Some(session.user.user_id.as_str()) {
         return Err(error_page(
             &state,
             StatusCode::FORBIDDEN,
@@ -1512,10 +1508,9 @@ async fn slack_user_callback(
         slack_config.redirect_host
     );
 
-    // Exchange the authorization code for a user access token
     let http = reqwest::Client::new();
     let token_resp = http
-        .post("https://slack.com/api/oauth.v2.access")
+        .post(state.slack_api.url("oauth.v2.access"))
         .form(&[
             ("client_id", slack_config.client_id.as_str()),
             ("client_secret", slack_config.client_secret.as_str()),
@@ -1524,37 +1519,26 @@ async fn slack_user_callback(
         ])
         .send()
         .await
-        .map_err(|e| {
-            internal_error(
-                &state,
-                "slack user oauth",
-                &format!("Failed to contact Slack: {e}"),
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "contact Slack for user OAuth", &e))?;
 
-    let resp_body: serde_json::Value = token_resp.json().await.map_err(|e| {
-        internal_error(
-            &state,
-            "slack user oauth",
-            &format!("Failed to parse Slack response: {e}"),
-        )
-    })?;
+    let resp_body: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|e| internal_error(&state, "parse Slack user OAuth response", &e))?;
 
     if resp_body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         let err_msg = resp_body
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown error");
-        tracing::error!("Slack user OAuth error: {err_msg}");
         return Err(error_page(
             &state,
             StatusCode::BAD_GATEWAY,
             "Slack error",
-            &format!("Slack returned an error: {err_msg}"),
+            &report_error("Slack user OAuth response", &err_msg),
         ));
     }
 
-    // For user-scoped OAuth, the user token is nested under authed_user
     let authed_user = resp_body.get("authed_user").ok_or_else(|| {
         internal_error(
             &state,
@@ -1568,13 +1552,12 @@ async fn slack_user_callback(
     let team_id = resp_body["team"]["id"].as_str().unwrap_or("").to_string();
     let team_name = resp_body["team"]["name"].as_str().unwrap_or("").to_string();
 
-    // Fetch display name via users.identity (requires identity.basic user scope)
     let slack_username = if user_access_token.is_empty() {
         slack_user_id.clone()
     } else {
         let identity_name: Option<String> = async {
             let r = http
-                .get("https://slack.com/api/users.identity")
+                .get(state.slack_api.url("users.identity"))
                 .bearer_auth(&user_access_token)
                 .send()
                 .await
@@ -1644,21 +1627,12 @@ async fn slack_disconnect(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-// ─── Google OAuth ───────────────────────────────────────────────────
-
 use axum::http::HeaderMap;
 
-/// Generate a random state value for OAuth CSRF protection (same entropy as CSRF tokens).
 fn generate_oauth_state() -> String {
     generate_csrf_token()
 }
 
-/// Pick the post-auth destination for a freshly-minted session.
-///
-/// New (OAuth/magic-link) users must pick a username via
-/// `/auth/complete-profile`; we forward `return_to` through that step so
-/// the original intent survives. Returning users go straight to
-/// `return_to` (validated) or `/dashboard` as fallback.
 fn post_auth_dest(is_new_user: bool, return_to: Option<&str>) -> String {
     if is_new_user {
         match return_to {
@@ -1673,13 +1647,8 @@ fn post_auth_dest(is_new_user: bool, return_to: Option<&str>) -> String {
     }
 }
 
-/// Lifetime for OAuth/MFA flow state rows. Matches the cookie Max-Age
-/// used by the state-anchor cookies (10 min).
 const OAUTH_FLOW_TTL_SECS: i64 = 600;
 
-/// Write a row to the OAuth state store, if one is configured. No-op
-/// without a store (the cookie-based CSRF anchor still works; we just
-/// lose the per-flow `return_to`).
 async fn persist_oauth_flow(
     state: &AppState,
     provider: &str,
@@ -1693,20 +1662,9 @@ async fn persist_oauth_flow(
     store
         .create(provider, oauth_state, return_to, expires_at)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, provider, "failed to persist OAuth flow state");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Login unavailable",
-                "Could not start the sign-in flow. Please try again.",
-            )
-        })
+        .map_err(|e| internal_error(state, "persist OAuth flow state", &e))
 }
 
-/// Read-and-delete the OAuth flow row. Returns the previously-stored
-/// `return_to` (validated via [`auth::safe_return_to`]) or `None` if no
-/// store is wired, the row is missing/expired, or the value isn't safe.
 async fn consume_oauth_flow_return_to(
     state: &AppState,
     provider: &str,
@@ -1719,13 +1677,12 @@ async fn consume_oauth_flow_return_to(
             .filter(|r| auth::safe_return_to(Some(r)).is_some()),
         Ok(None) => None,
         Err(e) => {
-            tracing::warn!(error = %e, provider, "OAuth flow state consume failed");
+            let _ = record_error("consume OAuth flow state", &e);
             None
         }
     }
 }
 
-/// GET /auth/google — redirect to Google's consent screen.
 async fn google_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -1733,10 +1690,6 @@ async fn google_oauth_start(
 ) -> Result<Response, Response> {
     let rt = auth::safe_return_to(rt_params.return_to.as_deref());
     if maybe.session.is_some() {
-        // Logged-in user hit the bare login route. Clear any stale link
-        // cookie *before* bouncing — otherwise an abandoned link flow's
-        // cookie lingers until expiry and could mis-dispatch a later
-        // login callback.
         let dest = rt.unwrap_or("/dashboard");
         return Ok(redirect_clearing_link_cookie(dest, "google"));
     }
@@ -1753,9 +1706,6 @@ async fn google_oauth_start(
     let oauth_state = generate_oauth_state();
     let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
 
-    // Persist per-flow return_to keyed by the OAuth state. The cookie
-    // below anchors the flow to this browser; the store is what keeps
-    // return_to safe from cross-tab cookie overwrite.
     persist_oauth_flow(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GOOGLE,
@@ -1772,14 +1722,10 @@ async fn google_oauth_start(
         urlencoding::encode(&oauth_state),
     );
 
-    // Store state in a short-lived cookie for validation on callback.
     let state_cookie = format!(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=600",
         oauth_state
     );
-    // Clear any stale link-purpose cookie left from an abandoned link
-    // flow on this browser — otherwise the callback would dispatch into
-    // the link branch unexpectedly.
     let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=0";
 
     let mut headers = HeaderMap::new();
@@ -1799,12 +1745,6 @@ async fn google_oauth_start(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// OAuth 2.0 authorization-code callback query parameters. Used by
-/// both Google and GitHub callbacks — both providers conform to the
-/// same RFC 6749 §4.1.2 shape (`code` on success, `error` on denial,
-/// always `state`). Renamed from `GoogleCallbackQuery` so the GitHub
-/// callback doesn't pick up Google-specific fields if this struct ever
-/// gains one.
 #[derive(Deserialize)]
 struct OAuthCallbackQuery {
     code: Option<String>,
@@ -1812,29 +1752,16 @@ struct OAuthCallbackQuery {
     error: Option<String>,
 }
 
-/// GET /auth/google/callback — handle the OAuth callback from Google.
-///
-/// See `github_oauth_callback` doc for the link-vs-login dispatch logic.
 async fn google_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    // ── 1. CSRF anchor: validate the OAuth state cookie FIRST. ────────
-    // Doing this before reading the link cookie prevents an attacker
-    // from leaking link-vs-login dispatch context through error-path
-    // disclosure (e.g. a forged `?error=access_denied` with a planted
-    // link cookie used to bounce to `/settings/account` rather than
-    // `/login`). State mismatch produces a generic 403 — no clue about
-    // which branch we'd have taken.
     let expected_state = jar
         .get("forage_oauth_state")
         .map(|c| c.value().to_string());
     let received_state = query.state.as_deref().unwrap_or("");
-    // Require a non-empty expected state so an injected empty-value
-    // `forage_oauth_state=` cookie combined with a missing `?state=`
-    // parameter (both `""`) can't pass the equality check.
     match expected_state {
         Some(ref expected) if !expected.is_empty() && expected == received_state => {}
         _ => {
@@ -1847,9 +1774,6 @@ async fn google_oauth_callback(
         }
     }
 
-    // Read-and-delete the per-flow return_to keyed by the OAuth state.
-    // Single-use — must happen at most once per callback irrespective of
-    // which branch we take below.
     let return_to = consume_oauth_flow_return_to(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GOOGLE,
@@ -1857,7 +1781,6 @@ async fn google_oauth_callback(
     )
     .await;
 
-    // ── 2. Dispatch link-vs-login. ────────────────────────────────────
     let link_cookie_user_id = jar
         .get(LINK_PURPOSE_COOKIE)
         .map(|c| c.value().to_string());
@@ -1882,7 +1805,6 @@ async fn google_oauth_callback(
         return Ok(Redirect::to(dest).into_response());
     }
 
-    // Handle denial from Google.
     if query.error.is_some() {
         return Ok(Redirect::to(if is_link_flow {
             "/settings/account?error=access_denied_google"
@@ -1913,7 +1835,6 @@ async fn google_oauth_callback(
 
     let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
 
-    // Step 1: Exchange the authorization code with Google via OIDC.
     let oidc = state.google_oidc_exchange.as_ref().ok_or_else(|| {
         error_page(
             &state,
@@ -1923,20 +1844,11 @@ async fn google_oauth_callback(
         )
     })?;
 
-    let identity = oidc
-        .exchange_code(code, &redirect_uri)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Google OIDC exchange failed");
-            error_page(
-                &state,
-                StatusCode::BAD_GATEWAY,
-                "Login failed",
-                "Failed to verify your Google account. Please try again.",
-            )
-        })?;
+    let identity = oidc.exchange_code(code, &redirect_uri).await.map_err(|e| {
+        let message = report_error("Google OIDC exchange", &e);
+        error_page(&state, StatusCode::BAD_GATEWAY, "Login failed", &message)
+    })?;
 
-    // If we're linking (not logging in), branch into the link flow.
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
         return Ok(complete_link_flow(
@@ -1949,7 +1861,6 @@ async fn google_oauth_callback(
         .await);
     }
 
-    // Step 2: Tell Forest to find-or-create this user by their verified identity.
     let result = state
         .forest_client
         .oauth_login("google", &identity.sub, &identity.email, &identity.name, identity.picture_url.as_deref())
@@ -1959,20 +1870,11 @@ async fn google_oauth_callback(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("Google OAuth login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "Google OAuth login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "Google sign-in failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "Google OAuth login", &e),
         })?;
 
-    // Build session (same pattern as login_submit / signup_submit).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -1988,7 +1890,7 @@ async fn google_oauth_callback(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during OAuth login");
+                let _ = record_error("fetch organisations during Google OAuth login", &e);
                 vec![]
             }
         };
@@ -2016,19 +1918,14 @@ async fn google_oauth_callback(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create Google OAuth login session", &e))?;
 
     let mut jar = auth::session_cookie(&session_id, true);
 
-    // Clear the OAuth state cookie.
     let mut clear_cookie = axum_extra::extract::cookie::Cookie::from("forage_oauth_state");
     clear_cookie.set_path("/auth/google");
     clear_cookie.make_removal();
@@ -2038,9 +1935,6 @@ async fn google_oauth_callback(
     Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
-// ─── GitHub OAuth ───────────────────────────────────────────────────
-
-/// GET /auth/github — redirect to GitHub's authorization screen.
 async fn github_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2084,7 +1978,6 @@ async fn github_oauth_start(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=600",
         oauth_state
     );
-    // Clear any stale link-purpose cookie (see google_oauth_start).
     let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=0";
 
     let mut headers = HeaderMap::new();
@@ -2104,30 +1997,16 @@ async fn github_oauth_start(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// GET /auth/github/callback — handle the OAuth callback from GitHub.
-///
-/// Dispatches between two flows based on the `forage_oauth_link_user`
-/// cookie set by `/settings/account/github/connect`:
-///   - Cookie present + session matches → **link flow** (Forest
-///     `LinkOAuthProvider`).
-///   - Cookie absent + no session → **login flow** (existing
-///     `OAuthLogin` behaviour).
-///   - Cookie absent + session present → bounce to /dashboard.
-///   - Cookie present + session missing or mismatched → 403.
 async fn github_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    // CSRF anchor first — see google_oauth_callback for rationale.
     let expected_state = jar
         .get("forage_oauth_state")
         .map(|c| c.value().to_string());
     let received_state = query.state.as_deref().unwrap_or("");
-    // Require a non-empty expected state so an injected empty-value
-    // `forage_oauth_state=` cookie combined with a missing `?state=`
-    // parameter (both `""`) can't pass the equality check.
     match expected_state {
         Some(ref expected) if !expected.is_empty() && expected == received_state => {}
         _ => {
@@ -2140,7 +2019,6 @@ async fn github_oauth_callback(
         }
     }
 
-    // Single-use read of the per-flow return_to (see google_oauth_callback).
     let return_to = consume_oauth_flow_return_to(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GITHUB,
@@ -2159,8 +2037,6 @@ async fn github_oauth_callback(
             == link_cookie_user_id;
 
     if !is_link_flow && link_cookie_user_id.is_some() {
-        // Cookie set for linking, but session is missing or belongs to
-        // a different user — refuse to proceed.
         return Err(error_page(
             &state,
             StatusCode::FORBIDDEN,
@@ -2204,7 +2080,6 @@ async fn github_oauth_callback(
 
     let redirect_uri = format!("{}/auth/github/callback", config.redirect_host);
 
-    // Step 1: Exchange code with GitHub via OIDC exchange.
     let oidc = state.github_oidc_exchange.as_ref().ok_or_else(|| {
         error_page(
             &state,
@@ -2214,20 +2089,11 @@ async fn github_oauth_callback(
         )
     })?;
 
-    let identity = oidc
-        .exchange_code(code, &redirect_uri)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "GitHub OIDC exchange failed");
-            error_page(
-                &state,
-                StatusCode::BAD_GATEWAY,
-                "Login failed",
-                "Failed to verify your GitHub account. Please try again.",
-            )
-        })?;
+    let identity = oidc.exchange_code(code, &redirect_uri).await.map_err(|e| {
+        let message = report_error("GitHub OIDC exchange", &e);
+        error_page(&state, StatusCode::BAD_GATEWAY, "Login failed", &message)
+    })?;
 
-    // If we're linking (not logging in), branch into the link flow.
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
         return Ok(complete_link_flow(
@@ -2240,7 +2106,6 @@ async fn github_oauth_callback(
         .await);
     }
 
-    // Step 2: Tell Forest to find-or-create this user.
     let result = state
         .forest_client
         .oauth_login("github", &identity.sub, &identity.email, &identity.name, identity.picture_url.as_deref())
@@ -2250,20 +2115,11 @@ async fn github_oauth_callback(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("GitHub OAuth login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "GitHub OAuth login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "GitHub sign-in failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "GitHub OAuth login", &e),
         })?;
 
-    // Build session (same pattern as Google).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -2279,7 +2135,7 @@ async fn github_oauth_callback(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during GitHub login");
+                let _ = record_error("fetch organisations during GitHub OAuth login", &e);
                 vec![]
             }
         };
@@ -2307,15 +2163,11 @@ async fn github_oauth_callback(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create GitHub OAuth login session", &e))?;
 
     let mut jar = auth::session_cookie(&session_id, true);
     let mut clear_cookie = axum_extra::extract::cookie::Cookie::from("forage_oauth_state");
@@ -2326,8 +2178,6 @@ async fn github_oauth_callback(
     let redirect_to = post_auth_dest(result.is_new_user, return_to.as_deref());
     Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
-
-// ─── Complete Profile (username selection for OAuth users) ──────────
 
 async fn complete_profile_page(
     State(state): State<AppState>,
@@ -2360,7 +2210,6 @@ async fn complete_profile_submit(
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    // Validate CSRF.
     if !auth::validate_csrf(&session, &form._csrf) {
         return Err(error_page(
             &state,
@@ -2370,12 +2219,10 @@ async fn complete_profile_submit(
         ));
     }
 
-    // Validate username.
     if let Err(e) = validate_username(&form.username) {
         return render_complete_profile(&state, &session.csrf_token, &form.username, Some(e.0), rt);
     }
 
-    // Update username on forest-server.
     state
         .forest_client
         .update_username(&session.access_token, &session.user.user_id, &form.username)
@@ -2391,18 +2238,9 @@ async fn complete_profile_submit(
                 )
                 .unwrap_err()
             }
-            _ => {
-                tracing::error!(error = %e, "failed to update username");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Update failed",
-                    "Failed to set username. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "update username during profile completion", &e),
         })?;
 
-    // Update session: set new username and clear needs_username flag.
     let mut updated = session.session_data.clone();
     if let Some(ref mut user) = updated.user {
         user.username = form.username;
@@ -2425,34 +2263,10 @@ fn render_complete_profile(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/complete_profile.html.jinja",
-            context! {
-                title => "Choose Username - Forest",
-                description => "Pick a username for your new account",
-                is_auth_page => true,
-                csrf_token => csrf_token,
-                username => username,
-                error => error,
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
-
-    Ok(Html(html).into_response())
+    let page =
+        crate::views::auth::CompleteProfilePage::new(state, csrf_token, username, error, return_to);
+    Ok(Html(crate::views::pages::complete_profile::render(&page)).into_response())
 }
-
-// ─── Magic Link ─────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct MagicLinkForm {
@@ -2461,7 +2275,6 @@ struct MagicLinkForm {
     return_to: Option<String>,
 }
 
-/// GET /auth/magic-link — show the magic link email form.
 async fn magic_link_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2484,7 +2297,6 @@ async fn magic_link_page(
     render_magic_link_form(&state, "", None, rt)
 }
 
-/// POST /auth/magic-link — send a magic link email.
 async fn magic_link_request(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2504,12 +2316,10 @@ async fn magic_link_request(
         )
     })?;
 
-    // Validate email.
     if let Err(e) = validate_email(&form.email) {
         return render_magic_link_form(&state, &form.email, Some(e.0), rt);
     }
 
-    // Rate limit: max 3 per 15 minutes per email.
     let since = Utc::now() - chrono::Duration::minutes(15);
     let count = store
         .count_recent(
@@ -2518,20 +2328,11 @@ async fn magic_link_request(
             since,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link count_recent failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "count recent magic links", &e))?;
     if count >= 3 {
         return render_magic_link_sent(&state, &form.email);
     }
 
-    // Generate token and store hash.
     let (raw_token, token_hash) =
         forage_core::auth::magic_link::generate_magic_link_token();
     let expires_at = Utc::now() + chrono::Duration::minutes(15);
@@ -2545,24 +2346,14 @@ async fn magic_link_request(
             rt,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link store_token failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "store magic link token", &e))?;
 
-    // Build magic link URL.
     let verify_url = format!(
         "{}/auth/magic-link/verify?token={}",
         state.forage_host,
         urlencoding::encode(&raw_token)
     );
 
-    // Publish email job to NATS (if available).
     if let Some(ref js) = state.email_jetstream {
         let envelope = forage_core::integrations::email::EmailEnvelope {
             to: form.email.clone(),
@@ -2582,25 +2373,17 @@ async fn magic_link_request(
             email_type: "magic-link".into(),
         };
 
-        let payload = serde_json::to_vec(&envelope).map_err(|e| {
-            tracing::error!(error = %e, "failed to serialize email envelope");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|e| internal_error(&state, "serialize magic link email", &e))?;
 
         let subject = forage_core::integrations::email::email_subject("magic-link");
         if let Err(e) = js.publish(subject, payload.into()).await {
-            tracing::error!(error = %e, "failed to publish magic link email to NATS");
+            let _ = record_error("publish magic link email", &e);
         }
     } else {
-        tracing::warn!(email = %form.email, url = %verify_url, "NATS not configured, magic link email not sent (token stored)");
+        tracing::warn!("NATS not configured, magic link email not sent (token stored)");
     }
 
-    // Always show success (prevents email enumeration).
     render_magic_link_sent(&state, &form.email)
 }
 
@@ -2609,7 +2392,6 @@ struct MagicLinkVerifyQuery {
     token: Option<String>,
 }
 
-/// GET /auth/magic-link/verify?token=xxx — verify and consume a magic link token.
 async fn magic_link_verify(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2646,15 +2428,7 @@ async fn magic_link_verify(
             &token_hash,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "magic link verify_and_consume failed");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?
+        .map_err(|e| internal_error(&state, "consume magic link token", &e))?
         .ok_or_else(|| {
             error_page(
                 &state,
@@ -2669,7 +2443,6 @@ async fn magic_link_verify(
         .return_to
         .filter(|r| auth::safe_return_to(Some(r)).is_some());
 
-    // Call Forest to find-or-create user by email identity.
     let result = state
         .forest_client
         .oauth_login("magic-link", &email, &email, "", None)
@@ -2679,20 +2452,11 @@ async fn magic_link_verify(
                 &state,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Temporarily unavailable",
-                "Authentication service is temporarily unavailable. Please try again later.",
+                &report_error("magic link login unavailable", &e),
             ),
-            _ => {
-                tracing::error!(error = %e, "magic link login failed");
-                error_page(
-                    &state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Login failed",
-                    "Magic link login failed. Please try again.",
-                )
-            }
+            _ => internal_error(&state, "magic link login", &e),
         })?;
 
-    // Build session (same pattern as Google OAuth callback).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -2708,7 +2472,7 @@ async fn magic_link_verify(
                 })
                 .collect(),
             Err(e) => {
-                tracing::warn!(error = %e, "failed to fetch orgs during magic link login");
+                let _ = record_error("fetch organisations during magic link login", &e);
                 vec![]
             }
         };
@@ -2736,15 +2500,11 @@ async fn magic_link_verify(
         needs_username: result.is_new_user,
     };
 
-    let session_id = state.sessions.create(session_data).await.map_err(|e| {
-        tracing::error!(error = %e, "failed to create session");
-        error_page(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "Internal error. Please try again.",
-        )
-    })?;
+    let session_id = state
+        .sessions
+        .create(session_data)
+        .await
+        .map_err(|e| internal_error(&state, "create magic link login session", &e))?;
 
     let jar = auth::session_cookie(&session_id, true);
 
@@ -2759,68 +2519,22 @@ fn render_magic_link_form(
     error: Option<String>,
     return_to: Option<&str>,
 ) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/magic_link.html.jinja",
-            context! {
-                title => "Sign in with Email - Forest",
-                description => "Get a magic link sent to your email",
-                email => email,
-                error => error,
-                return_to => return_to,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::MagicLinkPage::new(state, email, error, return_to);
+    Ok(Html(crate::views::pages::magic_link::render(&page)).into_response())
 }
 
 fn render_magic_link_sent(state: &AppState, email: &str) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/magic_link_sent.html.jinja",
-            context! {
-                title => "Check Your Email - Forest",
-                description => "Magic link sent",
-                email => email,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal error",
-                "Template rendering failed.",
-            )
-        })?;
-
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::EmailNoticePage::magic_link_sent(state, email);
+    Ok(Html(crate::views::pages::magic_link_sent::render(&page)).into_response())
 }
 
-// ─── Profile Picture ─────────────────────────────────────────────────
-
-const MAX_PICTURE_SIZE: usize = 2 * 1024 * 1024; // 2 MB
+const MAX_PICTURE_SIZE: usize = 2 * 1024 * 1024;
 const MAX_AVATAR_DIMENSION: u32 = 512;
 
-/// Decode an uploaded image and re-encode as WebP.
-/// This strips any embedded payloads (polyglot files, EXIF scripts, etc.)
-/// and normalizes the output to a safe, known format.
 fn reencode_avatar(data: &[u8]) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("failed to decode image: {e}"))?;
 
-    // Resize if larger than max dimension, preserving aspect ratio.
     let img = if img.width() > MAX_AVATAR_DIMENSION || img.height() > MAX_AVATAR_DIMENSION {
         img.resize(
             MAX_AVATAR_DIMENSION,
@@ -2862,7 +2576,7 @@ async fn upload_picture_submit(
             }
             "picture" => {
                 let data = field.bytes().await.map_err(|e| {
-                    tracing::error!("failed to read upload: {e}");
+                    let _ = record_error("read uploaded profile picture", &e);
                     error_page(
                         &state,
                         StatusCode::BAD_REQUEST,
@@ -2908,9 +2622,8 @@ async fn upload_picture_submit(
         )
     })?;
 
-    // Decode and re-encode as WebP to strip any embedded payloads.
     let webp_data = reencode_avatar(&raw_data).map_err(|e| {
-        tracing::warn!("image re-encode failed: {e}");
+        let _ = record_error("decode uploaded profile picture", &e);
         error_page(
             &state,
             StatusCode::BAD_REQUEST,
@@ -2933,17 +2646,8 @@ async fn upload_picture_submit(
             Some(&avatar_url),
         )
         .await
-        .map_err(|e| {
-            tracing::error!("failed to update profile picture URL in forest: {e}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Update failed",
-                "Failed to update your profile picture. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "update profile picture URL", &e))?;
 
-    // Update session cache with new picture URL.
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
             user.profile_picture_url = Some(avatar_url);
@@ -2979,17 +2683,8 @@ async fn remove_picture_submit(
         .forest_client
         .update_profile_picture_url(&session.access_token, &session.user.user_id, Some(""))
         .await
-        .map_err(|e| {
-            tracing::error!("failed to clear profile picture URL: {e}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Update failed",
-                "Failed to remove your profile picture. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "clear profile picture URL", &e))?;
 
-    // Update session cache to clear picture URL.
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
             user.profile_picture_url = None;
@@ -3000,15 +2695,6 @@ async fn remove_picture_submit(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Serve a user's avatar, by user id *or* by username.
-///
-/// Uploaded pictures are keyed by user id, which is what `profile_picture_url`
-/// points back at after an upload — that stays the fast path. But the views
-/// that want to show a face usually only know a username: the release timeline
-/// knows who deployed a release as `source_user`, not as an id. So a username
-/// is resolved to its account here, and a user who signed in with Google or
-/// GitHub — who has no upload at all, only the URL their provider gave us — is
-/// redirected on to that picture rather than 404ing.
 async fn serve_avatar(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -3018,8 +2704,6 @@ async fn serve_avatar(
         return avatar_response(pic);
     }
 
-    // Resolving a name needs the caller's token, which also keeps lookups by
-    // username behind the same login as the pages that ask for them.
     let session = match maybe.session {
         Some(s) => s,
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -3042,16 +2726,10 @@ async fn serve_avatar(
     }
 
     match profile.profile_picture_url.as_deref() {
-        // Only ever hand the browser on to an external http(s) picture. A URL
-        // pointing back at our own /avatars/ would loop: the upload it names is
-        // exactly what the store lookup above already came up empty for.
         Some(url)
             if (url.starts_with("https://") || url.starts_with("http://"))
                 && !url.contains("/avatars/") =>
         {
-            // A timeline shows the same handful of deployers over and over, and
-            // every card asking costs a user lookup. Let the browser hold the
-            // answer briefly — privately, since where it points is personal.
             (
                 [(
                     axum::http::header::CACHE_CONTROL,
@@ -3065,13 +2743,12 @@ async fn serve_avatar(
     }
 }
 
-/// The uploaded picture for a user id, if there is a store and it holds one.
 async fn stored_avatar(state: &AppState, user_id: &str) -> Option<forage_db::ProfilePicture> {
     let store = state.profile_picture_store.as_ref()?;
     match store.get(user_id).await {
         Ok(pic) => pic,
         Err(e) => {
-            tracing::warn!("profile picture lookup for {user_id} failed: {e:#}");
+            let _ = record_error("look up stored profile picture", &e);
             None
         }
     }
@@ -3096,8 +2773,6 @@ fn avatar_response(pic: forage_db::ProfilePicture) -> Response {
     (headers, pic.data).into_response()
 }
 
-// ─── Email verification (signup + add_email) ─────────────────────────
-
 async fn enqueue_verification_email(
     state: &AppState,
     email: &str,
@@ -3108,7 +2783,6 @@ async fn enqueue_verification_email(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("magic-link store not configured"))?;
 
-    // Rate-limit: 3 sends per email per 15 minutes (per type).
     let since = Utc::now() - chrono::Duration::minutes(15);
     let count = store
         .count_recent(
@@ -3165,38 +2839,18 @@ async fn enqueue_verification_email(
             forage_core::auth::magic_link::TOKEN_TYPE_EMAIL_VERIFY,
         );
         if let Err(e) = js.publish(subject, payload.into()).await {
-            tracing::error!(error = %e, "failed to publish verification email to NATS");
+            let _ = record_error("publish verification email", &e);
         }
     } else {
-        tracing::warn!(
-            email = %email,
-            url = %verify_url,
-            "NATS not configured, verification email not sent (token stored)",
-        );
+        tracing::warn!("NATS not configured, verification email not sent (token stored)",);
     }
 
     Ok(())
 }
 
-fn render_verify_email_check_inbox(
-    state: &AppState,
-    email: &str,
-) -> Result<Response, axum::http::StatusCode> {
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_check_inbox.html.jinja",
-            context! {
-                title => "Verify your email - Forest",
-                description => "Check your inbox for a verification link",
-                email => email,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    Ok(Html(html).into_response())
+fn render_verify_email_check_inbox(state: &AppState, email: &str) -> Result<Response, Response> {
+    let page = crate::views::auth::EmailNoticePage::check_inbox(state, email);
+    Ok(Html(crate::views::pages::verify_email_check_inbox::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -3230,39 +2884,21 @@ async fn verify_email_redeem(
             &token_hash,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "verify_and_consume failed for email-verify token");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error. Please try again.",
-            )
-        })?;
+        .map_err(|e| internal_error(&state, "consume email verification token", &e))?;
 
     let Some((email, stored_return_to)) = consumed.map(|c| (c.email, c.return_to)) else {
         return Ok(render_verify_email_failed(&state));
     };
-    // Validate the stored value at consume time too (defence in depth —
-    // the row could outlive a policy change to `safe_return_to`).
     let return_to = stored_return_to
         .as_deref()
         .and_then(|r| auth::safe_return_to(Some(r)))
         .map(|r| r.to_string());
 
     if let Err(e) = state.forest_client.confirm_email_verification(&email).await {
-        tracing::error!(error = %e, email = %email, "confirm_email_verification failed");
-        // Token is already consumed (single-use absolute). User must
-        // request a new one via /auth/verify-email/resend.
+        let _ = record_error("confirm email verification", &e);
         return Ok(render_verify_email_failed(&state));
     }
 
-    // If a return_to was carried from the original signup/login attempt,
-    // smooth out the journey: send the (still-unauthenticated) user to
-    // /login with that return_to preserved, so post-login they land on
-    // the pending intent (e.g. /device?user_code=…). Without this, the
-    // user lands on a success page and has to re-discover their entry
-    // point manually — that's the workaround DATA-251 calls out.
     if let Some(rt) = return_to {
         return Ok(Redirect::to(&format!(
             "/login?return_to={}",
@@ -3271,29 +2907,9 @@ async fn verify_email_redeem(
         .into_response());
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_success.html.jinja",
-            context! {
-                title => "Email verified - Forest",
-                description => "Your email has been verified",
-                email => email,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
-
-    // Set Referrer-Policy: no-referrer so the raw token never leaks
-    // via a Referer header on links inside the success page.
-    let mut response = Html(html).into_response();
+    let page = crate::views::auth::EmailNoticePage::verified(&state, &email);
+    let mut response =
+        Html(crate::views::pages::verify_email_success::render(&page)).into_response();
     response.headers_mut().insert(
         axum::http::header::REFERRER_POLICY,
         axum::http::HeaderValue::from_static("no-referrer"),
@@ -3302,20 +2918,12 @@ async fn verify_email_redeem(
 }
 
 fn render_verify_email_failed(state: &AppState) -> Response {
-    match state.templates.render(
-        "pages/verify_email_failed.html.jinja",
-        context! {
-            title => "Verification link expired - Forest",
-            description => "Verification link expired or already used",
-        },
-    ) {
-        Ok(html) => {
-            let mut resp = Html(html).into_response();
-            *resp.status_mut() = StatusCode::BAD_REQUEST;
-            resp
-        }
-        Err(e) => internal_error(state, "verify_email_failed template", &e),
-    }
+    let page = crate::views::auth::VerifyEmailFailedPage::new(state);
+    (
+        StatusCode::BAD_REQUEST,
+        Html(crate::views::pages::verify_email_failed::render(&page)),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -3324,53 +2932,23 @@ struct VerifyEmailResendForm {
 }
 
 async fn verify_email_resend_page(State(state): State<AppState>) -> Result<Response, Response> {
-    let html = state
-        .templates
-        .render(
-            "pages/verify_email_resend.html.jinja",
-            context! {
-                title => "Resend verification email - Forest",
-                description => "Send a new verification link",
-                email => "",
-                error => None::<String>,
-            },
-        )
-        .map_err(|e| {
-            tracing::error!("template error: {e:#}");
-            error_page(
-                &state,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error",
-                "Internal error.",
-            )
-        })?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::VerifyEmailResendPage::new(&state);
+    Ok(Html(crate::views::pages::verify_email_resend::render(&page)).into_response())
 }
 
 async fn verify_email_resend_submit(
     State(state): State<AppState>,
     Form(form): Form<VerifyEmailResendForm>,
 ) -> Result<Response, Response> {
-    // Always render the "check your inbox" page regardless of validation
-    // outcome to avoid leaking which emails are registered. Internal
-    // logs capture the actual outcome.
     if validate_email(&form.email).is_err() {
         tracing::info!(email = %form.email, "verify-email resend skipped: invalid email");
-        return render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response());
+        return render_verify_email_check_inbox(&state, &form.email);
     }
     if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
-        tracing::warn!(error = %e, "verify-email resend enqueue failed");
+        let _ = record_error("enqueue resent verification email", &e);
     }
-    render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response())
+    render_verify_email_check_inbox(&state, &form.email)
 }
-
-// ─── Account-level OAuth account linking (GitHub / Google) ──────────
-//
-// These routes let a signed-in user explicitly link an external OAuth
-// identity to their Forest account. Distinct from `/auth/<provider>`,
-// which mints a session. The two share the provider's authorize URL
-// and callback; dispatch happens via the `forage_oauth_link_user`
-// cookie set here. See `specs/features/010-account-integrations.md`.
 
 const LINK_PURPOSE_COOKIE: &str = "forage_oauth_link_user";
 
@@ -3405,9 +2983,6 @@ fn build_link_start_response(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// Build the cookie header values that clear the link/state cookies for a
-/// provider — used after a successful or failed link callback so the
-/// cookies don't leak into a later login attempt.
 fn clear_link_cookies(provider: &str) -> [String; 2] {
     let path = format!("/auth/{provider}");
     [
@@ -3416,11 +2991,6 @@ fn clear_link_cookies(provider: &str) -> [String; 2] {
     ]
 }
 
-/// Build a 302 redirect response that *also* clears the link-purpose
-/// cookie for the given provider. Used by the login-start routes when
-/// they bounce an already-authenticated user — without this, an
-/// abandoned link cookie would survive the redirect and mis-dispatch a
-/// later login callback.
 fn redirect_clearing_link_cookie(location: &str, provider: &str) -> Response {
     let clear = format!(
         "{LINK_PURPOSE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/auth/{provider}; Max-Age=0"
@@ -3435,10 +3005,6 @@ fn redirect_clearing_link_cookie(location: &str, provider: &str) -> Response {
     (StatusCode::FOUND, headers).into_response()
 }
 
-/// GET /settings/account/github/connect — kick off the GitHub linking
-/// flow. Requires an active session; sets the link-purpose cookie and
-/// redirects to GitHub's authorize URL. The callback at
-/// `/auth/github/callback` dispatches based on this cookie.
 async fn github_link_start(
     State(state): State<AppState>,
     session: Session,
@@ -3465,8 +3031,6 @@ async fn github_link_start(
     build_link_start_response(&state, &session, "github", &auth_url, &oauth_state)
 }
 
-/// GET /settings/account/google/connect — symmetric to the GitHub
-/// version. Uses `openid email profile` scope.
 async fn google_link_start(
     State(state): State<AppState>,
     session: Session,
@@ -3498,8 +3062,6 @@ struct ProviderDisconnectForm {
     _csrf: String,
 }
 
-/// POST /settings/account/github/disconnect — unlink the user's GitHub
-/// identity from their Forest account.
 async fn github_link_disconnect(
     State(state): State<AppState>,
     session: Session,
@@ -3514,8 +3076,6 @@ async fn github_link_disconnect(
     .await
 }
 
-/// POST /settings/account/google/disconnect — unlink the user's Google
-/// identity from their Forest account.
 async fn google_link_disconnect(
     State(state): State<AppState>,
     session: Session,
@@ -3550,7 +3110,6 @@ async fn disconnect_oauth_provider(
         .unlink_oauth_provider(&session.access_token, &session.user.user_id, provider)
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, provider = provider.as_str(), "unlink oauth provider failed");
             match &e {
                 forage_core::auth::AuthError::PermissionDenied(_) => error_page(
                     state,
@@ -3560,27 +3119,16 @@ async fn disconnect_oauth_provider(
                 ),
                 forage_core::auth::AuthError::NotAuthenticated
                 | forage_core::auth::AuthError::InvalidCredentials => Redirect::to("/login").into_response(),
-                // Forest refused to strip the last sign-in method. Send
-                // the user back to the account page with a banner —
-                // `error_message()` renders the human-readable string.
                 forage_core::auth::AuthError::LastAuthMethod => {
                     Redirect::to("/settings/account?error=last_auth_method").into_response()
                 }
-                _ => error_page(
-                    state,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Unlink failed",
-                    "Failed to unlink the account. Please try again.",
-                ),
+                _ => internal_error(state, "unlink OAuth provider", &e),
             }
         })?;
 
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Continue the OAuth callback as a *link* flow (rather than login).
-/// Reused by both github and google callbacks once they have decoded
-/// the OIDC identity.
 async fn complete_link_flow(
     state: &AppState,
     session: &Session,
@@ -3614,7 +3162,7 @@ async fn complete_link_flow(
             format!("/settings/account?error=already_linked_{provider_str}")
         }
         Err(e) => {
-            tracing::error!(error = %e, provider = provider_str, "link oauth provider failed");
+            let _ = record_error("link OAuth provider", &e);
             format!("/settings/account?error=link_failed_{provider_str}")
         }
     };

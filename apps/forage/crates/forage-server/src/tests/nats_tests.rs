@@ -19,8 +19,6 @@ use tokio::net::TcpListener;
 use crate::notification_consumer::NotificationConsumer;
 use crate::notification_worker::NotificationDispatcher;
 
-// ─── Test webhook receiver (same pattern as webhook_delivery_tests) ──
-
 #[derive(Debug, Clone)]
 struct ReceivedWebhook {
     body: String,
@@ -91,6 +89,7 @@ fn test_event(org: &str) -> NotificationEvent {
             environment: "production".into(),
             source_username: "alice".into(),
             source_user_id: String::new(),
+            source_attribution: "actor".into(),
             commit_sha: "aabbccdd".into(),
             commit_branch: "main".into(),
             context_title: "Deploy v3.0 succeeded".into(),
@@ -118,6 +117,7 @@ fn failed_event(org: &str) -> NotificationEvent {
             environment: "production".into(),
             source_username: "bob".into(),
             source_user_id: String::new(),
+            source_attribution: "actor".into(),
             commit_sha: "deadbeef".into(),
             commit_branch: "hotfix".into(),
             context_title: "Deploy v3.0 failed".into(),
@@ -127,8 +127,6 @@ fn failed_event(org: &str) -> NotificationEvent {
         }),
     }
 }
-
-// ─── Unit tests: process_payload without NATS ────────────────────────
 
 #[tokio::test]
 async fn process_payload_routes_and_dispatches_to_webhook() {
@@ -155,7 +153,7 @@ async fn process_payload_routes_and_dispatches_to_webhook() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -175,13 +173,12 @@ async fn process_payload_routes_and_dispatches_to_webhook() {
 async fn process_payload_skips_when_no_matching_integrations() {
     let store = Arc::new(InMemoryIntegrationStore::new());
 
-    // No integrations created — should skip silently
     let event = test_event("testorg");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    let result = NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher).await;
+    let result = NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher).await;
     assert!(result.is_ok(), "should succeed with no matching integrations");
 }
 
@@ -191,7 +188,7 @@ async fn process_payload_rejects_invalid_json() {
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
 
     let result =
-        NotificationConsumer::process_payload(b"not-json", store.as_ref(), &dispatcher).await;
+        NotificationConsumer::process_payload(b"not-json", store.as_ref(), None, None, &dispatcher).await;
     assert!(result.is_err(), "invalid JSON should fail");
     assert!(
         result.unwrap_err().contains("deserialize"),
@@ -219,18 +216,17 @@ async fn process_payload_respects_disabled_rules() {
         .await
         .unwrap();
 
-    // Disable release_succeeded
     store
         .set_rule_enabled(&integration.id, "release_succeeded", false)
         .await
         .unwrap();
 
-    let event = test_event("testorg"); // release_succeeded
+    let event = test_event("testorg");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -239,12 +235,11 @@ async fn process_payload_respects_disabled_rules() {
         "disabled rule should prevent delivery"
     );
 
-    // But release_failed should still work
     let event = failed_event("testorg");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
 
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -296,7 +291,7 @@ async fn process_payload_dispatches_to_multiple_integrations() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -329,11 +324,10 @@ async fn process_payload_records_delivery_status() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
-    // Verify delivery was recorded
     let deliveries = store.list_deliveries(&integration.id, 10).await.unwrap();
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].status, DeliveryStatus::Delivered);
@@ -350,7 +344,6 @@ async fn process_payload_records_failed_delivery() {
             integration_type: IntegrationType::Webhook,
             name: "dead-hook".into(),
             config: IntegrationConfig::Webhook {
-                // Unreachable port — will fail all retries
                 url: "http://127.0.0.1:1/hook".into(),
                 secret: None,
                 headers: HashMap::new(),
@@ -365,7 +358,7 @@ async fn process_payload_records_failed_delivery() {
     let payload = serde_json::to_vec(&envelope).unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
@@ -374,9 +367,6 @@ async fn process_payload_records_failed_delivery() {
     assert_eq!(deliveries[0].status, DeliveryStatus::Failed);
     assert!(deliveries[0].error_message.is_some());
 }
-
-// ─── Integration tests: full JetStream publish → consume → dispatch ──
-// These require NATS running on localhost:4223 (docker-compose).
 
 async fn connect_nats() -> Option<async_nats::jetstream::Context> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
@@ -389,7 +379,6 @@ async fn connect_nats() -> Option<async_nats::jetstream::Context> {
     }
 }
 
-/// Create a unique test stream to avoid interference between tests.
 async fn create_test_stream(
     js: &async_nats::jetstream::Context,
     name: &str,
@@ -397,7 +386,6 @@ async fn create_test_stream(
 ) -> async_nats::jetstream::stream::Stream {
     use async_nats::jetstream::stream;
 
-    // Delete if exists from a previous test run
     let _ = js.delete_stream(name).await;
 
     js.create_stream(stream::Config {
@@ -435,12 +423,10 @@ async fn jetstream_publish_and_consume_delivers_webhook() {
         .await
         .unwrap();
 
-    // Create a unique stream for this test
     let stream_name = "TEST_NATS_DELIVER";
     let subject = "test.notifications.js-org.release_succeeded";
     let stream = create_test_stream(&js, stream_name, &[format!("test.notifications.>")]).await;
 
-    // Publish an envelope
     let event = test_event("js-org");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
@@ -451,7 +437,6 @@ async fn jetstream_publish_and_consume_delivers_webhook() {
         .expect("publish failed");
     ack.await.expect("publish ack failed");
 
-    // Create a consumer and pull the message
     use async_nats::jetstream::consumer;
     let consumer_name = "test-consumer-deliver";
     let pull_consumer = stream
@@ -472,15 +457,13 @@ async fn jetstream_publish_and_consume_delivers_webhook() {
         .expect("stream ended")
         .expect("message error");
 
-    // Process through the consumer logic
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
 
     msg.ack().await.expect("ack failed");
 
-    // Verify webhook was delivered
     let deliveries = receiver.deliveries.lock().unwrap();
     assert_eq!(deliveries.len(), 1, "webhook should receive the event");
 
@@ -491,7 +474,6 @@ async fn jetstream_publish_and_consume_delivers_webhook() {
     assert_eq!(body["event"], "release_succeeded");
     assert_eq!(body["organisation"], "js-org");
 
-    // Cleanup
     let _ = js.delete_stream(stream_name).await;
 }
 
@@ -522,7 +504,6 @@ async fn jetstream_multiple_messages_all_delivered() {
     let stream_name = "TEST_NATS_MULTI";
     let stream = create_test_stream(&js, stream_name, &["test.multi.>".into()]).await;
 
-    // Publish 3 events
     for i in 0..3 {
         let mut event = test_event("multi-org");
         event.id = format!("multi-{i}");
@@ -538,7 +519,6 @@ async fn jetstream_multiple_messages_all_delivered() {
         ack.await.unwrap();
     }
 
-    // Consume all 3
     use async_nats::jetstream::consumer;
     use futures_util::StreamExt;
 
@@ -561,7 +541,7 @@ async fn jetstream_multiple_messages_all_delivered() {
             .expect("stream ended")
             .expect("error");
 
-        NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+        NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
             .await
             .unwrap();
         msg.ack().await.unwrap();
@@ -570,7 +550,6 @@ async fn jetstream_multiple_messages_all_delivered() {
     let deliveries = receiver.deliveries.lock().unwrap();
     assert_eq!(deliveries.len(), 3, "all 3 events should be delivered");
 
-    // Verify each has a unique notification_id
     let ids: Vec<String> = deliveries
         .iter()
         .map(|d| {
@@ -594,7 +573,6 @@ async fn jetstream_message_for_wrong_org_skips_dispatch() {
     let (url, receiver) = start_receiver().await;
     let store = Arc::new(InMemoryIntegrationStore::new());
 
-    // Integration for "org-a" only
     store
         .create_integration(&CreateIntegrationInput {
             organisation: "org-a".into(),
@@ -613,7 +591,6 @@ async fn jetstream_message_for_wrong_org_skips_dispatch() {
     let stream_name = "TEST_NATS_WRONG_ORG";
     let stream = create_test_stream(&js, stream_name, &["test.wrongorg.>".into()]).await;
 
-    // Publish event for "org-b" (no integration)
     let event = test_event("org-b");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
@@ -643,12 +620,11 @@ async fn jetstream_message_for_wrong_org_skips_dispatch() {
         .unwrap();
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
-    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), &dispatcher)
+    NotificationConsumer::process_payload(&msg.payload, store.as_ref(), None, None, &dispatcher)
         .await
         .unwrap();
     msg.ack().await.unwrap();
 
-    // org-a's webhook should NOT have been called
     assert!(
         receiver.deliveries.lock().unwrap().is_empty(),
         "wrong org should not trigger delivery"
@@ -676,7 +652,6 @@ async fn jetstream_stream_creation_is_idempotent() {
         ..Default::default()
     };
 
-    // Create twice — should not error
     js.get_or_create_stream(config.clone()).await.unwrap();
     js.get_or_create_stream(config).await.unwrap();
 
@@ -692,7 +667,6 @@ async fn jetstream_envelope_roundtrip_through_nats() {
     let stream_name = "TEST_NATS_ROUNDTRIP";
     let stream = create_test_stream(&js, stream_name, &["test.roundtrip.>".into()]).await;
 
-    // Publish an event with release context including error_message
     let event = failed_event("roundtrip-org");
     let envelope = NotificationEnvelope::from(&event);
     let payload = serde_json::to_vec(&envelope).unwrap();
@@ -722,7 +696,6 @@ async fn jetstream_envelope_roundtrip_through_nats() {
         .unwrap()
         .unwrap();
 
-    // Deserialize and verify all fields survived the roundtrip
     let restored: NotificationEnvelope = serde_json::from_slice(&msg.payload).unwrap();
     assert_eq!(restored.notification_type, "release_failed");
     assert_eq!(restored.organisation, "roundtrip-org");

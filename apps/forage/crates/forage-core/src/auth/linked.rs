@@ -1,28 +1,8 @@
-//! Account-linking types and pure mappers for external identity providers.
-//!
-//! Forest is the source of truth for GitHub/Google OAuth identities (via the
-//! `identities` table and `LinkOAuthProvider` / `UnlinkOAuthProvider` RPCs).
-//! Slack is sourced from Forage's `slack_user_links` table because Slack is
-//! not in Forest's `OAuthProvider` enum.
-//!
-//! This module holds:
-//! - `LinkedProvider`: provider identifier for the unified UI view
-//! - `LinkedIdentity`: render model used by the account page
-//! - `LinkOAuthInput`: pure value object representing a request to link an
-//!   identity in Forest (decoupled from gRPC types)
-//! - Pure mappers from `OidcIdentity` (already-verified provider profile)
-//!   into `LinkOAuthInput`
-
 use serde::{Deserialize, Serialize};
 
 use crate::auth::OidcIdentity;
 use crate::integrations::SlackUserLink;
 
-/// Provider identifier for a linked external account.
-///
-/// `GitHub` and `Google` are sourced from Forest's `identities`; `Slack` is
-/// sourced from Forage's `slack_user_links`. The unified view-model merges
-/// both into a single `Vec<LinkedIdentity>` for the account page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkedProvider {
@@ -58,11 +38,6 @@ impl LinkedProvider {
     }
 }
 
-/// A single linked external identity, rendered on the account page.
-///
-/// `external_id` is the provider's stable identifier (GitHub numeric id,
-/// Google `sub`, Slack user id). `display_name` is the human-readable label
-/// — login for GitHub, name/email for Google, slack_username for Slack.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkedIdentity {
     pub provider: LinkedProvider,
@@ -70,32 +45,11 @@ pub struct LinkedIdentity {
     pub display_name: String,
     pub email: Option<String>,
     pub avatar_url: Option<String>,
-    /// ISO-8601 timestamp from Forest (`linked_at`) or Forage (`created_at`).
-    /// Optional because some sources may not surface it.
     pub linked_at: Option<String>,
-    /// Provider-specific subtitle (e.g. Slack team name). None for
-    /// providers where the display name already conveys identity.
     pub subtitle: Option<String>,
-    /// Provider-specific key used by the disconnect form. For Slack this
-    /// is the workspace `team_id` (the existing `/settings/account/slack/disconnect`
-    /// route expects `team_id`); for GitHub/Google it is unused (the
-    /// disconnect route derives identity from the session).
     pub disconnect_key: Option<String>,
 }
 
-/// Drop avatar URLs that aren't HTTPS. The login flow already does this
-/// (see `forest_client.rs`), but the link flow used to copy the value
-/// through unfiltered — meaning a `javascript:` or `http://` URL could
-/// be stored in `provider_data` JSONB and surface in the UI later. The
-/// current template renders provider icons as static SVG, but a future
-/// avatar-rendering change would expose the gap. Symmetric to the
-/// login-flow validation closes the asymmetry caught in adversarial
-/// review gap #6.
-///
-/// Case-insensitive scheme match: RFC 3986 says URL schemes are
-/// case-insensitive. Real OAuth providers always return lowercase, but
-/// being lenient here costs nothing and makes the check robust if a
-/// future provider returns `HTTPS://`.
 fn filter_avatar_url(url: Option<&str>) -> Option<String> {
     url.filter(|u| {
         u.find("://")
@@ -105,10 +59,6 @@ fn filter_avatar_url(url: Option<&str>) -> Option<String> {
     .map(String::from)
 }
 
-/// Pure value object representing a `LinkOAuthProvider` request to Forest.
-/// `provider_data_json` carries the un-modelled extras (avatar, login) as
-/// raw JSON so they can be round-tripped through Forest's `provider_data`
-/// JSONB column without a schema change on Forage's side.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkOAuthInput {
     pub provider: LinkedProvider,
@@ -118,9 +68,6 @@ pub struct LinkOAuthInput {
     pub provider_data_json: String,
 }
 
-/// Provider-data JSON shape we write into Forest's `identities.provider_data`.
-/// Kept intentionally small and provider-agnostic so the rendering code
-/// doesn't need to know which provider produced it.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderDataExtras {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,15 +78,6 @@ pub struct ProviderDataExtras {
     pub name: Option<String>,
 }
 
-/// Map an OIDC identity (already-verified profile from the provider) into
-/// the input for Forest's `LinkOAuthProvider` RPC. The caller has already
-/// validated the email via OIDC `email_verified` — this is a pure shape
-/// transformation.
-///
-/// Display-name precedence: `identity.login` (handle) > `identity.name` >
-/// `identity.email`. The login takes priority because providers like
-/// GitHub use it as the user-recognisable identifier, even when a
-/// "real name" is also populated.
 pub fn link_input_from_oidc(
     provider: LinkedProvider,
     identity: &OidcIdentity,
@@ -173,10 +111,7 @@ pub fn link_input_from_oidc(
     }
 }
 
-/// GitHub OIDC exchanges in this codebase populate `sub` with GitHub's
-/// numeric user id and `name` with the user's display name. GitHub doesn't
-/// expose a `login` (handle) through OIDC, so callers fetching `/user`
-/// can pass it via `github_login_override`.
+/// GitHub OIDC carries no `login`, so pass the `/user` handle as `github_login_override`.
 pub fn link_input_from_github(
     identity: &OidcIdentity,
     github_login_override: Option<&str>,
@@ -208,9 +143,6 @@ pub fn link_input_from_github(
     }
 }
 
-/// Build a `LinkedIdentity` from Forest's `OAuthConnection`-like fields
-/// plus the optional provider-data extras decoded from JSONB. Pure
-/// function — no I/O.
 pub fn linked_identity_from_forest(
     provider: LinkedProvider,
     provider_user_id: &str,
@@ -218,8 +150,6 @@ pub fn linked_identity_from_forest(
     linked_at: Option<&str>,
     extras: Option<&ProviderDataExtras>,
 ) -> LinkedIdentity {
-    // Choose a display name: prefer login (GitHub handle) -> name -> email
-    // -> external id as final fallback.
     let display_name = extras
         .and_then(|e| e.login.clone())
         .or_else(|| extras.and_then(|e| e.name.clone()))
@@ -238,7 +168,6 @@ pub fn linked_identity_from_forest(
     }
 }
 
-/// Build a `LinkedIdentity` from a Slack user link. Pure function.
 pub fn linked_identity_from_slack(link: &SlackUserLink) -> LinkedIdentity {
     LinkedIdentity {
         provider: LinkedProvider::Slack,
@@ -252,15 +181,11 @@ pub fn linked_identity_from_slack(link: &SlackUserLink) -> LinkedIdentity {
     }
 }
 
-/// Merge Forest-sourced identities (github/google) with Slack links into
-/// a single render list, in stable order: GitHub, Google, then Slack
-/// workspaces by creation time. Pure function.
 pub fn merge_linked_identities(
     forest_identities: Vec<LinkedIdentity>,
     slack_links: &[SlackUserLink],
 ) -> Vec<LinkedIdentity> {
     let mut out = Vec::with_capacity(forest_identities.len() + slack_links.len());
-    // GitHub first, then Google, then any other Forest providers.
     let mut github = Vec::new();
     let mut google = Vec::new();
     let mut other = Vec::new();
@@ -327,8 +252,6 @@ mod tests {
 
     #[test]
     fn link_input_from_oidc_drops_non_https_avatar() {
-        // The login flow already filters to https-only — the link flow
-        // must match (adversarial review #6).
         let id = OidcIdentity {
             picture_url: Some("javascript:alert(1)".into()),
             ..sample_oidc()
@@ -350,7 +273,6 @@ mod tests {
 
     #[test]
     fn link_input_from_oidc_accepts_uppercase_https_scheme() {
-        // RFC 3986 says schemes are case-insensitive. Be lenient.
         let id = OidcIdentity {
             picture_url: Some("HTTPS://example.com/a.png".into()),
             ..sample_oidc()
@@ -400,11 +322,9 @@ mod tests {
 
     #[test]
     fn link_input_from_github_falls_back_to_name_then_email() {
-        // No login override, with name -> name wins
         let input = link_input_from_github(&sample_oidc(), None);
         assert_eq!(input.provider_display_name, "Kasper Hermansen");
 
-        // No login override, no name -> email
         let id = OidcIdentity {
             name: String::new(),
             ..sample_oidc()
@@ -481,8 +401,6 @@ mod tests {
         assert_eq!(id.subtitle.as_deref(), Some("rawpotion"));
         assert_eq!(id.external_id, "U456");
         assert_eq!(id.linked_at.as_deref(), Some("2026-05-01T00:00:00Z"));
-        // disconnect_key carries team_id so the existing slack_disconnect
-        // form receives the right value.
         assert_eq!(id.disconnect_key.as_deref(), Some("T123"));
     }
 
@@ -518,7 +436,6 @@ mod tests {
             created_at: "t".into(),
         };
 
-        // Pass Forest list in google-first order; output must still be github-first.
         let merged = merge_linked_identities(vec![google, github], &[slack]);
         assert_eq!(merged.len(), 3);
         assert_eq!(merged[0].provider, LinkedProvider::GitHub);

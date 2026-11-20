@@ -1,0 +1,270 @@
+use forage_core::integrations::baseline::PersonalPreference;
+use forage_ui::components::{AccountSection, Avatar, CsrfField, GoogleIcon, Icon, IntegrationIcon, ProviderTile};
+use forage_ui::layouts::Shell;
+use crate::views::account::{choice_classes, CLI_CHANNEL, DM_CHOICES};
+props crate::views::account::AccountPage { chrome, csrf_token, username, profile_picture_url, emails, mfa_enabled, back_href, back_label, error, flash, oauth_error, linked, slack_dm, cli_prefs };
+
+<Shell chrome={chrome}>
+  <section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+      <h1 class="text-2xl font-bold">Account Settings</h1>
+      <a href={back_href} class="text-sm text-gray-500 hover:text-gray-700">&larr; {back_label}</a>
+    </div>
+
+    {if let Some(error) = error {
+      <div class="mb-6 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">{error}</div>
+    }}
+    {if let Some(flash) = flash {
+      <div class="mb-6 p-3 bg-green-50 border border-green-200 rounded-md text-sm text-green-700">{flash}</div>
+    }}
+    {if let Some(oauth_error) = oauth_error {
+      <div class="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">{oauth_error}</div>
+    }}
+
+    <AccountSection title="Profile picture">
+      <div class="flex items-center gap-6">
+        <Avatar username={username.as_str()} url={profile_picture_url.as_deref()} />
+        <div class="flex flex-col gap-2">
+          <form method="POST" action="/settings/account/picture" enctype="multipart/form-data" class="flex items-center gap-2">
+            <CsrfField token={csrf_token.as_str()} name="_csrf" />
+            <input type="file" name="picture" accept="image/jpeg,image/png,image/webp"
+              class="text-sm text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border file:border-gray-300 file:text-sm file:bg-white file:text-gray-700 hover:file:bg-gray-50">
+            <button type="submit" class="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">Upload</button>
+          </form>
+          {if profile_picture_url.as_deref().is_some_and(|u| !u.is_empty()) {
+            <form method="POST" action="/settings/account/picture/remove">
+              <CsrfField token={csrf_token.as_str()} name="_csrf" />
+              <button type="submit" class="text-xs text-red-600 hover:text-red-800">Remove picture</button>
+            </form>
+          }}
+          <p class="text-xs text-gray-400">JPEG, PNG, or WebP. Max 2 MB.</p>
+        </div>
+      </div>
+    </AccountSection>
+
+    <AccountSection title="Username">
+      <form method="POST" action="/settings/account/username" class="flex gap-2">
+        <CsrfField token={csrf_token.as_str()} name="_csrf" />
+        <input type="text" name="username" value={username}
+          class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">Update</button>
+      </form>
+    </AccountSection>
+
+    <AccountSection title="Email addresses">
+      <div class="space-y-2 mb-4">
+        {for email in emails.iter() {
+          <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-gray-900">{email.email}</span>
+              {if email.verified {
+                <span class="text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">verified</span>
+              } else {
+                <span class="text-xs text-yellow-700 bg-yellow-100 px-1.5 py-0.5 rounded">unverified</span>
+              }}
+            </div>
+            <div class="flex items-center gap-3">
+              {if !email.verified {
+                <form method="POST" action="/settings/account/emails/resend-verification">
+                  <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                  <input type="hidden" name="email" value={email.email}>
+                  <button type="submit" class="text-xs text-gray-700 hover:text-gray-900 underline">Try sending again</button>
+                </form>
+              }}
+              <form method="POST" action="/settings/account/emails/remove">
+                <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                <input type="hidden" name="email" value={email.email}>
+                <button type="submit" class="text-xs text-red-600 hover:text-red-800">Remove</button>
+              </form>
+            </div>
+          </div>
+        }}
+      </div>
+      <form method="POST" action="/settings/account/emails" class="flex gap-2">
+        <CsrfField token={csrf_token.as_str()} name="_csrf" />
+        <input type="email" name="email" placeholder="new@example.com"
+          class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">Add email</button>
+      </form>
+    </AccountSection>
+
+    <AccountSection title="Change password">
+      <form method="POST" action="/settings/account/password" class="space-y-3">
+        <CsrfField token={csrf_token.as_str()} name="_csrf" />
+        <div>
+          <label for="current-password" class="block text-sm text-gray-700 mb-1">Current password</label>
+          <input type="password" id="current-password" name="current_password" required autocomplete="current-password"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+        <div>
+          <label for="new-password" class="block text-sm text-gray-700 mb-1">New password</label>
+          <input type="password" id="new-password" name="new_password" required autocomplete="new-password"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+        <div>
+          <label for="new-password-confirm" class="block text-sm text-gray-700 mb-1">Confirm new password</label>
+          <input type="password" id="new-password-confirm" name="new_password_confirm" required autocomplete="new-password"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+        <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">Change password</button>
+      </form>
+    </AccountSection>
+
+    <AccountSection title="Two-factor authentication">
+      {if *mfa_enabled {
+        <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg mb-4">
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+            <span class="text-sm text-gray-900">Two-factor authentication is <strong>enabled</strong></span>
+          </div>
+        </div>
+        <p class="text-sm text-gray-500 mb-4">Enter your current authenticator code to disable 2FA.</p>
+        <form method="POST" action="/settings/account/mfa/disable" class="flex gap-2 items-start">
+          <CsrfField token={csrf_token.as_str()} name="_csrf" />
+          <div class="flex-1">
+            <input type="text" name="code" required autocomplete="one-time-code" inputmode="numeric" pattern={"[0-9]{6}"} maxlength="6" aria-label="Authenticator code"
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-gray-900"
+              placeholder="000000">
+          </div>
+          <button type="submit" class="px-4 py-2 text-sm border border-red-300 text-red-700 rounded-md hover:bg-red-50 whitespace-nowrap">Disable 2FA</button>
+        </form>
+      } else {
+        <p class="text-sm text-gray-500 mb-4">Add an extra layer of security to your account by requiring a code from your authenticator app when you sign in.</p>
+        <form method="POST" action="/settings/account/mfa/setup">
+          <CsrfField token={csrf_token.as_str()} name="_csrf" />
+          <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">Enable two-factor authentication</button>
+        </form>
+      }}
+    </AccountSection>
+
+    {if let Some(linked) = linked {
+      <AccountSection title="Linked accounts">
+        <p class="text-sm text-gray-500 mb-4">Link external identities so we can map your work to your account. Disconnecting a sign-in provider won't log you out of this session. If it's the only way you sign in, we'll block the disconnect — set a password or link another provider first.</p>
+        {if !linked.accounts.is_empty() {
+          <div class="space-y-2 mb-4">
+            {for acc in linked.accounts.iter() {
+              <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <ProviderTile provider={acc.provider_key()} />
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">{acc.title}</p>
+                    <p class="text-xs text-gray-500">{acc.detail}</p>
+                  </div>
+                </div>
+                {if acc.is_slack() {
+                  <form method="POST" action="/settings/account/slack/disconnect">
+                    <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                    <input type="hidden" name="team_id" value={acc.disconnect_key}>
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Disconnect</button>
+                  </form>
+                } else {
+                  <form method="POST" action={acc.disconnect_action()} data-confirm={acc.disconnect_confirm()}>
+                    <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Disconnect</button>
+                  </form>
+                }}
+              </div>
+            }}
+          </div>
+        }}
+        <div class="flex flex-wrap gap-2">
+          {if linked.link_github {
+            <a href="/settings/account/github/connect" class="inline-flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+              <Icon name="github" class="w-4 h-4" />
+              Link GitHub
+            </a>
+          }}
+          {if linked.link_google {
+            <a href="/settings/account/google/connect" class="inline-flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+              <GoogleIcon />
+              Link Google
+            </a>
+          }}
+          {if linked.add_slack {
+            <a href="/settings/account/slack/connect" class="inline-flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+              <IntegrationIcon kind="slack" class="w-4 h-4 text-[#4A154B]" />
+              Add Slack workspace
+            </a>
+          }}
+        </div>
+      </AccountSection>
+    }}
+
+    {if let Some(dm) = slack_dm {
+      <AccountSection title="Individual Slack messages" id={Some("notifications")}>
+        <p class="text-sm text-gray-500 mb-4">Messages about releases that belong to you. Your organisation sets a default; your own choice here always wins.</p>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4">
+          {for row in dm.rows.iter() {
+            <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2" data-testid="dm-{row.key}">
+              <div>
+                <span class="block text-sm text-gray-900">{row.label}</span>
+                <span class="block text-xs text-gray-500">{match row.mode {
+                  PersonalPreference::Inherit => { Following your organisation's default ({row.org_default}) }
+                  PersonalPreference::On => { On &middot; your choice (organisation default: {row.org_default}) }
+                  PersonalPreference::Off => { Off &middot; your choice (organisation default: {row.org_default}) }
+                }}</span>
+              </div>
+              <div class="flex items-center gap-1">
+                {for choice in DM_CHOICES.iter() {
+                  <form method="POST" action="/settings/account/notifications" class="inline">
+                    <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                    <input type="hidden" name="notification_type" value={row.key}>
+                    <input type="hidden" name="channel" value="NOTIFICATION_CHANNEL_SLACK">
+                    <input type="hidden" name="enabled" value={choice.enabled}>
+                    <button type="submit" class={choice_classes(row.is(choice.mode))}>{choice.label}</button>
+                  </form>
+                }}
+                <form method="POST" action="/settings/account/notifications/reset" class="inline">
+                  <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                  <input type="hidden" name="notification_type" value={row.key}>
+                  <input type="hidden" name="channel" value="NOTIFICATION_CHANNEL_SLACK">
+                  <button type="submit" class={choice_classes(row.is(PersonalPreference::Inherit))} disabled={row.is(PersonalPreference::Inherit)}>Org default</button>
+                </form>
+              </div>
+            </div>
+          }}
+        </div>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {for route in dm.routes.iter() {
+            <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+              <span class="text-sm font-medium text-gray-900 sm:w-56 shrink-0">{route.org}{if !route.team_name.is_empty() { {" · "}{route.team_name} }}</span>
+              <span class={if route.reachable { "text-sm text-green-700" } else { "text-sm text-gray-600" }} data-testid="dm-route">{route.label}</span>
+            </div>
+          }}
+        </div>
+      </AccountSection>
+    }}
+
+    <AccountSection title="CLI notifications">
+      <p class="text-sm text-gray-500 mb-4">Choose which events appear in your CLI notification feed.</p>
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-gray-50 border-b border-gray-200">
+              <th class="text-left px-4 py-3 font-medium text-gray-700">Event</th>
+              <th class="text-center px-4 py-3 font-medium text-gray-700 w-24">CLI</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {for pref in cli_prefs.iter() {
+              <tr>
+                <td class="px-4 py-3 text-gray-700">{pref.label}</td>
+                <td class="text-center px-4 py-3">
+                  <form method="POST" action="/settings/account/notifications" class="inline">
+                    <CsrfField token={csrf_token.as_str()} name="_csrf" />
+                    <input type="hidden" name="notification_type" value={pref.key}>
+                    <input type="hidden" name="channel" value={CLI_CHANNEL}>
+                    <input type="hidden" name="enabled" value={pref.next_value()}>
+                    <button type="submit" class={if pref.enabled { "w-8 h-5 rounded-full relative transition-colors bg-gray-900" } else { "w-8 h-5 rounded-full relative transition-colors bg-gray-300" }} title={pref.title()} aria-pressed={if pref.enabled { "true" } else { "false" }}>
+                      <span class={if pref.enabled { "block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-0.5 transition-all left-[calc(100%-1.125rem)]" } else { "block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-0.5 transition-all left-0.5" }}></span>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            }}
+          </tbody>
+        </table>
+      </div>
+    </AccountSection>
+  </section>
+</Shell>

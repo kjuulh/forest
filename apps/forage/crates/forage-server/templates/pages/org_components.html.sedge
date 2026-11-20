@@ -1,0 +1,45 @@
+use forage_ui::components::{CodeBlock, EmptyState, Icon, Pagination};
+use forage_ui::layouts::Shell;
+use crate::views::catalogue::org_components_href;
+use crate::views::components::ComponentRow;
+props crate::views::catalogue::OrgComponentsPage { chrome, org, query, components, page, total_pages };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8 gap-4">
+      <h1 class="text-2xl font-bold">Components</h1>
+      {if !components.is_empty() || !query.is_empty() {
+        <details class="relative shrink-0 group">
+          <summary class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 cursor-pointer list-none select-none">
+            <Icon name="terminal" class="w-4 h-4" />
+            Install
+            <Icon name="chevron-down" class="w-3 h-3 ml-0.5" />
+          </summary>
+          <div class="absolute right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-md shadow-lg z-10 p-4 space-y-3">
+            <div>
+              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Subscribe to every tool in {org}</p>
+              <CodeBlock content={&format!("forest global add {org}")} copyable={true} id="org-install-cmd" />
+            </div>
+            <p class="text-xs text-gray-500">Subscribes your workstation to <span class="font-mono">{org}</span>'s catalogue. Forest installs shims for every tool the org publishes and keeps them in sync.</p>
+          </div>
+        </details>
+      }}
+    </div>
+    <form method="GET" action={org_components_href(org)} class="flex gap-3 mb-8">
+      <input type="text" name="q" value={query} placeholder="Search components..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+      <button type="submit" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800">Search</button>
+    </form>
+    {if !components.is_empty() {
+      <div class="space-y-3">
+        {for c in components.iter() {
+          <ComponentRow c={c} title={c.name} details={false} />
+        }}
+      </div>
+      <Pagination base_url={&org_components_href(org)} page={*page} total_pages={*total_pages} params={&[("q", query.as_str())]} />
+    } else if !query.is_empty() {
+      <EmptyState message={&format!("No components found for \"{query}\".")} />
+    } else {
+      <EmptyState message="No components published yet." hint="Publish with forest components publish ./my-component" />
+    }}
+  </section>
+</Shell>

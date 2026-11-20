@@ -38,7 +38,6 @@ import (
 	}
 }
 
-// Implements the forest/deployment contract.
 #Hooks: sdk.#ForestHooks & {
 	"forest/deployment": deployment.#DeploymentHooks & {
 		prepare: description: "Generate Terraform files for deployment"

@@ -273,9 +273,9 @@ Production traffic remains blocked until:
 
 ### Implemented
 
-- Rust is pinned to 1.98.1 across the root toolchain, CI images, and the Forage server template. The Forest and Forage build images track `rust:1.98-trixie`: Docker's official `rust` image publishes 1.98 and 1.98.0 but no 1.98.1 tag, so pinning the patch broke both image builds until this was corrected.
+- Rust is pinned to 1.100.0 (was 1.98.1 at cutover) across the root toolchain, CI images, and the Forage server template. The Forest and Forage build images track the minor tag (`rust:1.100-trixie`): when 1.98.1 was pinned, Docker's official `rust` image published no 1.98.1 tag, so pinning the patch broke both image builds.
 - SQLx is pinned to 0.9.0 and the Forest server's offline query metadata has been regenerated.
-- `mire` and `mire-sagas` are pinned to 0.3.0. Mire's optional NATS integration is not enabled; Forest's existing NATS dependency remains independent.
+- `mire` and `mire-sagas` are pinned to 0.4.0 (0.3.0 at cutover). 0.4.0 puts the PostgreSQL backend behind the `postgres` feature, which Forest enables explicitly because it turns default features off; its schema migrations are unchanged from 0.3.0. Mire's optional NATS integration is not enabled; Forest's existing NATS dependency remains independent.
 - All six aggregate contracts use Mire's `Aggregate`, `AggregateRoot`, `EventData`, and `RecordedEvent` types without compatibility aliases.
 - Forest `State` owns `mire::EventStore`.
 - Forest's transactional projection adapter uses Mire `TransactionScope`, so event append and synchronous projection SQL still commit or roll back together.

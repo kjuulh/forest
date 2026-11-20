@@ -1,0 +1,104 @@
+use forage_ui::components::Icon;
+use forage_ui::format::urlencode;
+use forage_ui::layouts::{OrgSettings, Shell};
+use forage_ui::org_settings::OrgSection;
+use forage_core::compute::RolloutStatus;
+use crate::views::org_pages::{resource_count, rollout_href};
+props crate::views::org_pages::ComputePage { chrome, org, instances, rollouts };
+
+<Shell chrome={chrome}>
+  <OrgSettings org={org} section={OrgSection::Compute}>
+    <h2 class="text-lg font-bold mb-6">Compute</h2>
+    <p class="text-sm text-gray-500 mb-6">Managed container instances deployed through forage/containers destinations. Pay-as-you-go compute — no cluster setup required.</p>
+    {if !instances.is_empty() {
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-left text-gray-500">
+            <tr>
+              <th class="px-5 py-3 font-medium">Project / Destination</th>
+              <th class="px-5 py-3 font-medium">Image</th>
+              <th class="px-5 py-3 font-medium">Region</th>
+              <th class="px-5 py-3 font-medium">Replicas</th>
+              <th class="px-5 py-3 font-medium">Resources</th>
+              <th class="px-5 py-3 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {for inst in instances.iter() {
+              <tr class="hover:bg-gray-50">
+                <td class="px-5 py-3">
+                  {if !inst.project.is_empty() {
+                    <a href="/orgs/{urlencode(org)}/projects/{urlencode(&inst.project)}" class="font-medium text-gray-900 hover:text-blue-600">{inst.project}</a>
+                    <span class="text-gray-400">/</span>
+                    <span class="text-sm font-mono text-gray-600">{inst.destination}</span>
+                    {if !inst.environment.is_empty() {
+                      <span class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{inst.environment}</span>
+                    }}
+                  } else {
+                    <span class="font-medium font-mono text-gray-900">{inst.resource_name}</span>
+                  }}
+                </td>
+                <td class="px-5 py-3 text-gray-600 font-mono text-xs">{inst.image}</td>
+                <td class="px-5 py-3">
+                  <span class="inline-flex items-center gap-1 text-xs font-mono">
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                    {inst.region}
+                  </span>
+                </td>
+                <td class="px-5 py-3 text-gray-600 font-mono">{inst.replicas}</td>
+                <td class="px-5 py-3 text-xs text-gray-500 font-mono">{inst.cpu} / {inst.memory}</td>
+                <td class="px-5 py-3">
+                  {match inst.status.as_str() {
+                    "running" => {
+                      <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                        Running
+                      </span>
+                    }
+                    "pending" => {
+                      <span class="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 bg-yellow-50 px-2 py-0.5 rounded-full">
+                        <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                        Pending
+                      </span>
+                    }
+                    other => { <span class="text-xs text-gray-500">{other}</span> }
+                  }}
+                </td>
+              </tr>
+            }}
+          </tbody>
+        </table>
+      </div>
+    } else {
+      <div class="border border-dashed border-gray-300 rounded-lg p-8 text-center">
+        <Icon name="server" class="mx-auto mb-3 w-8 h-8 text-gray-300" />
+        <p class="text-sm text-gray-500 mb-2">No compute instances running</p>
+        <p class="text-xs text-gray-400">Create a <a href="/orgs/{urlencode(org)}/destinations" class="text-blue-600 hover:underline">forage/containers destination</a> and deploy to get started.</p>
+      </div>
+    }}
+    {if !rollouts.is_empty() {
+      <h2 class="text-lg font-semibold mt-10 mb-4">Recent Rollouts</h2>
+      <div class="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+        {for rollout in rollouts.iter() {
+          {let dot = match rollout.status {
+            RolloutStatus::Succeeded => "bg-green-500",
+            RolloutStatus::InProgress => "bg-blue-500 animate-pulse",
+            RolloutStatus::Failed => "bg-red-500",
+            _ => "bg-gray-400",
+          };}
+          <a href={rollout_href(org, &rollout.id)} class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 block">
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="w-2 h-2 rounded-full {dot} shrink-0"></span>
+              <span class="text-sm font-medium font-mono text-gray-900 truncate">{rollout.apply_id}</span>
+              <span class="text-xs text-gray-400">{resource_count(rollout)}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-400">{rollout.status.to_string()}</span>
+              <Icon name="chevron-right" class="w-4 h-4 text-gray-300" />
+            </div>
+          </a>
+        }}
+      </div>
+    }}
+  </OrgSettings>
+</Shell>

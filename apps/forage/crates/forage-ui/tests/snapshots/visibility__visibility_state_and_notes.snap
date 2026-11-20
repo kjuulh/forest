@@ -1,0 +1,14 @@
+---
+source: crates/forage-ui/tests/visibility.rs
+expression: out
+---
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Public</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">Private</span>
+<p class="text-sm text-gray-600">
+<strong>Public is read-only.</strong> A public component is listed on the public registry
+  pages, with its readme, versions and manifest, for anyone to see, <em>including people who are
+  not signed in</em>. Anyone signed in to Forest can also resolve and download it. Publishing,
+  unpublishing and every other change still need membership of the organisation. The
+  organisation's releases, destinations, members and settings are not shared.
+</p>
+<p class="text-sm text-gray-500">Only an organisation admin can change this.</p>

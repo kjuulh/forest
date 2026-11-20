@@ -34,8 +34,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "1025:1025"
+      - "8025:8025"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8025/api/v1/info"]
       interval: 5s

@@ -3,10 +3,6 @@ use std::path::PathBuf;
 use super::{DestinationBackend, ProjectInfo, ReleaseAnnotation};
 use crate::logger::RemoteLogger;
 
-/// Backend backed by pre-fetched gRPC data and a `RemoteLogger`.
-///
-/// All data is fetched by the executor before the destination handler runs,
-/// so the trait methods simply return cloned data.
 pub struct RemoteBackend {
     deployment_files: Vec<(PathBuf, String)>,
     spec_files: Vec<(PathBuf, String)>,

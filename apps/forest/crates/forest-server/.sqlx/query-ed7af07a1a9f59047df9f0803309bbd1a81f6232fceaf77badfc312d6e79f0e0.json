@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO policies (project_id, name, policy_type, config)\n           VALUES ($1, $2, 'soak_time', $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ed7af07a1a9f59047df9f0803309bbd1a81f6232fceaf77badfc312d6e79f0e0"
+}

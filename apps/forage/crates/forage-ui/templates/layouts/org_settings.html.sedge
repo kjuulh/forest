@@ -1,0 +1,14 @@
+use crate::components::{SettingsPills, SettingsSidebar};
+use crate::org_settings::OrgSection;
+component OrgSettings(org: &str, section: OrgSection = OrgSection::General, children: Html) {
+<section class="app-container pt-12">
+  <h1 class="text-2xl font-bold mb-8">Settings</h1>
+  <SettingsPills org={*org} section={*section} />
+  <div class="flex gap-8">
+    <SettingsSidebar org={*org} section={*section} />
+    <div class="flex-1 min-w-0">
+      {children}
+    </div>
+  </div>
+</section>
+}

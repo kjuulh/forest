@@ -46,8 +46,6 @@ impl UpdateCommand {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
-        // `None` leaves the stored set untouched, so an update that only
-        // touches metadata cannot accidentally unhide a credential.
         let sensitive_keys = if self.clear_sensitive {
             Some(Vec::new())
         } else if self.sensitive.is_empty() {
@@ -56,10 +54,6 @@ impl UpdateCommand {
             Some(self.sensitive.clone())
         };
 
-        // Replacing is opt-in. The server stores metadata as one document, so a
-        // plain `--metadata k=v` used to send a one-entry map and delete
-        // everything else — including credentials this client is never shown and
-        // so could not have put back.
         if self.replace_metadata && metadata.is_empty() {
             anyhow::bail!(
                 "--replace-metadata with no --metadata would delete every key; \

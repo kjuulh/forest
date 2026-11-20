@@ -1914,6 +1914,13 @@ pub struct ReleaseContext {
     /// Number of destinations involved
     #[prost(int32, tag="16")]
     pub destination_count: i32,
+    /// How source_user_id was established: "actor" (the authenticated user who
+    /// ran the release), "github_id" (the detected commit author, via a GitHub
+    /// identity linked to their Forest account), "email" (the detected commit
+    /// author, via an email on their Forest account), or empty when unknown or
+    /// when there is no personal recipient.
+    #[prost(string, tag="18")]
+    pub source_attribution: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Notification {
@@ -1964,6 +1971,24 @@ pub struct SetNotificationPreferenceRequest {
 pub struct SetNotificationPreferenceResponse {
     #[prost(message, optional, tag="1")]
     pub preference: ::core::option::Option<NotificationPreference>,
+}
+/// Explicit preferences stored for one user. Service accounts only: delivery
+/// services read a recipient's preferences before routing to them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetUserNotificationPreferencesRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+/// Removes the caller's explicit preference, so the default applies again.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetNotificationPreferenceRequest {
+    #[prost(enumeration="NotificationType", tag="1")]
+    pub notification_type: i32,
+    #[prost(enumeration="NotificationChannel", tag="2")]
+    pub channel: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetNotificationPreferenceResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListenNotificationsRequest {
@@ -2096,6 +2121,10 @@ pub struct LookupOAuthClientResponse {
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// A public client (RFC 8252 native app, e.g. a CLI) holds no secret, so it
+    /// must bind every authorization to a PKCE S256 challenge.
+    #[prost(bool, tag="8")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAuthorizationCodeRequest {
@@ -2109,10 +2138,10 @@ pub struct CreateOAuthAuthorizationCodeRequest {
     /// consented scopes (subset of app scopes)
     #[prost(string, repeated, tag="4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// PKCE (optional)
+    /// PKCE (optional; required, S256, for a public client)
     #[prost(string, tag="5")]
     pub code_challenge: ::prost::alloc::string::String,
-    /// "S256" | "plain" (optional)
+    /// "S256" | "plain" (optional; must be "S256" for a public client)
     #[prost(string, tag="6")]
     pub code_challenge_method: ::prost::alloc::string::String,
     /// OIDC nonce (optional) — echoed into the id_token
@@ -2131,6 +2160,7 @@ pub struct CreateOAuthAuthorizationCodeResponse {
 pub struct ExchangeOAuthCodeRequest {
     #[prost(string, tag="1")]
     pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
@@ -2175,7 +2205,14 @@ pub struct IntrospectClientTokenRequest {
 }
 /// Empty `app_id` means the token is not live — unknown, expired or
 /// revoked, deliberately indistinguishable to the caller.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+///
+/// Two kinds of token are live: an app's client-credentials token
+/// (`forest_cat_`), and an access token an app holds on a user's behalf
+/// (`forest_oat_`, from the authorization-code flow). For the latter
+/// `user_id` is set, along with the user's username and the organisations
+/// they belong to; `organisation_id` is still the app's. For a client
+/// token the user fields are empty.
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IntrospectClientTokenResponse {
     #[prost(bool, tag="1")]
     pub active: bool,
@@ -2185,6 +2222,20 @@ pub struct IntrospectClientTokenResponse {
     pub organisation_id: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag="5")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="7")]
+    pub organisations: ::prost::alloc::vec::Vec<IntrospectedOrganisation>,
+}
+/// An organisation the user behind an introspected token is a member of.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IntrospectedOrganisation {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthUserinfoRequest {
@@ -2225,6 +2276,7 @@ pub struct GetOAuthUserinfoResponse {
 pub struct RefreshOAuthTokenRequest {
     #[prost(string, tag="1")]
     pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
@@ -2285,6 +2337,95 @@ pub struct GetOAuthConsentResponse {
     #[prost(string, repeated, tag="1")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    /// non-empty subset of the app's scopes
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateOAuthDeviceAuthorizationResponse {
+    /// Secret: only the client holds it, and sends it back to redeem the grant.
+    #[prost(string, tag="1")]
+    pub device_code: ::prost::alloc::string::String,
+    /// Shown to the person, e.g. "BCDF-GHJK".
+    #[prost(string, tag="2")]
+    pub user_code: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub verification_uri: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub verification_uri_complete: ::prost::alloc::string::String,
+    #[prost(int64, tag="5")]
+    pub expires_in_seconds: i64,
+    #[prost(int32, tag="6")]
+    pub interval_seconds: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthDeviceAuthorizationResponse {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// the app's name
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub homepage_url: ::prost::alloc::string::String,
+    /// what approving grants the app
+    #[prost(string, repeated, tag="4")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    /// the approving user (resolved by Forage's session)
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub approving_ip: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub approving_user_agent: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveOAuthDeviceAuthorizationResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyOAuthDeviceAuthorizationResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthDeviceCodeRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub device_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthDeviceCodeResponse {
+    #[prost(enumeration="OAuthDeviceTokenStatus", tag="1")]
+    pub status: i32,
+    /// only when ISSUED
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<OAuthTokens>,
+}
 /// Public-safe representation of an OAuth application. Never carries the
 /// client_secret (that is only present in Create/Rotate responses).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2309,8 +2450,9 @@ pub struct OAuthApp {
     /// scopes this app is permitted to request
     #[prost(string, repeated, tag="8")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// OAuth grants this app may use: "authorization_code" and/or
-    /// "client_credentials". Apps predating machine-to-machine support
+    /// OAuth grants this app may use: "authorization_code",
+    /// "client_credentials" and/or "urn:ietf:params:oauth:grant-type:device_code".
+    /// Apps predating machine-to-machine support
     /// carry "authorization_code" alone.
     #[prost(string, repeated, tag="12")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
@@ -2321,6 +2463,11 @@ pub struct OAuthApp {
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="11")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// A public client (RFC 8252 native app, e.g. a CLI): it has no usable
+    /// client_secret, may only use `authorization_code` (with PKCE S256) and
+    /// the device grant, and may not hold `openid`. Fixed at creation.
+    #[prost(bool, tag="13")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppRequest {
@@ -2340,12 +2487,17 @@ pub struct CreateOAuthAppRequest {
     /// machine-capable by asking.
     #[prost(string, repeated, tag="7")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Register a public client (a CLI or other native app that cannot keep a
+    /// secret). No client_secret is returned, and the app may only use
+    /// `authorization_code` with PKCE S256 and may not hold `openid`.
+    #[prost(bool, tag="8")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppResponse {
     #[prost(message, optional, tag="1")]
     pub app: ::core::option::Option<OAuthApp>,
-    /// The raw client_secret, only returned on creation.
+    /// The raw client_secret, only returned on creation. Empty for a public app.
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
 }
@@ -2422,6 +2574,46 @@ pub struct DeleteOAuthAppRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteOAuthAppResponse {
+}
+/// RFC 8628 §3.5. A device_code that is unknown, already redeemed, or bound
+/// to another client is EXPIRED_TOKEN, indistinguishable from a lapsed one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OAuthDeviceTokenStatus {
+    Unspecified = 0,
+    Issued = 1,
+    AuthorizationPending = 2,
+    SlowDown = 3,
+    AccessDenied = 4,
+    ExpiredToken = 5,
+}
+impl OAuthDeviceTokenStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED",
+            Self::Issued => "O_AUTH_DEVICE_TOKEN_STATUS_ISSUED",
+            Self::AuthorizationPending => "O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING",
+            Self::SlowDown => "O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN",
+            Self::AccessDenied => "O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED",
+            Self::ExpiredToken => "O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "O_AUTH_DEVICE_TOKEN_STATUS_ISSUED" => Some(Self::Issued),
+            "O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING" => Some(Self::AuthorizationPending),
+            "O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN" => Some(Self::SlowDown),
+            "O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED" => Some(Self::AccessDenied),
+            "O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN" => Some(Self::ExpiredToken),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseRequest {
@@ -2638,6 +2830,10 @@ pub struct UpdateProjectRequest {
     /// server-side. To clear all metadata, send an empty ProjectMetadata.
     #[prost(message, optional, tag="5")]
     pub metadata: ::core::option::Option<ProjectMetadata>,
+    /// "public" or "private". Unset leaves it unchanged. Public lets anyone signed
+    /// in resolve the project's components; changing it needs an org admin.
+    #[prost(string, optional, tag="6")]
+    pub visibility: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectResponse {
@@ -4172,6 +4368,36 @@ pub struct UpdateMemberRoleRequest {
 pub struct UpdateMemberRoleResponse {
     #[prost(message, optional, tag="1")]
     pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOrganisationVisibilityRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    /// "public" or "private".
+    #[prost(string, tag="2")]
+    pub visibility: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOrganisationVisibilityResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVisibilityRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub project: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVisibilityResponse {
+    /// "public" or "private".
+    #[prost(string, tag="1")]
+    pub organisation_visibility: ::prost::alloc::string::String,
+    /// The project's own setting; set when a project was named. A component is
+    /// public when this or the organisation is.
+    #[prost(string, optional, tag="2")]
+    pub project_visibility: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bool, tag="3")]
+    pub can_change: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListMembersRequest {

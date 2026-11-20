@@ -10,19 +10,6 @@ use crate::{
     user_state::UserStateLoaderState,
 };
 
-/// Print a single line naming the forest context + server URL the publish is
-/// about to hit. TASKS/031 item #10 — prevents accidental pushes to the wrong
-/// (e.g. prod) registry by making the destination visible *before* the first
-/// RPC.
-///
-/// Resolved exactly as the gRPC client resolves it (`--forest-server`, then
-/// `--context`, then the active context), so the line names where the upload
-/// actually goes. It used to read the stored active context only, and named
-/// the wrong instance whenever `--context` or `--forest-server` was given.
-///
-/// Best-effort: a failure to resolve (no contexts configured, corrupted state
-/// file) silently degrades to a minimal "publishing <owner>/<component>" line
-/// so we never block the publish just for the courtesy print.
 fn print_publish_context(state: &State, owner: &str, component: &str) {
     let target = ContextStore::from_env().and_then(|store| {
         crate::contexts::resolve_server_target(
@@ -33,33 +20,40 @@ fn print_publish_context(state: &State, owner: &str, component: &str) {
     });
     match target {
         Ok(target) => {
-            tracing::debug!(
-                "publishing as {owner}/{component} to {} ({})",
-                target.label,
-                target.server
-            );
-            crate::ui::status(publish_line(owner, component, &target));
+            let line = publish_line(owner, component, &target);
+            tracing::debug!("{line}");
+            crate::ui::status(line);
         }
         Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
     }
 }
 
-/// The server URL is on the human line too: two contexts can share a
-/// misleading name, and the URL is what says which registry this is.
+fn display_server(server: &str) -> std::borrow::Cow<'_, str> {
+    if !server.contains(['@', '?', '#']) {
+        return std::borrow::Cow::Borrowed(server);
+    }
+    let Ok(mut url) = reqwest::Url::parse(server) else {
+        return std::borrow::Cow::Borrowed("<invalid server URL>");
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    std::borrow::Cow::Owned(url.into())
+}
+
 fn publish_line(owner: &str, component: &str, target: &crate::contexts::ServerTarget) -> String {
+    let server = display_server(&target.server);
     if target.label == target.server {
-        format!("Publishing {owner}/{component} to {}", target.server)
+        format!("Publishing {owner}/{component} to {server}")
     } else {
         format!(
             "Publishing {owner}/{component} to {} ({})",
-            target.label, target.server
+            target.label, server
         )
     }
 }
 
-/// Shape/kind/platform discriminators the post-success summary needs from
-/// the publish flow. Kept as a plain data carrier so each publish path
-/// (main, external, prebuilt) can construct it inline without coupling.
 struct PublishSummary {
     owner: String,
     component: String,
@@ -71,7 +65,6 @@ struct PublishSummary {
 
 impl PublishSummary {
     fn print(&self) {
-        // shape/kind/platform are diagnostic detail — keep them in the logs.
         tracing::debug!(
             "published {}/{}@{} as shape={} [{}] {}",
             self.owner,
@@ -88,10 +81,6 @@ impl PublishSummary {
     }
 }
 
-/// Derive the manifest shape string from the kind + descriptor presence.
-/// Mirrors `forest_manifest::derive_shape` for the binary/external kinds
-/// the manifest validator accepts today; CUE-only / Deno publishes report
-/// their CLI kind directly because no manifest shape is computed for them.
 fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'static str {
     match (kind, has_tool, has_methods) {
         ("binary", false, true) => "component",
@@ -104,24 +93,6 @@ fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'stat
     }
 }
 
-/// Warn when a *tool* is about to be published for a single platform.
-///
-/// A component with a tool facet is installable with `forest global add`, so a
-/// colleague on any other OS/arch gets a hard failure:
-///
-/// ```text
-/// tool understory/fungus@0.1.28 not available for linux/amd64; published for: darwin/arm64
-/// ```
-///
-/// This is easy to do by accident and invisible at publish time, because a
-/// `type: "rust"` / `"go"` component is compiled on whichever host runs publish
-/// — so a publish from a Mac contributes darwin/arm64 and nothing else, no
-/// matter what the `architectures` matrix promises. fungus shipped four
-/// versions that way before anyone on Linux tried to run it.
-///
-/// Returns the message to show, or `None` when there is nothing to warn about:
-/// a non-tool component (a library is not installed per-platform), or a tool
-/// that already ships more than one platform.
 fn single_platform_tool_warning(
     has_tool: bool,
     platforms: &[String],
@@ -134,8 +105,6 @@ fn single_platform_tool_warning(
     let remedy = if upload_type == Some("prebuilt") {
         "add the other platforms to `upload.prebuilt` in forest.cue"
     } else {
-        // The built path physically cannot do better than the host, so pointing
-        // at the architectures matrix would be misleading advice.
         "switch to `upload.type: \"prebuilt\"` and build each platform up front \
 (a built component only ever publishes the host's platform)"
     };
@@ -145,24 +114,6 @@ platform; {remedy}"
     ))
 }
 
-/// The binaries to publish: everything under `.forest/component/output/`, and
-/// nothing else.
-///
-/// DATA-654. That directory is what the build components write
-/// (`forest run build`), it covers the whole cross-compile matrix, and it holds
-/// *release* artifacts. Before this it was only a preference: an empty output
-/// tree fell back to `component_binary::resolve_binary`, which walks up to the
-/// cargo workspace root and probes `target/debug/<name>` *before*
-/// `target/release/<name>`. Publish then shipped whatever happened to be in
-/// `target/` — in practice a stale debug build, more than once.
-///
-/// There is no fallback now, not even the content-addressable cache: `meta.json`
-/// records whatever the *local* resolver last synced, and `forest run` syncs
-/// `target/debug` builds into it, so honouring the cache would upload the same
-/// stale binary with a hash check in front of it. See
-/// `component_binary::resolve_publishable_binary`.
-///
-/// An empty output tree is an error, loudly, rather than a quiet mis-upload.
 fn publishable_binaries(
     current_dir: &std::path::Path,
     name: &str,
@@ -183,19 +134,10 @@ fn publishable_binaries(
     )
 }
 
-/// DATA-654 — `.forest` is the only place a publish takes artifacts from.
-///
-/// The decoy in every one of these is a `target/debug/<name>` inside a real
-/// cargo workspace layout, i.e. exactly what `find_local_binary` used to hand
-/// the publish flow and what got uploaded to the registry as a stale debug
-/// build. It must never appear in the result.
 #[cfg(test)]
 mod publishable_binaries_tests {
     use super::*;
 
-    /// A cargo workspace root with a component subdirectory, plus a decoy
-    /// `target/debug/<name>` that the old resolver would have found by
-    /// walking up from the component.
     fn workspace_with_decoy(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
@@ -240,8 +182,6 @@ mod publishable_binaries_tests {
         );
     }
 
-    /// The regression this whole change exists for: nothing staged, a stale
-    /// debug binary sitting in target/. Publish must refuse, not upload it.
     #[test]
     fn empty_forest_dir_fails_loudly_instead_of_falling_back_to_target() {
         let (_tmp, component) = workspace_with_decoy("mytool");
@@ -260,10 +200,6 @@ mod publishable_binaries_tests {
         );
     }
 
-    /// A `meta.json` naming a cached blob — the shape a "registry cache
-    /// restore" would take — is not a fallback either. That file records
-    /// whatever the *local* resolver last synced, and `forest run` fills it
-    /// from `target/debug`, so it cannot vouch for the build profile.
     #[test]
     fn a_cached_blob_is_not_a_fallback_for_an_empty_forest_dir() {
         let (_tmp, component) = workspace_with_decoy("mytool");
@@ -286,9 +222,6 @@ mod publishable_binaries_tests {
         );
     }
 
-    /// A partial matrix still publishes what built. Cross-compiling is not
-    /// always possible on one runner (DATA-583), so "some platforms staged"
-    /// must stay a success, not become the new failure mode.
     #[test]
     fn a_partial_matrix_publishes_the_platforms_that_built() {
         let (_tmp, component) = workspace_with_decoy("mytool");
@@ -304,15 +237,6 @@ mod publishable_binaries_tests {
     }
 }
 
-/// RAII guard that fires a best-effort `AbortUpload` RPC on Drop unless
-/// disarmed. Wraps every `forest publish` flow so an early `?` return, a
-/// panic, or a Ctrl-C between `begin_upload` and `commit_upload` leaves
-/// the server's staging row aborted rather than half-staged. See
-/// TASKS/023-publish-transactional.md.
-///
-/// The server's `AbortUpload` handler is idempotent — unknown / already
-/// committed / already aborted uploads are no-ops — so the fire-and-forget
-/// pattern here cannot create spurious state.
 struct AbortOnDrop {
     client: Option<GrpcClient>,
     upload_context: String,
@@ -328,8 +252,6 @@ impl AbortOnDrop {
         }
     }
 
-    /// Cancel the abort — call this after `commit_upload` succeeds so the
-    /// guard does not roll back a legitimate publish on the way out.
     fn disarm(mut self) {
         self.client = None;
     }
@@ -342,9 +264,6 @@ impl Drop for AbortOnDrop {
         };
         let upload_context = std::mem::take(&mut self.upload_context);
         let reason = std::mem::take(&mut self.reason);
-        // Fire-and-forget on the current tokio runtime. Errors are swallowed:
-        // the server is required to be idempotent on abort, and there's no
-        // user-visible action to take from a Drop handler anyway.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 if let Err(e) = client
@@ -369,11 +288,6 @@ mod abort_on_drop_tests {
         atomic::{AtomicBool, Ordering},
     };
 
-    /// Re-implementation of the guard against a trivial sink so we can test
-    /// arm / disarm semantics without needing a live gRPC server.
-    ///
-    /// This mirrors the production guard's *contract*: on Drop with the
-    /// "armed" flag set, fire a side effect; on `disarm`, do not.
     struct TestGuard {
         fired: Arc<AtomicBool>,
         armed: bool,
@@ -399,7 +313,6 @@ mod abort_on_drop_tests {
         let fired = Arc::new(AtomicBool::new(false));
         {
             let _g = TestGuard::new(fired.clone());
-            // implicit drop here
         }
         assert!(fired.load(Ordering::SeqCst), "guard should fire on drop");
     }
@@ -465,11 +378,6 @@ mod abort_on_drop_tests {
             .collect()
     }
 
-    /// A component that imports the SDK is unusable from the registry without
-    /// its module file, so publishing has to carry it. Regression for
-    /// forest/deployment@0.3.0, which shipped without one and failed every
-    /// consumer with "imports are unavailable because there is no
-    /// cue.mod/module.cue file".
     #[tokio::test]
     async fn publish_includes_the_cue_module_file() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -495,8 +403,6 @@ mod abort_on_drop_tests {
         assert!(names.iter().any(|n| n == "forest.cue"), "got: {names:?}");
     }
 
-    /// And a component without one still publishes rather than erroring —
-    /// plenty of components import nothing.
     #[tokio::test]
     async fn publish_without_a_module_file_is_fine() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -508,16 +414,6 @@ mod abort_on_drop_tests {
         assert_eq!(names, vec!["forest.cue".to_string()]);
     }
 
-    /// The regression this whole function exists for.
-    ///
-    /// Publishing used to collect a hand-picked list — top-level `*.cue`
-    /// plus `cue.mod/module.cue` — so `templates/` shipped with nothing.
-    /// A consumer then deployed a component whose Terraform did not
-    /// exist, and because `forest release prepare` renders templates
-    /// behind `if template_dir.exists()`, it produced an empty directory
-    /// and OpenTofu failed with "No configuration files" — naming
-    /// neither the component nor the missing files. `init/**`, read by
-    /// scaffolding, fell through the same hole.
     #[tokio::test]
     async fn publish_includes_templates_and_scaffolding() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -551,10 +447,6 @@ mod abort_on_drop_tests {
         );
     }
 
-    /// The payload lands on disk before it is sent, so "what did this
-    /// publish contain" is a directory you can look at rather than a
-    /// question you answer by reading the code — the same role
-    /// `.forest/deployment/` plays for a release.
     #[tokio::test]
     async fn publish_stages_the_payload_under_dot_forest() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -587,9 +479,53 @@ mod abort_on_drop_tests {
         );
     }
 
-    /// A file deleted from the component must not survive in the package.
-    /// The staged tree is rebuilt each run precisely so a stale entry
-    /// cannot ship forever.
+    #[tokio::test]
+    async fn the_staged_package_does_not_show_up_as_untracked_in_git() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+        tokio::fs::write(dir.path().join(".gitignore"), "dist/\n")
+            .await
+            .expect("write the component's own .gitignore");
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .expect("run git")
+        };
+        assert!(git(&["init", "-q"]).status.success());
+
+        let files = super::stage_component_package(
+            dir.path(),
+            &[],
+            &super::DeclaredPaths::default(),
+            Vec::new(),
+        )
+        .await
+        .expect("stage");
+
+        let own_ignore = files.iter().find(|(name, _)| name == ".gitignore");
+        assert_eq!(
+            own_ignore.map(|(_, c)| c.as_slice()),
+            Some(b"dist/\n".as_slice()),
+            "the component's own .gitignore must publish unchanged, got: {files:?}",
+        );
+        let staged_copy = std::fs::read(dir.path().join(super::PACKAGE_DIR).join(".gitignore"))
+            .expect("staged .gitignore");
+        assert_eq!(staged_copy, b"dist/\n");
+        let status = git(&["status", "--porcelain", "--untracked-files=all"]);
+        let untracked = String::from_utf8_lossy(&status.stdout);
+        let mut lines: Vec<&str> = untracked.lines().collect();
+        lines.sort();
+        assert_eq!(
+            lines,
+            ["?? .gitignore", "?? forest.cue"],
+            "got: {untracked}"
+        );
+    }
+
     #[tokio::test]
     async fn staging_clears_what_the_component_no_longer_has() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -620,9 +556,6 @@ mod abort_on_drop_tests {
         );
     }
 
-    /// Staged build output is uploaded as typed per-platform binaries, so
-    /// it must not ALSO ship as generic files — that would double every
-    /// binary in the payload.
     #[tokio::test]
     async fn publish_excludes_staged_build_output() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -638,8 +571,6 @@ mod abort_on_drop_tests {
             .await
             .expect("write staged binary");
 
-        // Consumers DO read this one, so it is not excluded with the rest
-        // of `.forest/`.
         let meta = dir.path().join(".forest/component");
         tokio::fs::write(meta.join("meta.json"), "{}\n")
             .await
@@ -667,9 +598,6 @@ mod abort_on_drop_tests {
 
     #[test]
     fn summary_format_is_stable() {
-        // Snapshot the exact line format we print on success. Users grep
-        // this output, so the format is part of the CLI contract — changing
-        // it should require deliberately updating this test.
         let s = PublishSummary {
             owner: "understory".into(),
             component: "canopy-data-cli".into(),
@@ -678,8 +606,6 @@ mod abort_on_drop_tests {
             kind: "binary",
             platform: "darwin_arm64".into(),
         };
-        // Mirror what `print` writes so the assertion exercises the format
-        // without needing to capture stderr.
         let line = format!(
             "published {}/{}@{} as shape={} [{}] {}",
             s.owner, s.component, s.version, s.shape, s.kind, s.platform,
@@ -697,7 +623,6 @@ mod abort_on_drop_tests {
 
         let td = tempfile::TempDir::new().unwrap();
         let store = ContextStore::with_root(td.path().to_path_buf());
-        // `default` stays active; `prod` is only selected via --context.
         store
             .create("prod", "https://forest.example.invalid", false)
             .unwrap();
@@ -709,15 +634,11 @@ mod abort_on_drop_tests {
         );
         let active = resolve_server_target(None, None, &store).unwrap();
         assert_eq!(active.label, "default");
-        // An unknown name is an error, so the caller prints the bare line.
         assert!(resolve_server_target(None, Some("missing"), &store).is_err());
     }
 
     #[test]
     fn production_guard_compiles_with_disarm_signature() {
-        // Compile-time check on AbortOnDrop's API surface. We can't construct
-        // one without a real GrpcClient; the runtime assertion (aborted upload
-        // frees the version for a fresh begin) lives in the accepttest suite.
         let _ = std::mem::size_of::<AbortOnDrop>();
     }
 }
@@ -751,11 +672,9 @@ pub struct PublishCommand {
     /// before, so manual publishing is unchanged.
     ///
     /// Set the *env* form rather than the flag when the build has to agree:
-    /// `forest run build` reads the same variable, so exporting it once
-    /// covers build and publish and the binary's stamped version matches
-    /// what the registry records. Passing only `--version` overrides the
-    /// publish but leaves an already-built binary stamped with the cue
-    /// version, which `forest publish` warns about.
+    /// forest's rust/go/docker build components stamp that variable into the
+    /// binary. A `prebuilt` build script must stamp it itself; `forest
+    /// components version` prints the version this publish would use.
     #[arg(
         long = "version",
         value_name = "VERSION",
@@ -765,16 +684,6 @@ pub struct PublishCommand {
 }
 
 impl PublishCommand {
-    /// Construct a non-dry-run publish for programmatic use. Used by the
-    /// hidden `forest bootstrap` command, which publishes many components by
-    /// switching the working directory between them. DATA-312.
-    ///
-    /// `version: None` is deliberate and load-bearing. Bootstrap publishes
-    /// every workspace component in one process; a `FOREST_COMPONENT_VERSION`
-    /// in the ambient environment would otherwise stamp all of them with one
-    /// version. Because the override is read by clap's `env` (applied only
-    /// when parsing argv) rather than by `std::env::var` at use-site, this
-    /// constructor is immune by construction — keep it that way.
     pub fn for_bootstrap() -> Self {
         Self {
             dry_run: false,
@@ -782,57 +691,14 @@ impl PublishCommand {
         }
     }
 
-    /// Resolve the version to publish under: the override if one was given,
-    /// otherwise whatever forest.cue declared.
-    ///
-    /// An all-whitespace override is treated as absent. CI writes these from
-    /// shell interpolation (`--version "${{ inputs.version }}"`), and an
-    /// unset input expands to the empty string — publishing `""` would fail
-    /// the C8 semver gate with a baffling message instead of just falling
-    /// back to the manifest.
     fn resolve_version<'a>(&'a self, cue_version: &'a str) -> &'a str {
-        match self.version.as_deref().map(str::trim) {
-            Some(v) if !v.is_empty() => v,
-            _ => cue_version,
-        }
+        effective_version(self.version.as_deref(), cue_version)
     }
 
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // 1. Parse the component's CUE files to get metadata
-        let mut cue_args = vec![
-            "export".to_string(),
-            "--out".to_string(),
-            "json".to_string(),
-        ];
         let current_dir = std::env::current_dir()?;
-        // Collect all .cue files for evaluation
-        let mut dir_entries = tokio::fs::read_dir(&current_dir).await?;
-        while let Some(entry) = dir_entries.next_entry().await? {
-            if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {
-                cue_args.push(entry.file_name().to_string_lossy().to_string());
-            }
-        }
+        let doc = export_forest_cue(&current_dir).await?;
 
-        let output = crate::tools::cue::output(|| {
-            let mut cmd = tokio::process::Command::new("cue");
-            cmd.args(&cue_args);
-            if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-                cmd.env("CUE_REGISTRY", registry);
-            }
-            cmd
-        })
-        .await?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::diagnostics::report(
-                crate::diagnostics::CueEvalError::from_cue_stderr(&current_dir, &stderr),
-            ));
-        }
-
-        let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-
-        // Extract metadata — forest.component is optional for CUE-only components
         let component = doc.get("forest").and_then(|f| f.get("component"));
 
         let project = doc.get("project");
@@ -843,14 +709,7 @@ impl PublishCommand {
             .or_else(|| project.and_then(|p| p.get("name")).and_then(|v| v.as_str()))
             .context("component or project name is required")?;
 
-        let cue_version = component
-            .and_then(|c| c.get("version"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("0.1.0");
-        // DATA-583: `--version` / FOREST_COMPONENT_VERSION win over the
-        // manifest so a tag-triggered release picks the version without
-        // editing forest.cue. Resolved once, here, so every downstream
-        // step — preflight, manifest, upload, summary — sees one value.
+        let cue_version = cue_component_version(&doc);
         let version = self.resolve_version(cue_version);
         if version != cue_version {
             crate::ui::status(format!(
@@ -866,27 +725,12 @@ impl PublishCommand {
 
         tracing::info!("publishing component {organisation}/{name}@{version}");
 
-        // DATA-583: fail here, offline, rather than on the first RPC. Publish
-        // is the one command CI runs unattended, and the overwhelmingly common
-        // CI misconfiguration — the secret never reached the job — otherwise
-        // surfaces as a transport-layer "user is not logged in" from inside the
-        // auth interceptor, several frames from anything actionable.
         ensure_authenticated(state).await?;
 
-        // Sync project-level metadata (description, About-sidebar fields, README)
-        // from forest.cue → server. CUE is source of truth: missing in CUE = cleared.
-        // See specs/features/009-project-metadata.md.
-        //
-        // Skipped under --dry-run: this is `create_project` plus a metadata
-        // write, so running it contacts — and mutates — the registry the flag
-        // promises not to touch. It also *clears* server-side fields absent from
-        // CUE, so a dry run could quietly wipe a project's description.
         if !self.dry_run {
             sync_project_fields(state, &current_dir, organisation, name, &doc).await?;
         }
 
-        // Dispatch: `external:` block in forest.cue means external manifest mode
-        // (TASKS/018-global-tools.md §1a.2b). No build, no UploadBinary.
         let external = component.and_then(|c| c.get("external"));
         if let Some(external_block) = external {
             return publish_external(
@@ -902,10 +746,6 @@ impl PublishCommand {
             .await;
         }
 
-        // Dispatch: `upload.type == "prebuilt"` uploads existing binaries
-        // declared per-platform in CUE. Skips `forest build` and skips
-        // the `_meta/describe` probe — the tool facet is sourced from
-        // `#Tool` instead. Result is kind=binary (auth-gated download).
         let upload_type = component
             .and_then(|c| c.get("upload"))
             .and_then(|u| u.get("type"))
@@ -923,11 +763,6 @@ impl PublishCommand {
             .await;
         }
 
-        // TASKS/028: run the full Phase 1 preflight as a gate. This
-        // subsumes the standalone 027 check (it's now C5) and adds the
-        // names-agree (C3) and semver-valid (C8) checks. All failures
-        // are reported together so the user doesn't have to fix one,
-        // re-run, fix the next.
         let pf_ctx = crate::services::preflight::PreflightContext {
             current_dir: current_dir.clone(),
             doc: doc.clone(),
@@ -943,12 +778,6 @@ impl PublishCommand {
             ));
         }
 
-        // 2. Check for binary (optional — CUE-only / Deno components don't need one)
-        //
-        // DATA-654: resolve through the publish-only resolver, not
-        // `resolve_binary`. The latter also probes the cargo target directory,
-        // which would let a stray `target/debug/<name>` answer "yes, this is a
-        // binary component" here and then be uploaded below.
         let binary = component_binary::resolve_publishable_binary(
             &current_dir,
             name,
@@ -957,11 +786,6 @@ impl PublishCommand {
             Some(version),
         );
 
-        // Detect Deno components: forest.cue declares `upload.type = "deno"`
-        // *or* the working dir has the Deno shape (deno.json + src/main.ts).
-        // When matched, the publish flow uploads the source tree alongside
-        // CUE so consumers can spawn the component directly from cache,
-        // matching how a local path-dep behaves.
         let upload_section = component.and_then(|c| c.get("upload"));
         let upload_type = upload_section
             .and_then(|u| u.get("type"))
@@ -979,9 +803,6 @@ impl PublishCommand {
             };
             (Some(desc), "binary")
         } else if is_deno_component {
-            // Deno components carry a descriptor via the local build cache's
-            // meta.json. Load it so the published manifest can advertise
-            // methods + tool facet, matching the binary path.
             let desc = component_binary::load_cached_descriptor_with_meta(
                 &current_dir,
                 Some(organisation),
@@ -994,7 +815,6 @@ impl PublishCommand {
             (None, "cue")
         };
 
-        // 3. Build manifest
         let mut manifest = serde_json::json!({
             "name": name,
             "organisation": organisation,
@@ -1004,27 +824,16 @@ impl PublishCommand {
 
         if let Some(ref desc) = descriptor {
             manifest["protocol_version"] = serde_json::json!(desc.protocol_version);
-            // Methods are also surfaced as a plain string array for the
-            // shape derivation in forest-manifest (HYBRID vs COMPONENT).
             let method_names: Vec<String> = desc.methods.iter().map(|m| m.name.clone()).collect();
             manifest["methods"] = serde_json::json!(method_names);
             manifest["capabilities"] = serde_json::json!({ "methods": desc.methods });
-            // Carry the tool facet through to the published manifest if the
-            // describe response advertised one.
             if let Some(tool) = describe_response_tool_facet(desc) {
                 manifest["tool"] = tool;
             }
 
-            // `platforms` is binary-only metadata: per-OS/arch hashes for
-            // the downloader. Deno components run via the source bundle
-            // we upload separately and have no `platforms` map.
             if binary.is_some() {
-                // Every platform the build produced, not just the host's.
                 let mut platforms = serde_json::Map::new();
                 for (os, arch, path) in publishable_binaries(&current_dir, name)? {
-                    // forest-manifest's validator accepts "darwin", not "macos";
-                    // the on-disk layout uses "macos", so translate at the
-                    // manifest boundary.
                     let manifest_os = if os == "macos" { "darwin" } else { os.as_str() };
                     let binary_content = tokio::fs::read(&path).await?;
                     let sha256 = hex::encode(Sha256::digest(&binary_content));
@@ -1040,9 +849,6 @@ impl PublishCommand {
             }
         }
 
-        // `include` (TASKS/023): default env shipped beside the binary. Read
-        // straight from the CUE doc (a regular field, present in `cue export`)
-        // and attach to the manifest — independent of kind/describe.
         if let Some(include) = include_manifest_value(&doc)? {
             manifest["include"] = include;
         }
@@ -1056,11 +862,6 @@ impl PublishCommand {
                 .unwrap_or_else(|| "CUE-only (no binary)".to_string()),
         );
 
-        // TASKS/031: dry-run stops here. Everything above is local-only
-        // (cue eval, bin check, describe probe, manifest synthesis); the
-        // first RPC is `begin_component_upload` below. Print the would-be
-        // summary using the same renderer as the post-success path so the
-        // user sees exactly the line a real publish would emit.
         if self.dry_run {
             print_publish_context(state, organisation, name);
             let has_tool = descriptor
@@ -1071,13 +872,6 @@ impl PublishCommand {
                 .as_ref()
                 .map(|d| !d.methods.is_empty())
                 .unwrap_or(false);
-            // Report every platform that would be uploaded. Summarising only
-            // the host's was how a single-platform publish went unnoticed:
-            // the dry-run agreed with the mistake.
-            //
-            // Computed once and shared with the single-platform warning below —
-            // it needs the same list, and walking the output tree twice to
-            // rebuild it invites the two disagreeing.
             let listed: Vec<String> = if binary.is_some() {
                 publishable_binaries(&current_dir, name)?
                     .into_iter()
@@ -1110,7 +904,6 @@ impl PublishCommand {
             return Ok(());
         }
 
-        // 4. Begin upload
         print_publish_context(state, organisation, name);
         let client = state.grpc_client();
         tracing::info!("beginning upload");
@@ -1118,11 +911,8 @@ impl PublishCommand {
             .begin_component_upload(organisation, name, version)
             .await?;
 
-        // TASKS/023: roll back the staged upload if any subsequent step
-        // returns Err or the process is killed. Disarmed after commit.
         let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
-        // 5. Upload binary (if present)
         if binary.is_some() {
             let to_upload = publishable_binaries(&current_dir, name)?;
             if let Some(msg) = single_platform_tool_warning(
@@ -1142,8 +932,6 @@ impl PublishCommand {
                 crate::ui::warn(msg);
             }
             for (os, arch, path) in to_upload {
-                // Align the upload os with what the manifest validator +
-                // resolver expect ("darwin" not "macos").
                 let upload_os = if os == "macos" { "darwin" } else { os.as_str() };
                 let binary_content = tokio::fs::read(&path).await?;
                 let sha256 = hex::encode(Sha256::digest(&binary_content));
@@ -1164,10 +952,6 @@ impl PublishCommand {
             }
         }
 
-        // 6. Upload the component's files — CUE specs, templates,
-        //    scaffolding, sources. One call, shared with the prebuilt and
-        //    external paths, because three independent lists is how
-        //    `templates/` came to be published by none of them.
         let uploaded_binaries: Vec<std::path::PathBuf> = if binary.is_some() {
             publishable_binaries(&current_dir, name)?
                 .into_iter()
@@ -1177,8 +961,6 @@ impl PublishCommand {
             Vec::new()
         };
 
-        // Deno's meta.json is not in the tree; it comes from the build
-        // cache and publishes at the path consumers read.
         let extra = match kind {
             "deno" => deno_meta_extra(organisation, name, version)
                 .await
@@ -1197,24 +979,6 @@ impl PublishCommand {
         )
         .await?;
 
-        // 7. Publish manifest — skipped for CUE-only components. The
-        //    server's manifest validator (forest-manifest::parse) only
-        //    accepts `kind: "binary"` and `kind: "external"`; a pure CUE
-        //    library (e.g. forest/sdk, forest/deployment) has neither a
-        //    binary nor an external manifest and so doesn't carry any of
-        //    the rule-derived shape constraints. commit_upload defaults
-        //    the shape to "component" when no manifest was published —
-        //    forage renders that gracefully (no platforms table, no
-        //    install command). Adding a proper `Library` shape is
-        //    tracked separately; this keeps SDK publishes unblocked.
-        // The server's manifest validator (forest-manifest::parse) only
-        // accepts `kind: "binary"` and `kind: "external"`. CUE-only and
-        // Deno-source components carry their methods via the uploaded
-        // meta.json (Deno) or are pure schema libraries (CUE) — neither
-        // shape needs the binary/external rule set. Skip publish_manifest
-        // for them; commit_upload still records the version + uploaded
-        // files. Adding a `Library` / `Deno` shape to the manifest
-        // validator is a separate piece of work.
         if kind == "binary" || kind == "external" {
             tracing::info!("publishing manifest");
             let manifest_json = serde_json::to_string(&manifest)?;
@@ -1225,14 +989,10 @@ impl PublishCommand {
             tracing::info!("{kind}-only component — skipping manifest publish");
         }
 
-        // 8. Commit
         tracing::info!("committing upload");
         client.commit_component_upload(&upload_context).await?;
         abort_guard.disarm();
 
-        // TASKS/031 #5: visible summary so the user can see what landed
-        // (notably the shape — a binary publish that lands as `[files]`
-        // because of name mismatch is now immediately obvious).
         let has_tool = descriptor
             .as_ref()
             .and_then(describe_response_tool_facet)
@@ -1262,19 +1022,6 @@ impl PublishCommand {
     }
 }
 
-/// Confirm a credential exists before the first mutating RPC (DATA-583).
-///
-/// Two ways to be authenticated, matching the two audiences:
-///   - `FOREST_TOKEN` in the environment — the CI path. The gRPC auth
-///     interceptor short-circuits to it, so no local login is involved and
-///     nothing can prompt.
-///   - A logged-in user in the local state file — the interactive path,
-///     established by `forest auth login`.
-///
-/// This checks that *a* credential is present, not that it is valid — the
-/// first RPC does that, and it is the only thing that can. The failure it
-/// catches is the one worth a good message: an unattended publish that was
-/// never handed a token at all.
 async fn ensure_authenticated(state: &State) -> anyhow::Result<()> {
     if std::env::var("FOREST_TOKEN")
         .ok()
@@ -1302,21 +1049,57 @@ async fn ensure_authenticated(state: &State) -> anyhow::Result<()> {
     )
 }
 
-/// Warn when the version being published cannot be the version that was
-/// built into the binary (DATA-583).
-///
-/// The build runs in a separate process — a depended-on `forest-contrib/build-*`
-/// component (DATA-312) — which recovers the version by re-reading forest.cue,
-/// with `FOREST_COMPONENT_VERSION` as its only override. So a `--version` passed
-/// to `forest publish` alone reaches the *upload* and not the *build*: the
-/// registry records 0.1.8 while `mytool version` reports the manifest's 0.1.7.
-/// That is precisely the inconsistency this flag exists to remove, so say so
-/// rather than shipping a binary that misreports itself.
-///
-/// Only meaningful for components that produce a binary — a CUE library has
-/// nothing stamped into it. Advisory: never blocks the publish, because the
-/// override is also legitimate for re-tagging an artifact whose version is not
-/// baked in.
+pub(crate) async fn export_forest_cue(
+    current_dir: &std::path::Path,
+) -> anyhow::Result<serde_json::Value> {
+    let mut cue_args = vec![
+        "export".to_string(),
+        "--out".to_string(),
+        "json".to_string(),
+    ];
+    let mut dir_entries = tokio::fs::read_dir(current_dir).await?;
+    while let Some(entry) = dir_entries.next_entry().await? {
+        if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {
+            cue_args.push(entry.file_name().to_string_lossy().to_string());
+        }
+    }
+
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.args(&cue_args);
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd
+    })
+    .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(crate::diagnostics::report(
+            crate::diagnostics::CueEvalError::from_cue_stderr(current_dir, &stderr),
+        ));
+    }
+
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+pub(crate) fn cue_component_version(doc: &serde_json::Value) -> &str {
+    doc.pointer("/forest/component/version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.1.0")
+}
+
+pub(crate) fn effective_version<'a>(
+    override_version: Option<&'a str>,
+    cue_version: &'a str,
+) -> &'a str {
+    match override_version.map(str::trim) {
+        Some(v) if !v.is_empty() => v,
+        _ => cue_version,
+    }
+}
+
 fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, version: &str) {
     let declares_binary = component
         .and_then(|c| c.pointer("/upload/architectures"))
@@ -1327,8 +1110,6 @@ fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, 
         return;
     }
 
-    // The build only ever sees the env form. If it does not carry the version
-    // we are about to publish, the build could not have stamped it.
     let build_saw = std::env::var("FOREST_COMPONENT_VERSION").ok();
     if build_saw.as_deref().map(str::trim) == Some(version) {
         return;
@@ -1337,22 +1118,12 @@ fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, 
     eprintln!(
         "warning: publishing as {version}, but FOREST_COMPONENT_VERSION does not carry \
          that value, so the build stamped a different version into the binary.\n         \
-         Export it instead of (or as well as) passing --version, and re-run the build:\n         \
-         export FOREST_COMPONENT_VERSION={version} && forest run build && forest publish"
+         Export it instead of (or as well as) passing --version, and rebuild with it:\n         \
+         export FOREST_COMPONENT_VERSION={version}, then build (a prebuilt build script \
+         reads it from `forest components version`) and `forest publish`"
     );
 }
 
-/// Ensure the project exists and push its declared fields (description,
-/// metadata, README) up to the server before the artefact upload.
-///
-/// - Calls `create_project` first (idempotent: server upserts on conflict)
-///   so a publish into a brand-new project still works without a separate
-///   `forest project create` step.
-/// - Reads `project.description` and `project.metadata.*` from the
-///   already-parsed CUE JSON.
-/// - Reads README.md from the project directory if present.
-/// - Sends all three to `UpdateProject` with field-mask semantics — empty
-///   values clear the server. See spec §"Publish flow".
 async fn sync_project_fields(
     state: &State,
     current_dir: &std::path::Path,
@@ -1362,7 +1133,6 @@ async fn sync_project_fields(
 ) -> anyhow::Result<()> {
     let client = state.grpc_client();
 
-    // Idempotent — server treats existing project as a no-op via ON CONFLICT.
     client
         .create_project(organisation, name)
         .await
@@ -1370,7 +1140,6 @@ async fn sync_project_fields(
 
     let project = doc.get("project");
 
-    // String fields default to "" when missing from CUE (= clear server-side).
     let description = project
         .and_then(|p| p.get("description"))
         .and_then(|v| v.as_str())
@@ -1398,8 +1167,6 @@ async fn sync_project_fields(
     Ok(())
 }
 
-/// Pull blessed metadata fields out of the parsed CUE JSON.
-/// Missing keys become empty strings (cleared server-side per spec).
 fn extract_project_metadata(meta: &serde_json::Value) -> ProjectMetadata {
     let s = |key: &str| -> String {
         meta.get(key)
@@ -1428,9 +1195,6 @@ fn extract_project_metadata(meta: &serde_json::Value) -> ProjectMetadata {
     }
 }
 
-/// Read a project's README.md (case-insensitive) if present. Returns
-/// empty string when absent — server treats that as "clear", matching
-/// the missing-in-CUE-clears policy.
 async fn read_optional_readme(current_dir: &std::path::Path) -> anyhow::Result<String> {
     for candidate in ["README.md", "Readme.md", "readme.md"] {
         let p = current_dir.join(candidate);
@@ -1443,10 +1207,6 @@ async fn read_optional_readme(current_dir: &std::path::Path) -> anyhow::Result<S
     Ok(String::new())
 }
 
-/// Read the optional `tool` facet from a component's `_meta/describe`
-/// response if it advertised one. Returns the JSON form ready to embed
-/// in the manifest. The describe protocol places `tool` alongside
-/// `methods` (see TASKS/018-global-tools.md §1a.1).
 fn describe_response_tool_facet(
     desc: &forest_sdk::ComponentDescriptor,
 ) -> Option<serde_json::Value> {
@@ -1462,11 +1222,6 @@ fn describe_response_tool_facet(
     })
 }
 
-/// Extract the `include` block (TASKS/023) from the CUE project doc, ready to
-/// attach to the manifest. `include` is a plain CUE field, so it appears in
-/// `cue export` output directly (no `cue eval -e` needed). Validates env
-/// names/values for a friendly publish-time error and warns on secret-ish keys.
-/// Returns `None` when there is no `include` block.
 fn include_manifest_value(doc: &serde_json::Value) -> anyhow::Result<Option<serde_json::Value>> {
     let include = match doc.pointer("/forest/component/include") {
         Some(v) if !v.is_null() => v,
@@ -1499,11 +1254,6 @@ fn include_manifest_value(doc: &serde_json::Value) -> anyhow::Result<Option<serd
         }
     }
 
-    // `include.shell` (DATA-588). Validated here so a typo'd shell name or a
-    // malformed argv fails the publish with a pointed message, rather than
-    // shipping a manifest whose shell integration silently never loads. The
-    // block is still passed through verbatim below — the manifest parser is the
-    // authority, this is just the friendly front door.
     if let Some(shell) = obj.get("shell").filter(|v| !v.is_null()) {
         let shell_obj = shell
             .as_object()
@@ -1541,8 +1291,6 @@ fn include_manifest_value(doc: &serde_json::Value) -> anyhow::Result<Option<serd
     Ok(Some(include.clone()))
 }
 
-/// Heuristic: does this env key name look like it carries a secret? Advisory
-/// only (TASKS/023 E8/Q4) — never blocks the publish.
 fn looks_secret(key: &str) -> bool {
     let u = key.to_ascii_uppercase();
     u == "PASSWORD"
@@ -1553,8 +1301,6 @@ fn looks_secret(key: &str) -> bool {
         || u.ends_with("_PASSWORD")
 }
 
-/// External-manifest publishing path. Skips the binary build/upload entirely
-/// and submits only the manifest (kind=external). See §1a.2b.
 async fn publish_external(
     state: &State,
     current_dir: &std::path::Path,
@@ -1565,7 +1311,6 @@ async fn publish_external(
     external_block: &serde_json::Value,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    // Build the platforms map from the CUE `external.platforms` array.
     let raw_platforms = external_block
         .get("platforms")
         .and_then(|v| v.as_array())
@@ -1605,16 +1350,10 @@ async fn publish_external(
         if let Some(a) = entry.get("archive_sha256").and_then(|v| v.as_str()) {
             platform_obj["archive_sha256"] = serde_json::json!(a);
         }
-        // The CUE-facing #ForestArchitectures enum uses "macos"; the
-        // server-side manifest validator wants "darwin". Translate at
-        // the manifest boundary (same shape as the upload path).
         let manifest_os = if os == "macos" { "darwin" } else { os };
         platforms.insert(format!("{manifest_os}_{arch}"), platform_obj);
     }
 
-    // Extract the `#Tool` facet via a dedicated `cue eval -e tool`.
-    // `#Tool` is a CUE definition (hidden from `cue export`); we eval it
-    // explicitly to extract its concrete JSON form.
     let tool_facet = eval_tool_facet(current_dir).await?;
 
     let mut manifest = serde_json::json!({
@@ -1636,11 +1375,6 @@ async fn publish_external(
 
     print_publish_context(state, organisation, name);
 
-    // Dry-run stops here, exactly as the built and prebuilt paths do. Everything
-    // above is local — cue eval, tool-facet extraction, manifest synthesis — and
-    // `begin_component_upload` below is the first RPC. Without this the flag was
-    // silently ignored on the external path and `--dry-run` published for real,
-    // which is the opposite of what it exists to promise.
     if dry_run {
         let listed: Vec<String> = platforms.keys().cloned().collect();
         eprintln!(
@@ -1661,9 +1395,6 @@ async fn publish_external(
         .await?;
     let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
-    // Skip UploadBinary entirely — externals are URL-hosted. The file
-    // payload still ships: an external tool can carry templates and
-    // scaffolding like any other component.
     upload_component_files(
         &client,
         &upload_context,
@@ -1681,9 +1412,6 @@ async fn publish_external(
     client.commit_component_upload(&upload_context).await?;
     abort_guard.disarm();
 
-    // External tools advertise multiple platforms by URL — pick the first
-    // declared key for the summary line; the user can run `forest components
-    // show` to see the full list.
     let platform_key = platforms
         .keys()
         .next()
@@ -1701,13 +1429,6 @@ async fn publish_external(
     Ok(())
 }
 
-/// Publish a `upload.type=prebuilt` component: iterate per-platform
-/// binary paths declared in CUE, upload each as the binary payload for
-/// that (os, arch) tuple, and synthesise the manifest descriptor from
-/// the `#Tool` facet rather than probing `_meta/describe`.
-///
-/// Result is `kind=binary` (download flows through gRPC + auth), but
-/// the binaries are pre-built rather than produced by `forest build`.
 async fn publish_prebuilt(
     state: &State,
     current_dir: &std::path::Path,
@@ -1725,15 +1446,10 @@ async fn publish_prebuilt(
              when upload.type == \"prebuilt\"",
         )?;
 
-    // Tool facet sourced from #Tool, replacing _meta/describe.
     let tool_facet = eval_tool_facet(current_dir).await?;
 
-    // Flatten the os→arch→path map and read each binary.
     let mut platforms_for_manifest = serde_json::Map::new();
     let mut uploads: Vec<(String, String, Vec<u8>, String)> = Vec::new();
-    // Kept so the file walk can exclude them: these binaries ship as
-    // typed per-platform payloads, and a `dist/` tree walked as generic
-    // files would double every one of them.
     let mut uploaded_binary_paths: Vec<std::path::PathBuf> = Vec::new();
     for (os, archs) in prebuilt {
         let archs = archs
@@ -1750,8 +1466,6 @@ async fn publish_prebuilt(
             let sha256 = hex::encode(Sha256::digest(&bytes));
             uploaded_binary_paths.push(abs_path.clone());
 
-            // Match the upload/external paths: SDK exposes "macos" to
-            // CUE authors, manifest validator wants "darwin".
             let manifest_os = if os == "macos" { "darwin" } else { os.as_str() };
 
             platforms_for_manifest.insert(
@@ -1789,9 +1503,6 @@ async fn publish_prebuilt(
         uploads.len(),
     );
 
-    // A prebuilt block *can* express every platform, so a single-platform one
-    // is a declaration gap rather than a toolchain limit — worth saying so
-    // before the upload rather than after someone on Linux hits it.
     if let Some(msg) = single_platform_tool_warning(
         !tool_facet.is_null(),
         &uploads
@@ -1803,9 +1514,8 @@ async fn publish_prebuilt(
         crate::ui::warn(msg);
     }
 
-    // Honour --dry-run here too. The prebuilt path returns long before the
-    // dry-run check on the built path, so `--dry-run` used to publish for real
-    // against a flag documented as "do not contact the registry".
+    print_publish_context(state, organisation, name);
+
     if dry_run {
         let listed: Vec<String> = uploads
             .iter()
@@ -1819,7 +1529,6 @@ async fn publish_prebuilt(
         return Ok(());
     }
 
-    print_publish_context(state, organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
@@ -1844,9 +1553,6 @@ async fn publish_prebuilt(
             .await?;
     }
 
-    // Every declared platform's binary is uploaded above as a typed
-    // payload, so all of them are excluded from the file walk — a
-    // prebuilt component's `dist/` would otherwise ship twice.
     upload_component_files(
         &client,
         &upload_context,
@@ -1864,8 +1570,6 @@ async fn publish_prebuilt(
     client.commit_component_upload(&upload_context).await?;
     abort_guard.disarm();
 
-    // Prebuilt uploads can span multiple platforms; show them comma-joined
-    // sorted so the line is stable across runs.
     let mut platform_keys: Vec<String> = platforms_for_manifest.keys().cloned().collect();
     platform_keys.sort();
     let platform = if platform_keys.is_empty() {
@@ -1885,21 +1589,13 @@ async fn publish_prebuilt(
     Ok(())
 }
 
-/// `forest.component.paths`, as the walker wants it.
-///
-/// Absent means "the component tree", which is the default and the right
-/// one: whatever a consumer reads at deploy time is carried without
-/// anyone having to remember it.
 #[derive(Debug, Default, Clone)]
 struct DeclaredPaths {
-    /// `None` ⇒ include everything the excludes admit.
     include: Option<Vec<String>>,
     exclude: Vec<String>,
 }
 
 impl DeclaredPaths {
-    /// Read from the evaluated manifest. A component that declares no
-    /// `paths` block gets the default.
     fn from_doc(doc: &serde_json::Value) -> Self {
         let globs = |key: &str| -> Option<Vec<String>> {
             doc.pointer(&format!("/forest/component/paths/{key}"))?
@@ -1919,27 +1615,6 @@ impl DeclaredPaths {
     }
 }
 
-/// Collect everything a component ships that is NOT a typed binary.
-///
-/// Pure and separately testable; [`upload_component_files`] is the thing
-/// that talks to the registry.
-///
-/// The payload is the component tree itself. It used to be a hand-picked
-/// list — top-level `*.cue` plus `cue.mod/module.cue` — assembled
-/// independently at three call sites, and `templates/` was in none of
-/// them. A published component's Terraform therefore did not exist on
-/// the machine that deployed it, and `forest release prepare` renders
-/// templates behind `if template_dir.exists()`, so it produced an empty
-/// directory and OpenTofu failed with "No configuration files", naming
-/// nothing that would lead you here. `init/**`, which scaffolding reads,
-/// fell through the same hole.
-///
-/// Consuming a component by PATH hides all of this: the files are simply
-/// on disk. So it works locally and breaks only once published.
-///
-/// `component_walk` applies the non-overridable excludes (`.git/`,
-/// `target/`, vendored cue deps, staged build output), subtracts the
-/// component's own `.forestignore`, and enforces the size caps.
 async fn collect_component_files(
     dir: &std::path::Path,
     binary_paths: &[std::path::PathBuf],
@@ -1947,9 +1622,6 @@ async fn collect_component_files(
 ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use crate::services::component_walk::{WalkConfig, component_walk};
 
-    // `.forestignore` and `paths.exclude` say the same thing in two
-    // places, so they compose rather than override: a component can use
-    // either, and neither silently wins.
     let mut forestignore = paths.exclude.clone();
     if let Ok(contents) = tokio::fs::read_to_string(dir.join(".forestignore")).await {
         forestignore.extend(
@@ -1983,33 +1655,8 @@ async fn collect_component_files(
     Ok(files)
 }
 
-/// Where publish assembles the payload before sending it, relative to
-/// the component root.
-///
-/// A sibling of `output/`, which holds the binaries a build staged. The
-/// walker excludes both.
 const PACKAGE_DIR: &str = ".forest/component/package";
 
-/// Stage the payload on disk, then upload it from there. **The** place a
-/// component's files are published.
-///
-/// Staging rather than streaming straight from the source tree, because
-/// that is what `.forest/` is for: `forest release prepare` renders a
-/// deployment into `.forest/deployment/<env>/<destination>/` and the
-/// apply runs from it, so "what is about to be shipped" is a directory
-/// you can look at. Publishing had no equivalent — the payload existed
-/// only as an in-memory list, so the honest answer to "what did this
-/// publish contain" was to read the code. Now it is
-/// `.forest/component/package/`.
-///
-/// The staged tree is rebuilt from scratch each run. A leftover file
-/// from a previous publish that no longer exists in the component would
-/// otherwise ship forever.
-///
-/// `extra` carries entries that are not in the tree but have to land in
-/// it: deno's `meta.json` is read out of the local build cache and
-/// published at the path a consumer looks for. An `extra` entry wins
-/// over a walked file of the same name.
 async fn upload_component_files(
     client: &crate::grpc::GrpcClient,
     upload_context: &str,
@@ -2039,10 +1686,6 @@ async fn upload_component_files(
     Ok(files.len())
 }
 
-/// Assemble the payload under [`PACKAGE_DIR`] and return it.
-///
-/// Separated from the upload so it is testable without a registry, and
-/// so `--dry-run` can stage without sending.
 async fn stage_component_package(
     dir: &std::path::Path,
     binary_paths: &[std::path::PathBuf],
@@ -2060,8 +1703,6 @@ async fn stage_component_package(
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let package_root = dir.join(PACKAGE_DIR);
-    // Rebuilt from scratch: a file that has since been deleted from the
-    // component must not survive in the package.
     if tokio::fs::try_exists(&package_root).await.unwrap_or(false) {
         tokio::fs::remove_dir_all(&package_root)
             .await
@@ -2079,12 +1720,16 @@ async fn stage_component_package(
             .await
             .with_context(|| format!("stage {rel_path}"))?;
     }
+    if !files.is_empty() {
+        let ignore = dir.join(".forest/component/.gitignore");
+        tokio::fs::write(&ignore, "/.gitignore\n/package/\n")
+            .await
+            .with_context(|| format!("write {}", ignore.display()))?;
+    }
 
     Ok(files)
 }
 
-/// Deno's `meta.json`, which lives in the local build cache rather than
-/// in the component tree, mapped to the path a consumer reads it from.
 async fn deno_meta_extra(
     organisation: &str,
     name: &str,
@@ -2105,9 +1750,6 @@ async fn deno_meta_extra(
     }
 }
 
-/// Evaluate `#Tool` from the project's CUE package. Since `#Tool` is a
-/// definition (hidden from `cue export`), we use `cue eval --expression`
-/// to extract its concrete value.
 async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Value> {
     let output = crate::tools::cue::output(|| {
         let mut cmd = tokio::process::Command::new("cue");
@@ -2131,60 +1773,41 @@ async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Va
     Ok(v)
 }
 
-/// Collect the `.cue` files a consumer needs: every `.cue` in the component
-/// directory, plus `cue.mod/module.cue` when the component has one.
-///
-/// The module file is not optional dressing. A component whose spec begins
-/// `import "forest.sh/forest/sdk@v0"` cannot be evaluated without it — CUE
-/// reports `imports are unavailable because there is no cue.mod/module.cue
-/// file` and the consumer's parse fails. Publishing without it produced
-/// components that worked from a relative `path:` and were unusable from the
-/// registry, which is why every example references contracts by path.
-///
-/// `collect_deno_files` has always shipped it for the Deno path; this is the
-/// same rule for the CUE one.
-/// DATA-583 — version override resolution.
-///
-/// Precedence is **`--version` > `FOREST_COMPONENT_VERSION` > forest.cue**, and
-/// it is assembled from two independent pieces:
-///
-///   - clap resolves *flag vs env* into `self.version` before we see it. That
-///     leg is asserted structurally (`arg_is_wired_to_the_env_var`) rather than
-///     by setting the variable: every `try_parse_from` in this binary reads the
-///     process environment, so a test that mutates it corrupts whichever tests
-///     happen to run alongside it. Cargo runs them in threads; there is no
-///     serialisation to rely on.
-///   - `resolve_version` resolves *override vs manifest*, tested directly below.
-///
-/// Structs are built by literal rather than parsed, so no test here depends on
-/// the ambient environment being clean.
 #[cfg(test)]
 mod publish_line_tests {
     use super::*;
     use crate::contexts::ServerTarget;
 
     #[test]
-    fn a_context_is_named_with_its_server() {
-        let target = ServerTarget {
-            label: "work".into(),
-            server: "https://api.work.example".into(),
-        };
-        assert_eq!(
-            publish_line("acme", "tool", &target),
-            "Publishing acme/tool to work (https://api.work.example)"
-        );
+    fn publishing_never_echoes_server_url_credentials() {
+        let server = "https://private-user:private-password@api.example/registry?token=private-query#private-fragment";
+        for label in ["work", server] {
+            let target = ServerTarget {
+                label: label.into(),
+                server: server.into(),
+            };
+            let line = publish_line("acme", "tool", &target);
+            assert!(line.contains("api.example/registry"));
+            for secret in [
+                "private-user",
+                "private-password",
+                "private-query",
+                "private-fragment",
+            ] {
+                assert!(!line.contains(secret));
+            }
+        }
     }
 
     #[test]
-    fn an_explicit_server_is_named_once() {
+    fn an_invalid_server_url_does_not_echo_potential_credentials() {
+        let server = "https://[invalid?token=private-query";
         let target = ServerTarget {
-            label: "https://api.other.example".into(),
-            server: "https://api.other.example".into(),
+            label: server.into(),
+            server: server.into(),
         };
-        assert_eq!(
-            publish_line("acme", "tool", &target),
-            "Publishing acme/tool to https://api.other.example"
-        );
+        let line = publish_line("acme", "tool", &target);
+        assert!(!line.contains("private-query"));
     }
 }
 
@@ -2201,8 +1824,6 @@ mod version_override_tests {
 
     #[test]
     fn cue_version_is_used_when_no_override_is_given() {
-        // The pre-DATA-583 behaviour, which must not change: manual publishing
-        // keeps reading forest.cue.
         assert_eq!(with_version(None).resolve_version("0.1.7"), "0.1.7");
     }
 
@@ -2216,16 +1837,12 @@ mod version_override_tests {
 
     #[test]
     fn blank_and_whitespace_overrides_fall_back_to_cue() {
-        // An unset CI input interpolates to "" — that must mean "no override",
-        // not "publish as the empty string", which would fail the C8 semver
-        // gate with a message about `` instead of just working.
         assert_eq!(with_version(Some("")).resolve_version("0.1.7"), "0.1.7");
         assert_eq!(with_version(Some("   ")).resolve_version("0.1.7"), "0.1.7");
     }
 
     #[test]
     fn override_is_trimmed() {
-        // Shell interpolation of a tag routinely carries a trailing newline.
         assert_eq!(
             with_version(Some(" 0.1.8\n")).resolve_version("0.1.7"),
             "0.1.8"
@@ -2234,11 +1851,6 @@ mod version_override_tests {
 
     #[test]
     fn bootstrap_ignores_the_ambient_env_override() {
-        // Bootstrap publishes every workspace component in one process. If it
-        // honoured FOREST_COMPONENT_VERSION it would stamp all of them with the
-        // same version. It builds the command directly rather than parsing
-        // argv, so clap's `env` never applies — assert that, because the
-        // immunity is a property of the construction and easy to lose.
         assert!(PublishCommand::for_bootstrap().version.is_none());
         assert_eq!(
             PublishCommand::for_bootstrap().resolve_version("0.1.7"),
@@ -2248,18 +1860,6 @@ mod version_override_tests {
 
     #[test]
     fn arg_is_wired_to_the_env_var() {
-        // The env leg of the precedence chain. clap applies `env` only when
-        // parsing argv and only when the flag is absent, which is exactly
-        // "flag > env"; what this asserts is that the variable is still named
-        // FOREST_COMPONENT_VERSION — the same name `forest run build` reads, so
-        // one export covers build and publish. Renaming one side silently
-        // decouples the stamped version from the published one.
-        //
-        // Spelled as a literal rather than imported from
-        // `forest_build_core::FOREST_VERSION_ENV`: the CLI does not depend on
-        // the build crate (the build is a separately published component), and
-        // taking a dependency for one constant would invert that. The coupling
-        // is real, so it is named here and in the build crate's doc comment.
         use clap::CommandFactory;
         let cmd = PublishCommand::command();
         let arg = cmd
@@ -2308,8 +1908,6 @@ mod include_tests {
         assert!(include_manifest_value(&doc).is_err());
     }
 
-    // --- include.shell (DATA-588) ----------------------------------------
-
     #[test]
     fn valid_shell_block_is_passed_through() {
         let doc = doc_with_include(serde_json::json!({
@@ -2322,8 +1920,6 @@ mod include_tests {
 
     #[test]
     fn unknown_shell_name_errors_at_publish() {
-        // Catching the typo here is the whole point: an unrecognised shell would
-        // otherwise ship in the manifest and silently never load.
         let doc = doc_with_include(serde_json::json!({
             "shell": { "init": { "zshell": ["init", "zsh"] } }
         }));
@@ -2332,8 +1928,6 @@ mod include_tests {
 
     #[test]
     fn empty_shell_argv_errors_at_publish() {
-        // An empty argv would exec the tool with no arguments at capture time,
-        // running its default action instead of printing a script.
         let doc = doc_with_include(serde_json::json!({
             "shell": { "init": { "zsh": [] } }
         }));
@@ -2380,8 +1974,6 @@ mod include_tests {
     }
 }
 
-/// Guards the single-platform tool warning — the check that would have caught
-/// fungus shipping darwin/arm64-only across four versions.
 #[cfg(test)]
 mod platform_guard_tests {
     use super::single_platform_tool_warning;
@@ -2392,8 +1984,6 @@ mod platform_guard_tests {
 
     #[test]
     fn warns_when_a_built_tool_ships_only_the_host_platform() {
-        // The fungus case: type: "rust", published from a Mac, four versions
-        // that nobody on Linux could install.
         let msg = single_platform_tool_warning(true, &plats(&["darwin_arm64"]), Some("rust"))
             .expect("a single-platform tool must warn");
         assert!(msg.contains("darwin_arm64"), "{msg}");
@@ -2409,9 +1999,6 @@ mod platform_guard_tests {
 
     #[test]
     fn warns_for_a_single_platform_prebuilt_tool_but_advises_differently() {
-        // A prebuilt block can express every platform, so the remedy is to
-        // declare them — telling the author to "switch to prebuilt" would be
-        // nonsense when they already have.
         let msg = single_platform_tool_warning(true, &plats(&["linux_amd64"]), Some("prebuilt"))
             .expect("still a single-platform tool");
         assert!(msg.contains("upload.prebuilt"), "{msg}");
@@ -2431,7 +2018,6 @@ mod platform_guard_tests {
             ),
             None
         );
-        // Two is enough to be deliberate.
         assert_eq!(
             single_platform_tool_warning(
                 true,
@@ -2444,9 +2030,6 @@ mod platform_guard_tests {
 
     #[test]
     fn stays_quiet_for_a_non_tool_component() {
-        // A library or plain component is not installed per-platform, so a
-        // single binary is entirely normal and warning would be noise on every
-        // publish.
         assert_eq!(
             single_platform_tool_warning(false, &plats(&["darwin_arm64"]), Some("rust")),
             None
@@ -2455,8 +2038,6 @@ mod platform_guard_tests {
 
     #[test]
     fn stays_quiet_when_there_are_no_platforms_at_all() {
-        // Nothing to say here — a separate error already covers it, and this
-        // guard must not turn "no binary" into a confusing platform warning.
         assert_eq!(single_platform_tool_warning(true, &[], Some("rust")), None);
     }
 }

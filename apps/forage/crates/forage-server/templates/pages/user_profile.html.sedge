@@ -1,0 +1,120 @@
+use forage_ui::components::{Avatar, HeatCell, Icon, Timeago};
+use forage_ui::layouts::Shell;
+use crate::views::account::present;
+props crate::views::account::UserProfilePage { chrome, username, profile_picture_url, created_at, heatmap, recent_releases, contributed_projects };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12">
+    <div class="flex items-start gap-6 mb-8">
+      <Avatar username={username.as_str()} url={profile_picture_url.as_deref()} size="w-20 h-20" text="text-3xl" />
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">{username}</h1>
+        {if let Some(since) = present(created_at) {
+          <p class="text-sm text-gray-500 mt-1">Member since <Timeago value={since} /></p>
+        }}
+      </div>
+    </div>
+
+    <div class="border-t border-gray-200 pt-6">
+      <h2 class="text-sm font-semibold text-gray-900 mb-4">{heatmap.heading()}</h2>
+
+      {if !heatmap.weeks.is_empty() {
+        <div class="overflow-x-auto pb-2">
+          <div class="inline-block">
+            <div class="flex gap-0.5 text-xs text-gray-400 mb-1" aria-hidden="true">
+              <span class="w-6 shrink-0"></span>
+              {for week in heatmap.weeks.iter() {
+                <span class="w-[11px] shrink-0 whitespace-nowrap">{week.month.as_deref().unwrap_or_default()}</span>
+              }}
+            </div>
+
+            <div class="flex gap-0.5">
+              <div class="flex flex-col gap-0.5 text-xs text-gray-400 pr-1 w-6 shrink-0">
+                <span class="h-[11px]"></span>
+                <span class="h-[11px] leading-[11px] text-[9px]">Mon</span>
+                <span class="h-[11px]"></span>
+                <span class="h-[11px] leading-[11px] text-[9px]">Wed</span>
+                <span class="h-[11px]"></span>
+                <span class="h-[11px] leading-[11px] text-[9px]">Fri</span>
+                <span class="h-[11px]"></span>
+              </div>
+              {for week in heatmap.weeks.iter() {
+                <div class="flex flex-col gap-0.5">
+                  {for day in week.days.iter() {
+                    {if day.in_range {
+                      <HeatCell level={day.level} title={Some(day.title().as_str())} />
+                    } else {
+                      <div class="size-[11px]"></div>
+                    }}
+                  }}
+                </div>
+              }}
+            </div>
+
+            <div class="flex items-center justify-end gap-1 mt-2 text-xs text-gray-400">
+              <span>Less</span>
+              <HeatCell level={0} title={None} />
+              <HeatCell level={1} title={None} />
+              <HeatCell level={2} title={None} />
+              <HeatCell level={3} title={None} />
+              <HeatCell level={4} title={None} />
+              <span>More</span>
+            </div>
+          </div>
+        </div>
+      } else {
+        <p class="text-sm text-gray-500">No public activity yet.</p>
+      }}
+    </div>
+
+    <div class="border-t border-gray-200 pt-6 mt-6">
+      <h2 class="text-sm font-semibold text-gray-900 mb-4">Recent releases</h2>
+      {if !recent_releases.is_empty() {
+        <div class="space-y-3">
+          {for r in recent_releases.iter() {
+            <a href={r.project_href()} class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors group">
+              <div class="w-8 h-8 rounded bg-violet-100 flex items-center justify-center shrink-0">
+                <Icon name="tag" class="w-4 h-4 text-violet-600" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-gray-500">{r.org}/{r.project}</span>
+                  {if let Some(version) = present(&r.version) { <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">{version}</span> }}
+                </div>
+                <div class="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
+                  {if let Some(branch) = present(&r.branch) { <span class="font-mono">{branch}</span> }}
+                  {if let Some(sha) = present(&r.commit_sha) { <span class="font-mono">{sha}</span> }}
+                  <span><Timeago value={r.created_at.as_str()} /></span>
+                </div>
+              </div>
+              <Icon name="chevron-right" class="w-4 h-4 text-gray-300 group-hover:text-gray-500 shrink-0" />
+            </a>
+          }}
+        </div>
+      } else {
+        <p class="text-sm text-gray-500">No releases yet.</p>
+      }}
+    </div>
+
+    <div class="border-t border-gray-200 pt-6 mt-6 pb-12">
+      <h2 class="text-sm font-semibold text-gray-900 mb-4">Projects</h2>
+      {if !contributed_projects.is_empty() {
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {for p in contributed_projects.iter() {
+            <a href={p.href()} class="flex items-center gap-3 px-3 py-3 rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors group">
+              <div class="w-8 h-8 rounded bg-gray-100 flex items-center justify-center shrink-0">
+                <Icon name="folder" class="w-4 h-4 text-gray-500" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <span class="text-sm font-medium text-gray-900 group-hover:text-violet-700">{p.org}/{p.project}</span>
+                <p class="text-xs text-gray-400 mt-0.5">{p.releases_label()}</p>
+              </div>
+            </a>
+          }}
+        </div>
+      } else {
+        <p class="text-sm text-gray-500">No project contributions yet.</p>
+      }}
+    </div>
+  </section>
+</Shell>

@@ -1,27 +1,9 @@
-/**
- * <pipeline-builder> web component
- *
- * Interactive node-graph editor for release pipeline stages.
- * Syncs to a hidden textarea (data-target) as JSON.
- *
- * Stage format (matches Rust serde of PipelineStage):
- *   { "id": "stage-name", "depends_on": ["other"], "config": {"Deploy": {"environment": "prod"}} }
- *
- * Usage:
- *   <pipeline-builder data-target="pipeline-stages"></pipeline-builder>
- *   <textarea id="pipeline-stages" name="stages_json" hidden></textarea>
- *
- * Optional attributes:
- *   data-readonly="true"   render-only mode (no editing)
- */
-
 const NODE_W = 200;
 const NODE_H = 68;
 const GRID = 20;
-const SVG_HALF = 6000;          // SVG covers [-6000, +6000] in canvas coords
+const SVG_HALF = 6000;
 const TYPES = ["deploy", "wait", "plan"];
 
-// Lucide-style icons (16x16, stroke="currentColor"). Inline SVG paths.
 const ICONS = {
   deploy: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
   wait:   '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
@@ -36,8 +18,6 @@ const ICONS = {
   close:  '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
 };
 
-// Type theme. Accent is a saturated color that reads on both light and dark
-// surfaces; tint is a very subtle wash used for the icon background.
 const TYPE_STYLE = {
   deploy: { label: "Deploy", accent: "#3b82f6", tint: "rgba(59,130,246,0.10)", icon: ICONS.deploy },
   wait:   { label: "Wait",   accent: "#f59e0b", tint: "rgba(245,158,11,0.12)", icon: ICONS.wait },
@@ -61,23 +41,20 @@ function svgIcon(name, size = 16, strokeWidth = 2) {
   return svg;
 }
 
-// Tracks which editor most recently received user interaction. Keyboard
-// shortcuts (Delete) only fire on the active editor so multiple builders
-// on the same page can't interfere with each other.
 let activeEditor = null;
 
 class PipelineBuilder extends HTMLElement {
   connectedCallback() {
     this.stages = [];
-    this.positions = {};            // { id: {x, y} }
+    this.positions = {};
     this._targetId = this.dataset.target || "";
     this._readonly = this.dataset.readonly === "true";
     this._storageKey = `pb-pos:${this._targetId}`;
-    this._mode = "graph";           // "graph" | "json"
+    this._mode = "graph";
     this._selectedId = null;
     this._pan = { x: 0, y: 0 };
     this._zoom = 1;
-    this._pending = null;           // { fromId, x, y } during port drag
+    this._pending = null;
     this._rawJson = null;
 
     const target = this._target();
@@ -114,9 +91,6 @@ class PipelineBuilder extends HTMLElement {
     const form = this.closest("form");
     if (!form) return;
     const handler = (e) => {
-      // If we're in JSON mode, the raw textarea drives submission directly
-      // and the user is expected to fix invalid JSON themselves. Validate
-      // only graph-derived state.
       if (this._mode === "json") {
         if (this._rawJson != null) {
           try { JSON.parse(this._rawJson); }
@@ -139,8 +113,6 @@ class PipelineBuilder extends HTMLElement {
     this._formGuard = { form, handler };
   }
 
-  // ─── data plumbing ──────────────────────────────────────────────────────
-
   _target() {
     return this._targetId ? document.getElementById(this._targetId) : null;
   }
@@ -161,7 +133,6 @@ class PipelineBuilder extends HTMLElement {
         config: s.config || { Deploy: { environment: "" } },
       };
     }
-    // Legacy {name, type, depends_on}
     const type = s.type || "deploy";
     const config = type === "wait"
       ? { Wait: { duration_seconds: s.duration_seconds || 0 } }
@@ -208,7 +179,6 @@ class PipelineBuilder extends HTMLElement {
       }
     }
 
-    // cycle detection (Kahn)
     const inDeg = {};
     const adj = {};
     for (const s of this.stages) {
@@ -236,31 +206,27 @@ class PipelineBuilder extends HTMLElement {
     }
     if (visited < Object.keys(inDeg).length) errors.push("Cycle detected in dependencies");
 
-    // dedupe
     return Array.from(new Set(errors));
   }
-
-  // ─── positions / layout ─────────────────────────────────────────────────
 
   _loadPositions() {
     if (!this._storageKey) return;
     try {
       const raw = localStorage.getItem(this._storageKey);
       if (raw) this.positions = JSON.parse(raw) || {};
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
   }
 
   _savePositions() {
     if (!this._storageKey) return;
     try {
-      // only persist positions for currently named stages
       const live = {};
       for (const s of this.stages) {
         if (s.id && this.positions[s.id]) live[s.id] = this.positions[s.id];
       }
       this.positions = live;
       localStorage.setItem(this._storageKey, JSON.stringify(live));
-    } catch (e) { /* ignore quota */ }
+    } catch (e) {}
   }
 
   _computeLevels() {
@@ -354,8 +320,6 @@ class PipelineBuilder extends HTMLElement {
     this._applyTransform();
   }
 
-  // ─── render ─────────────────────────────────────────────────────────────
-
   _render() {
     this._unbindGlobal();
     if (this._resizeObserver) {
@@ -366,7 +330,6 @@ class PipelineBuilder extends HTMLElement {
     this.className = "block";
 
     if (this._readonly) {
-      // Read-only: just show the graph, no inspector / toolbar editing
       this.append(this._renderGraph(true));
       return;
     }
@@ -443,7 +406,6 @@ class PipelineBuilder extends HTMLElement {
     const spacer = el("span", "flex-1");
     bar.append(spacer);
 
-    // Mode toggle pill
     const modePill = el("div", "inline-flex p-0.5 bg-gray-100 rounded-md");
     const makeModeBtn = (mode, label) => {
       const isActive = this._mode === mode;
@@ -474,7 +436,6 @@ class PipelineBuilder extends HTMLElement {
   }
 
   _renderCanvasControls(stage) {
-    // Floating control cluster anchored bottom-right of the canvas.
     const wrap = el("div", "absolute bottom-3 right-3 flex flex-col gap-1");
     wrap.style.zIndex = "10";
 
@@ -484,7 +445,6 @@ class PipelineBuilder extends HTMLElement {
       b.title = title;
       b.append(svgIcon(icon, 14, 2));
       b.onclick = (e) => { e.preventDefault(); onClick(); };
-      // Don't let the canvas grab these as pan-starts
       b.onmousedown = (e) => e.stopPropagation();
       return b;
     };
@@ -492,7 +452,6 @@ class PipelineBuilder extends HTMLElement {
     const group1 = el("div", "flex flex-col rounded-md overflow-hidden border border-gray-200 bg-white shadow-sm");
     const zin = makeBtn("plus", "Zoom in (⌘/Ctrl + scroll)", () => this._zoomBy(1.2));
     const zout = makeBtn("minus", "Zoom out (⌘/Ctrl + scroll)", () => this._zoomBy(1 / 1.2));
-    // strip extra borders that came from makeBtn now that they sit in a grouped container
     [zin, zout].forEach((b) => { b.className = "w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"; });
     const div1 = el("div", "h-px bg-gray-200");
     group1.append(zin, div1, zout);
@@ -564,8 +523,6 @@ class PipelineBuilder extends HTMLElement {
     }
   }
 
-  // ─── canvas ─────────────────────────────────────────────────────────────
-
   _renderGraph(readonly) {
     const stage = el("div", "pb-stage relative overflow-hidden select-none");
     stage.style.background = "var(--color-gray-50)";
@@ -584,7 +541,6 @@ class PipelineBuilder extends HTMLElement {
     viewport.style.width = "1px";
     viewport.style.height = "1px";
 
-    // SVG for edges sits in viewport so it shares the transform
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("pb-edges");
     svg.setAttribute("width", String(SVG_HALF * 2));
@@ -612,7 +568,6 @@ class PipelineBuilder extends HTMLElement {
     marker.append(arrow);
     defs.append(marker);
     svg.append(defs);
-    // currentColor on the SVG drives both edge stroke and marker fill.
     svg.style.color = "var(--color-gray-400)";
     viewport.append(svg);
 
@@ -621,12 +576,10 @@ class PipelineBuilder extends HTMLElement {
     stage.append(viewport);
 
     if (!readonly) {
-      // Hint pill, anchored bottom-left, kept visually quiet
       const hint = el("div", "absolute bottom-3 left-3 text-3xs text-gray-400 pointer-events-none flex items-center gap-1.5 bg-white/70 backdrop-blur-sm border border-gray-200 rounded-md px-2 py-1");
       hint.innerHTML = `<span>Drag to pan</span><span class="text-gray-300">·</span><span><kbd class="font-mono text-4xs">⌘</kbd>+scroll to zoom</span><span class="text-gray-300">·</span><span>drag port to connect</span>`;
       stage.append(hint);
 
-      // Empty state when no stages exist
       if (this.stages.filter((s) => s.id).length === 0) {
         const empty = el("div", "absolute inset-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none");
         const ring = el("div", "w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3 text-gray-400");
@@ -640,7 +593,6 @@ class PipelineBuilder extends HTMLElement {
         stage.append(empty);
       }
 
-      // Floating zoom/fit/layout controls
       this._renderCanvasControlsDeferred = () => this._renderCanvasControls(stage);
     }
 
@@ -650,7 +602,6 @@ class PipelineBuilder extends HTMLElement {
       stage.append(empty);
     }
 
-    // defer initial draw to next frame so dimensions are known
     requestAnimationFrame(() => {
       this._renderNodes();
       this._renderEdges();
@@ -663,7 +614,6 @@ class PipelineBuilder extends HTMLElement {
         if (readonly || (this._pan.x === 0 && this._pan.y === 0 && this._zoom === 1)) this._fit();
         else this._applyTransform();
       } else if ("ResizeObserver" in window) {
-        // stage hidden (e.g. inside a closed <details>) — fit when it becomes visible
         const ro = new ResizeObserver((entries) => {
           for (const entry of entries) {
             if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
@@ -711,16 +661,13 @@ class PipelineBuilder extends HTMLElement {
         ? `0 0 0 2px ${style.accent}, 0 8px 24px -8px rgba(15,23,42,0.35)`
         : "0 1px 2px rgba(15,23,42,0.06)";
 
-      // Left accent stripe (color-coded by stage type)
       const stripe = el("div", "absolute top-0 left-0 bottom-0");
       stripe.style.width = "4px";
       stripe.style.background = style.accent;
       node.append(stripe);
 
-      // Body
       const body = el("div", "pb-node-body h-full pl-4 pr-3 py-2 flex items-center gap-2.5");
 
-      // Icon disc
       const iconBox = el("div", "flex items-center justify-center rounded-md shrink-0");
       iconBox.style.width = "30px";
       iconBox.style.height = "30px";
@@ -729,7 +676,6 @@ class PipelineBuilder extends HTMLElement {
       iconBox.append(svgIcon(type, 16, 2));
       body.append(iconBox);
 
-      // Text column
       const text = el("div", "min-w-0 flex-1");
 
       const topRow = el("div", "pb-node-top flex items-center gap-1.5");
@@ -757,7 +703,6 @@ class PipelineBuilder extends HTMLElement {
       body.append(text);
       node.append(body);
 
-      // input port (left)
       const inPort = el("div", "pb-port pb-port-in absolute rounded-full");
       inPort.dataset.role = "in";
       inPort.dataset.id = stage.id;
@@ -772,7 +717,6 @@ class PipelineBuilder extends HTMLElement {
       inPort.style.zIndex = "2";
       node.append(inPort);
 
-      // output port (right)
       const outPort = el("div", "pb-port pb-port-out absolute rounded-full");
       outPort.dataset.role = "out";
       outPort.dataset.id = stage.id;
@@ -805,7 +749,6 @@ class PipelineBuilder extends HTMLElement {
   _renderEdges() {
     const svg = this.querySelector(".pb-edges");
     if (!svg) return;
-    // wipe everything except <defs>
     Array.from(svg.children).forEach((c) => { if (c.tagName !== "defs") svg.removeChild(c); });
 
     const OFFSET_X = SVG_HALF;
@@ -859,12 +802,10 @@ class PipelineBuilder extends HTMLElement {
     viewport.style.transform = `translate(${this._pan.x}px, ${this._pan.y}px) scale(${this._zoom})`;
   }
 
-  // ─── interactions ───────────────────────────────────────────────────────
-
   _bindInteractions(stage) {
-    let mode = null;            // 'pan' | 'node' | 'port' | null
-    let active = null;          // drag state
-    const DRAG_THRESHOLD = 4;   // px before a click becomes a drag
+    let mode = null;
+    let active = null;
+    const DRAG_THRESHOLD = 4;
 
     const claimFocus = () => { activeEditor = this; };
 
@@ -898,8 +839,6 @@ class PipelineBuilder extends HTMLElement {
           moved: false,
           prevSelected: this._selectedId,
         };
-        // Selection visuals + inspector update happen in-place (no full
-        // render) so the in-progress drag closures stay valid.
         this._selectedId = id;
         this._updateSelectionVisuals();
         this._replaceInspector();
@@ -907,8 +846,6 @@ class PipelineBuilder extends HTMLElement {
         e.preventDefault();
         return;
       }
-      // background → pan (deselect deferred to onUp so we don't render
-      // mid-event and orphan this closure's stage/handlers).
       mode = "pan";
       active = {
         startX: e.clientX,
@@ -964,7 +901,6 @@ class PipelineBuilder extends HTMLElement {
         if (port && port.dataset.role === "in") {
           toId = port.dataset.id;
         } else {
-          // Fallback: dropping on the node body counts as the input port.
           const dropNode = target ? target.closest(".pb-node") : null;
           if (dropNode) toId = dropNode.dataset.id;
         }
@@ -976,7 +912,6 @@ class PipelineBuilder extends HTMLElement {
         this._renderEdges();
       } else if (mode === "pan") {
         stage.style.cursor = "";
-        // A click on background (no drag) deselects.
         if (!active.moved && this._selectedId) {
           this._selectedId = null;
           this._updateSelectionVisuals();
@@ -988,7 +923,6 @@ class PipelineBuilder extends HTMLElement {
     };
 
     const onWheel = (e) => {
-      // Only zoom with a modifier so plain scroll still scrolls the page.
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const rect = stage.getBoundingClientRect();
@@ -1014,8 +948,6 @@ class PipelineBuilder extends HTMLElement {
       if (!this._selectedId) return;
       const tag = (e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      // Delete only — Backspace is dangerous because users press it to
-      // navigate back; deleting a node should be deliberate.
       if (e.key === "Delete") {
         e.preventDefault();
         this._removeStage(this._selectedId);
@@ -1079,7 +1011,7 @@ class PipelineBuilder extends HTMLElement {
     }, 600);
   }
 
-  _unbindGlobal() { /* replaced on bind */ }
+  _unbindGlobal() {}
 
   _screenToCanvas(sx, sy) {
     return {
@@ -1087,8 +1019,6 @@ class PipelineBuilder extends HTMLElement {
       y: (sy - this._pan.y) / this._zoom,
     };
   }
-
-  // ─── stage operations ──────────────────────────────────────────────────
 
   _uniqueId(base) {
     const taken = new Set(this.stages.map((s) => s.id));
@@ -1115,8 +1045,6 @@ class PipelineBuilder extends HTMLElement {
     this._selectedId = id;
     this._savePositions();
     this._render();
-    // Ensure the new stage is visible — refit only if it lies outside the
-    // currently displayed region.
     requestAnimationFrame(() => this._ensureVisible(id));
   }
 
@@ -1126,7 +1054,6 @@ class PipelineBuilder extends HTMLElement {
     if (!pos || !stage) return;
     const rect = stage.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    // Convert node bounds to screen-space.
     const sx1 = pos.x * this._zoom + this._pan.x;
     const sy1 = pos.y * this._zoom + this._pan.y;
     const sx2 = sx1 + NODE_W * this._zoom;
@@ -1138,8 +1065,6 @@ class PipelineBuilder extends HTMLElement {
   }
 
   _findFreeSlot() {
-    // Pick a non-colliding canvas position: to the right of the existing
-    // rightmost node when there are stages, otherwise the visible centre.
     const others = Object.entries(this.positions).map(([_, p]) => p);
     let target;
     if (others.length === 0) {
@@ -1219,7 +1144,6 @@ class PipelineBuilder extends HTMLElement {
   }
 
   _reachable(start, target) {
-    // is there a path start → ... → target via depends_on edges (out: dep -> stage)
     const adj = {};
     for (const s of this.stages) {
       if (!s.id) continue;
@@ -1239,8 +1163,6 @@ class PipelineBuilder extends HTMLElement {
     }
     return false;
   }
-
-  // ─── inspector ──────────────────────────────────────────────────────────
 
   _renderInspector() {
     if (!this._selectedId) {
@@ -1262,7 +1184,6 @@ class PipelineBuilder extends HTMLElement {
     const aside = el("aside", "pb-inspector w-72 shrink-0 border-l border-gray-200 bg-white flex flex-col");
     aside.style.minWidth = "0";
 
-    // Header
     const head = el("div", "px-4 py-3 border-b border-gray-200 flex items-center gap-2.5");
     const iconBox = el("div", "flex items-center justify-center rounded-md shrink-0");
     iconBox.style.width = "28px";
@@ -1286,10 +1207,8 @@ class PipelineBuilder extends HTMLElement {
     head.append(del);
     aside.append(head);
 
-    // Body
     const body = el("div", "px-4 py-3 overflow-y-auto flex-1 space-y-3");
 
-    // ID
     body.append(this._field("Stage ID", (() => {
       const inp = el("input", "w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 bg-white");
       inp.type = "text";
@@ -1316,7 +1235,6 @@ class PipelineBuilder extends HTMLElement {
       return inp;
     })(), "Unique identifier · lowercase, dashes, underscores"));
 
-    // Type
     body.append(this._field("Type", (() => {
       const group = el("div", "inline-flex w-full p-0.5 bg-gray-100 rounded-md");
       for (const t of TYPES) {
@@ -1338,7 +1256,6 @@ class PipelineBuilder extends HTMLElement {
       return group;
     })()));
 
-    // Config (type-specific)
     if (type === "deploy") {
       body.append(this._field("Environment", this._textInput(stage.config.Deploy.environment || "", (v) => {
         stage.config.Deploy.environment = v.trim();
@@ -1351,7 +1268,6 @@ class PipelineBuilder extends HTMLElement {
         this._sync();
         this._refreshSelectedNode();
       });
-      // wrap with seconds suffix
       const wrap = el("div", "relative");
       inp.classList.add("pr-16");
       const suffix = el("span", "absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none");
@@ -1384,7 +1300,6 @@ class PipelineBuilder extends HTMLElement {
       body.append(label);
     }
 
-    // Dependencies
     const otherIds = this.stages.map((s) => s.id).filter((id) => id && id !== stage.id);
     if (otherIds.length > 0) {
       const divider = el("div", "border-t border-gray-100 -mx-4");
@@ -1467,9 +1382,6 @@ class PipelineBuilder extends HTMLElement {
   }
 
   _refreshSelectedNode() {
-    // Light in-place update of the selected node's sub-label, so the
-    // inspector input keeps focus while the user types. Triggers a
-    // full re-render as a fallback if the inline structure changed.
     if (!this._selectedId) return;
     const node = this.querySelector(`.pb-node[data-id="${cssEsc(this._selectedId)}"]`);
     if (!node) return;
@@ -1478,8 +1390,6 @@ class PipelineBuilder extends HTMLElement {
     const topRow = node.querySelector(".pb-node-top");
     if (!topRow) return;
     const label = this._configLabel(stage.config);
-    // topRow children: [typeLabel, (dot), (sub)]
-    // remove any existing dot+sub
     while (topRow.children.length > 1) topRow.removeChild(topRow.lastElementChild);
     if (label) {
       const dot = el("span", "text-gray-300");
@@ -1515,3 +1425,11 @@ function bezier(from, to, ox, oy) {
 }
 
 customElements.define("pipeline-builder", PipelineBuilder);
+
+document.addEventListener("sedx:load", () => {
+  document.querySelectorAll("pipeline-builder").forEach((builder) => {
+    if (!(builder instanceof PipelineBuilder) || builder.childElementCount > 0) return;
+    builder.disconnectedCallback();
+    builder.connectedCallback();
+  });
+});

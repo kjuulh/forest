@@ -2,26 +2,11 @@
 RUST_LOG = "forest=debug,notmad=trace,info"
 _.file = ".env"
 
-# Default server for the `forest` CLI (publish, release, etc). Override in
-# .env to point at a local server (e.g. http://localhost:4040 for forest-team
-# dev work). The runner uses FOREST_SERVER_ADDR — separate variable, not set
-# here.
-#FOREST_SERVER = "https://api.forest.development.understory.sh"
-
-# CUE registry override — `forest.sh/...` modules resolve from forest's OCI
-# registry on the dev server (HTTPS, port 443, terminated at the platform
-# ALB; the forest task's HTTP/4042 backend serves /v2/* OCI). Everything
-# else falls back to the central CUE registry.
 CUE_REGISTRY = "forest.sh=registry.api.forest.development.understory.sh,registry.cuelang.org"
 
 [tools]
-rust = { version = "1.98.1", components = "rust-src,rust-analyzer" }
+rust = { version = "1.100.0", components = "rust-src,rust-analyzer" }
 uv = "latest"
-# forest shells out to `cue`: the component and project parsers evaluate real
-# CUE, and so do their unit tests, which fail rather than skip when it is
-# absent. It was an undeclared prerequisite until CI went looking for it.
-# Pinned rather than "latest" because those tests assert on cue's own
-# diagnostics, which are not a stable interface across releases.
 cue = "0.16.1"
 
 [tasks.todos]
@@ -32,8 +17,6 @@ alias = ["i", "install"]
 run = "cargo install --path crates/forest -f"
 
 [tasks.forest]
-# FOREST_SERVER comes from [env] (default = api.forest.development.understory.sh)
-# or from .env (override, e.g. http://localhost:4040 when developing forest).
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- "
 
@@ -63,21 +46,6 @@ run = "cargo run -p forest-server -- serve"
 [tasks."build"]
 run = "cargo build --release"
 
-# Bootstrap the forest-contrib build components (DATA-654).
-#
-# They cannot build themselves: `build-rust` exposes `commands/build` for
-# *other* projects and has no build command of its own, so there is no
-# `forest run build` that produces it. Since forest resolves a local component
-# only from `.forest/component/output/<os>/<arch>/<name>`, a plain `cargo build`
-# no longer makes them runnable — the artifact has to be staged there.
-#
-# Same recipe `.github/workflows/publish-build-component.yml` uses to bootstrap
-# them in CI, just from a debug build: the output tree is a plain filesystem
-# contract, so a plain cargo build can stand in for the component that cannot
-# build itself.
-#
-# Run this once after a fresh clone (or after `cargo clean`) if `forest run` in
-# an example reports no build command.
 [tasks."contrib:stage"]
 description = "Stage the forest-contrib build components so `forest run build` works locally"
 run = """
@@ -169,15 +137,7 @@ run = "cargo run -p forest-server --bin forest-event-migration -- audit --strict
 
 [tasks."db:prepare"]
 depends = ["db:migrate"]
-# Must run inside the crate, NOT `--workspace`. The offline cache the release
-# build reads lives at crates/forest-server/.sqlx/, but `--workspace` writes to
-# the workspace root instead — leaving the real cache stale. A query change then
-# compiles fine locally (live DATABASE_URL) and fails the Docker build, which
-# sets SQLX_OFFLINE=true. See apps/forest/Dockerfile.
 dir = "./crates/forest-server"
-# `-- --all-targets` so the tests' queries stay in the cache. Without it the
-# prepare only walks the lib and bin, and silently *deletes* the entries the
-# test targets need — the offline build of `cargo test` then stops compiling.
 run = "cargo sqlx prepare -- --all-targets"
 
 [tasks."k8s:up"]

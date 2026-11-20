@@ -4,13 +4,6 @@ package forest.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// OAuthAppsService manages organisation-owned OAuth applications — the
-// "Sign in with Forest" equivalent of a GitHub OAuth App. Apps are owned
-// by an organisation; only org admins may manage them. The client_secret
-// is returned exactly once (on create / rotate) and only its hash is stored.
-//
-// This service covers app *management* (CRUD). The authorization-server
-// RPCs (authorize / token / userinfo) are added in later milestones.
 service OAuthAppsService {
   rpc CreateOAuthApp(CreateOAuthAppRequest) returns (CreateOAuthAppResponse);
   rpc ListOAuthApps(ListOAuthAppsRequest) returns (ListOAuthAppsResponse);
@@ -19,41 +12,31 @@ service OAuthAppsService {
   rpc RotateOAuthAppSecret(RotateOAuthAppSecretRequest) returns (RotateOAuthAppSecretResponse);
   rpc DeleteOAuthApp(DeleteOAuthAppRequest) returns (DeleteOAuthAppResponse);
 
-  // ── Authorization server (service-account only; called by Forage) ──
-  // Public client metadata for rendering the consent screen.
   rpc LookupOAuthClient(LookupOAuthClientRequest) returns (LookupOAuthClientResponse);
-  // Mint a single-use authorization code after the user consents.
   rpc CreateOAuthAuthorizationCode(CreateOAuthAuthorizationCodeRequest) returns (CreateOAuthAuthorizationCodeResponse);
-  // Exchange an authorization code for access + refresh tokens.
   rpc ExchangeOAuthCode(ExchangeOAuthCodeRequest) returns (ExchangeOAuthCodeResponse);
-  // Resolve an OAuth access token to user claims, gated by granted scopes.
   rpc GetOAuthUserinfo(GetOAuthUserinfoRequest) returns (GetOAuthUserinfoResponse);
-  // The client_credentials grant: an app authenticating as itself, with no
-  // user in the loop. No refresh token and no id_token are issued.
   rpc IssueClientCredentialsToken(IssueClientCredentialsTokenRequest) returns (IssueClientCredentialsTokenResponse);
-  // Resolve a machine token to the app behind it. Called by resource servers
-  // to authorise a request.
   rpc IntrospectClientToken(IntrospectClientTokenRequest) returns (IntrospectClientTokenResponse);
-  // Exchange a refresh token for a new access + refresh token (with rotation).
   rpc RefreshOAuthToken(RefreshOAuthTokenRequest) returns (RefreshOAuthTokenResponse);
-  // Revoke a user's grant for an app (drops all its issued tokens).
   rpc RevokeOAuthGrant(RevokeOAuthGrantRequest) returns (RevokeOAuthGrantResponse);
-  // List the apps a user has authorized (one entry per app with live tokens).
   rpc ListOAuthGrants(ListOAuthGrantsRequest) returns (ListOAuthGrantsResponse);
-  // Return the scopes a user has previously consented to for a client, so the
-  // consent screen can be skipped when the request is already covered.
   rpc GetOAuthConsent(GetOAuthConsentRequest) returns (GetOAuthConsentResponse);
+
+  rpc InitiateOAuthDeviceAuthorization(InitiateOAuthDeviceAuthorizationRequest) returns (InitiateOAuthDeviceAuthorizationResponse);
+  rpc LookupOAuthDeviceAuthorization(LookupOAuthDeviceAuthorizationRequest) returns (LookupOAuthDeviceAuthorizationResponse);
+  rpc ApproveOAuthDeviceAuthorization(ApproveOAuthDeviceAuthorizationRequest) returns (ApproveOAuthDeviceAuthorizationResponse);
+  rpc DenyOAuthDeviceAuthorization(DenyOAuthDeviceAuthorizationRequest) returns (DenyOAuthDeviceAuthorizationResponse);
+  rpc ExchangeOAuthDeviceCode(ExchangeOAuthDeviceCodeRequest) returns (ExchangeOAuthDeviceCodeResponse);
 }
 
-// Opaque bearer tokens issued to an OAuth app on a user's behalf.
 message OAuthTokens {
   string access_token = 1;
   string refresh_token = 2;
-  string token_type = 3; // always "bearer"
-  int64 expires_in_seconds = 4; // access-token lifetime
-  repeated string scopes = 5; // granted scopes
-  // OIDC id_token (JWT, HS256 signed with the client_secret). Present only when
-  // the `openid` scope was granted; empty otherwise.
+  string token_type = 3;
+  int64 expires_in_seconds = 4;
+  repeated string scopes = 5;
+  // Present only when the `openid` scope was granted.
   string id_token = 6;
 }
 
@@ -69,20 +52,21 @@ message LookupOAuthClientResponse {
   string homepage_url = 5;
   repeated string redirect_uris = 6;
   repeated string scopes = 7;
+  bool public = 8;
 }
 
 message CreateOAuthAuthorizationCodeRequest {
   string client_id = 1;
-  string user_id = 2; // the consenting user (resolved by Forage's session)
+  string user_id = 2;
   string redirect_uri = 3;
-  repeated string scopes = 4; // consented scopes (subset of app scopes)
-  string code_challenge = 5; // PKCE (optional)
-  string code_challenge_method = 6; // "S256" | "plain" (optional)
-  string nonce = 7; // OIDC nonce (optional) — echoed into the id_token
+  repeated string scopes = 4;
+  string code_challenge = 5;
+  string code_challenge_method = 6;
+  string nonce = 7;
 }
 
 message CreateOAuthAuthorizationCodeResponse {
-  string code = 1; // raw single-use code
+  string code = 1;
   int64 expires_in_seconds = 2;
 }
 
@@ -91,7 +75,7 @@ message ExchangeOAuthCodeRequest {
   string client_secret = 2;
   string code = 3;
   string redirect_uri = 4;
-  string code_verifier = 5; // PKCE (optional)
+  string code_verifier = 5;
 }
 
 message ExchangeOAuthCodeResponse {
@@ -101,13 +85,12 @@ message ExchangeOAuthCodeResponse {
 message IssueClientCredentialsTokenRequest {
   string client_id = 1;
   string client_secret = 2;
-  // Subset of the app's registered scopes. Empty means all of them.
   repeated string scopes = 3;
 }
 
 message IssueClientCredentialsTokenResponse {
   string access_token = 1;
-  string token_type = 2; // always "bearer"
+  string token_type = 2;
   int64 expires_in_seconds = 3;
   repeated string scopes = 4;
 }
@@ -116,29 +99,33 @@ message IntrospectClientTokenRequest {
   string access_token = 1;
 }
 
-// Empty `app_id` means the token is not live — unknown, expired or
-// revoked, deliberately indistinguishable to the caller.
 message IntrospectClientTokenResponse {
   bool active = 1;
+  // Empty when the token is not live (unknown, expired or revoked).
   string app_id = 2;
   string organisation_id = 3;
   repeated string scopes = 4;
+  string user_id = 5;
+  string username = 6;
+  repeated IntrospectedOrganisation organisations = 7;
+}
+
+message IntrospectedOrganisation {
+  string organisation_id = 1;
+  string name = 2;
 }
 
 message GetOAuthUserinfoRequest {
-  string access_token = 1; // raw OAuth access token presented by the client
+  string access_token = 1;
 }
 
-// User claims, populated according to the token's granted scopes. `sub` is
-// always present; profile/email fields only when the corresponding scope is
-// granted.
 message OAuthUserinfo {
-  string sub = 1; // user_id (always present)
-  string username = 2; // scope: profile
-  string profile_picture_url = 3; // scope: profile
-  string email = 4; // scope: email (primary verified address)
-  repeated string emails = 5; // scope: email (all verified addresses)
-  repeated string scopes = 6; // granted scopes
+  string sub = 1;
+  string username = 2;
+  string profile_picture_url = 3;
+  string email = 4;
+  repeated string emails = 5;
+  repeated string scopes = 6;
 }
 
 message GetOAuthUserinfoResponse {
@@ -156,7 +143,7 @@ message RefreshOAuthTokenResponse {
 }
 
 message RevokeOAuthGrantRequest {
-  string user_id = 1; // resolved by Forage's session (the consenting user)
+  string user_id = 1;
   string app_id = 2;
 }
 
@@ -168,12 +155,11 @@ message ListOAuthGrantsRequest {
   string user_id = 1;
 }
 
-// A single authorized application from the resource owner's perspective.
 message OAuthGrant {
   string app_id = 1;
   string name = 2;
-  repeated string scopes = 3; // union of granted scopes across live tokens
-  google.protobuf.Timestamp authorized_at = 4; // earliest live token
+  repeated string scopes = 3;
+  google.protobuf.Timestamp authorized_at = 4;
 }
 
 message ListOAuthGrantsResponse {
@@ -186,28 +172,85 @@ message GetOAuthConsentRequest {
 }
 
 message GetOAuthConsentResponse {
-  // Scopes the user has already consented to for this client (empty = none).
   repeated string scopes = 1;
 }
 
-// Public-safe representation of an OAuth application. Never carries the
-// client_secret (that is only present in Create/Rotate responses).
+message InitiateOAuthDeviceAuthorizationRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  repeated string scopes = 3;
+}
+
+message InitiateOAuthDeviceAuthorizationResponse {
+  string device_code = 1;
+  string user_code = 2;
+  string verification_uri = 3;
+  string verification_uri_complete = 4;
+  int64 expires_in_seconds = 5;
+  int32 interval_seconds = 6;
+}
+
+message LookupOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+}
+
+message LookupOAuthDeviceAuthorizationResponse {
+  string client_id = 1;
+  string name = 2;
+  string homepage_url = 3;
+  repeated string scopes = 4;
+}
+
+message ApproveOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+  string user_id = 2;
+  string approving_ip = 3;
+  string approving_user_agent = 4;
+}
+
+message ApproveOAuthDeviceAuthorizationResponse {}
+
+message DenyOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+  string user_id = 2;
+}
+
+message DenyOAuthDeviceAuthorizationResponse {}
+
+message ExchangeOAuthDeviceCodeRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  string device_code = 3;
+}
+
+enum OAuthDeviceTokenStatus {
+  O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED = 0;
+  O_AUTH_DEVICE_TOKEN_STATUS_ISSUED = 1;
+  O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING = 2;
+  O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN = 3;
+  O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED = 4;
+  O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN = 5;
+}
+
+message ExchangeOAuthDeviceCodeResponse {
+  OAuthDeviceTokenStatus status = 1;
+  OAuthTokens tokens = 2;
+}
+
 message OAuthApp {
-  string app_id = 1; // UUID
-  string organisation_id = 2; // UUID of the owning org
+  string app_id = 1;
+  string organisation_id = 2;
   string name = 3;
   string description = 4;
   string homepage_url = 5;
-  string client_id = 6; // public client identifier
+  string client_id = 6;
   repeated string redirect_uris = 7;
-  repeated string scopes = 8; // scopes this app is permitted to request
-  // OAuth grants this app may use: "authorization_code" and/or
-  // "client_credentials". Apps predating machine-to-machine support
-  // carry "authorization_code" alone.
+  repeated string scopes = 8;
   repeated string grant_types = 12;
-  string created_by = 9; // UUID of the creating user
+  string created_by = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  bool public = 13;
 }
 
 message CreateOAuthAppRequest {
@@ -217,14 +260,14 @@ message CreateOAuthAppRequest {
   string homepage_url = 4;
   repeated string redirect_uris = 5;
   repeated string scopes = 6;
-  // Empty defaults to ["authorization_code"], so an app only becomes
-  // machine-capable by asking.
+  // Empty defaults to ["authorization_code"].
   repeated string grant_types = 7;
+  bool public = 8;
 }
 
 message CreateOAuthAppResponse {
   OAuthApp app = 1;
-  // The raw client_secret, only returned on creation.
+  // Only returned on creation; empty for a public app.
   string client_secret = 2;
 }
 
@@ -253,9 +296,7 @@ message UpdateOAuthAppRequest {
   string homepage_url = 5;
   repeated string redirect_uris = 6;
   repeated string scopes = 7;
-  // Empty defaults to ["authorization_code"], matching create. Removing
-  // a grant takes effect immediately: in-flight codes and existing
-  // refresh tokens for that flow stop working.
+  // Removing a grant immediately invalidates its in-flight codes and refresh tokens.
   repeated string grant_types = 8;
 }
 
@@ -270,7 +311,7 @@ message RotateOAuthAppSecretRequest {
 
 message RotateOAuthAppSecretResponse {
   OAuthApp app = 1;
-  // The new raw client_secret, only returned on rotation.
+  // Only returned on rotation.
   string client_secret = 2;
 }
 

@@ -1,0 +1,85 @@
+use forage_core::platform::PolicyConfig;
+use forage_ui::ButtonVariant;
+use forage_ui::components::{Button, Card, CsrfField, EnvironmentSelect, PolicyKindChip};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::project_settings::Section;
+use crate::views::project_settings::{policies_href, policy_href, policy_kind};
+props crate::views::project_settings::PolicyEditPage { chrome, org, project, csrf_token, policy, environments };
+
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Policies} description="Update the conditions this policy gates on." crumb={Some(policy.name.as_str())}>
+    {let kind = policy_kind(&policy.config);}
+    <Card class="p-6">
+      <form method="post" action={policy_href(org, project, &policy.id)} class="space-y-4">
+        <CsrfField token={csrf_token} />
+        <input type="hidden" name="policy_type" value={kind.slug()}>
+        <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+          <span>Type:</span>
+          <PolicyKindChip kind={kind} class="text-xs font-medium" />
+        </div>
+        {match &policy.config {
+          PolicyConfig::SoakTime { source_environment, target_environment, duration_seconds } => {
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Source environment</label>
+                <EnvironmentSelect name="source_environment" environments={environments.as_slice()} selected={source_environment.as_str()} />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" environments={environments.as_slice()} selected={target_environment.as_str()} />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Soak duration (seconds)</label>
+              <input type="number" name="duration_seconds" min="1" value={duration_seconds.to_string()} class="w-48 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+              <p class="text-xs text-gray-500 mt-1">e.g. 1800 = 30 minutes, 3600 = 1 hour</p>
+            </div>
+          }
+          PolicyConfig::BranchRestriction { target_environment, branch_pattern } => {
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+                <input type="text" name="branch_pattern" value={branch_pattern} class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" environments={environments.as_slice()} selected={target_environment.as_str()} />
+              </div>
+            </div>
+          }
+          PolicyConfig::Approval { target_environment, required_approvals } => {
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" environments={environments.as_slice()} selected={target_environment.as_str()} />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Required approvals</label>
+                <input type="number" name="required_approvals" min="1" value={required_approvals.to_string()} class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                <p class="text-xs text-gray-500 mt-1">Number of distinct approvals needed before deployment proceeds.</p>
+              </div>
+            </div>
+          }
+          PolicyConfig::SupersedePending { target_environment, same_branch_only } => {
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                <EnvironmentSelect name="target_environment" environments={environments.as_slice()} selected={target_environment.as_str()} />
+              </div>
+              <div>
+                <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                  <input type="checkbox" name="same_branch_only" value="1" checked={*same_branch_only} class="rounded border-gray-300 text-gray-900 focus:ring-gray-900"> Same branch only</label>
+                <p class="text-xs text-gray-500 mt-1">Only supersede a pending release when the newer one is on the same branch.</p>
+              </div>
+            </div>
+            <p class="text-xs text-gray-500">A deploy already running is never interrupted — it finishes, and the queue behind it collapses to the newest.</p>
+          }
+        }}
+        <div class="flex items-center gap-3 pt-2">
+          <Button label="Save Changes" />
+          <Button label="Cancel" variant={ButtonVariant::Secondary} href={Some(policies_href(org, project).as_str())} />
+        </div>
+      </form>
+    </Card>
+  </ProjectSettings>
+</Shell>

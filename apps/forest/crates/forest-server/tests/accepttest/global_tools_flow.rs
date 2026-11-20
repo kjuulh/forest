@@ -1,19 +1,8 @@
-//! Acceptance tests for the global-tools registry contract.
-//!
-//! Exercises TASKS/018-global-tools.md §1a.2 (server-side validation) and
-//! §1a.2e (shape persistence) end-to-end against the live gRPC server +
-//! Postgres dev database. Each test creates a unique org, publishes a
-//! manifest, and inspects the server's stored state.
-
 use forest_grpc_interface::*;
 use serde_json::json;
 use tonic::metadata::MetadataValue;
 
 use crate::accepttest::fixtures::{Given, testcase};
-
-// ---------------------------------------------------------------------------
-// Shared scaffolding
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Default)]
 struct GlobalToolsData {
@@ -103,8 +92,6 @@ async fn publish_manifest(
         .map(|_| ())
 }
 
-/// Stream-upload a binary artifact for an in-flight upload.
-/// Mirrors the protocol-level path that `forest components publish` uses.
 async fn upload_binary(
     g: &Given<GlobalToolsData>,
     token: &str,
@@ -156,10 +143,6 @@ fn unique_org() -> String {
     format!("gtorg{}", uuid::Uuid::now_v7().simple())
 }
 
-// ---------------------------------------------------------------------------
-// Happy paths — one per shape
-// ---------------------------------------------------------------------------
-
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
@@ -188,7 +171,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
         .expect("publish_manifest must succeed for valid external manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Verify the manifest round-trips via GetComponentManifest.
     let resp = g
         .fixture()
         .registry()
@@ -207,7 +189,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
     assert_eq!(returned["kind"], "external");
     assert_eq!(returned["tool"]["name"], "rg");
 
-    // Verify the shape persisted on `components`.
     let shape: String =
         sqlx::query_scalar("SELECT shape FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -217,7 +198,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
             .expect("query shape");
     assert_eq!(shape, "tool_external");
 
-    // And that `kind` is also set to "external".
     let kind: String =
         sqlx::query_scalar("SELECT kind FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -296,13 +276,8 @@ async fn publish_hybrid_component_manifest_persists_hybrid_shape() {
     assert_eq!(shape, "hybrid_component");
 }
 
-// ---------------------------------------------------------------------------
-// Negative cases — §1a.2 validation rules
-// ---------------------------------------------------------------------------
-
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_without_tool_facet() {
-    // §1a.2 rule 2: external ⇒ tool present.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -332,7 +307,6 @@ async fn rejects_external_manifest_without_tool_facet() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_binary_manifest_without_methods_or_tool() {
-    // §1a.2 rule 7.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -358,7 +332,6 @@ async fn rejects_binary_manifest_without_methods_or_tool() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_with_http_scheme() {
-    // §1a.2 rule 4: external URLs must be https://.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -389,7 +362,6 @@ async fn rejects_external_manifest_with_http_scheme() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_with_methods_declared() {
-    // §1a.2e: external manifests cannot declare methods (no describe).
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -421,7 +393,6 @@ async fn rejects_external_manifest_with_methods_declared() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_invalid_tool_name() {
-    // §1a.2 rule 3: tool.name regex.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -461,22 +432,10 @@ async fn publish_tool(
     commit_upload(g, token, &upload).await;
 }
 
-// ---------------------------------------------------------------------------
-// End-to-end: upload binary → lazy fetch via DownloadBinary → exec
-// ---------------------------------------------------------------------------
-
-/// The smallest valid Linux ELF that exits 0 — a minimal shell script that
-/// happens to also satisfy `chmod +x` semantics. For the cache layer we
-/// only need *bytes that round-trip with a stable sha*, not an executable
-/// shape — the test asserts on cache content, not exec.
 const STUB_BINARY: &[u8] = b"#!/bin/sh\necho hello, $1!\nexit 0\n";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
-    // Verifies the full TOOL_BINARY lifecycle on the server side:
-    //   publish → DownloadBinary → bytes match what we uploaded.
-    // This is the contract the client's `resolve_to_cached_path` cold path
-    // depends on.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -502,7 +461,6 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
         .expect("publish_manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Now exercise the download path the way `forest global run` would.
     let mut stream = g
         .fixture()
         .registry()
@@ -514,6 +472,7 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
                 version: "0.1.0".into(),
                 os: "linux".into(),
                 arch: "amd64".into(),
+                ..Default::default()
             },
         ))
         .await
@@ -526,13 +485,9 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
     }
     assert_eq!(fetched, STUB_BINARY);
 
-    // Sha matches what we uploaded — the client cache layer's content-address
-    // invariant (cache::finalize) accepts these bytes only if the manifest
-    // claims this sha. End-to-end integrity verified.
     let downloaded_sha = hex::encode(Sha256::digest(&fetched));
     assert_eq!(downloaded_sha, expected_sha);
 
-    // Shape persisted as tool_binary.
     let shape: String =
         sqlx::query_scalar("SELECT shape FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -543,11 +498,158 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
     assert_eq!(shape, "tool_binary");
 }
 
+fn patterned_binary() -> Vec<u8> {
+    (0..2_500_123u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+async fn publish_patterned_tool(
+    g: &Given<GlobalToolsData>,
+    token: &str,
+    org: &str,
+    binary: &[u8],
+) -> String {
+    use sha2::{Digest, Sha256};
+    let sha = hex::encode(Sha256::digest(binary));
+    let upload = begin_upload(g, token, org, "ranged-tool", "0.1.0").await;
+    upload_binary(g, token, &upload, "linux", "amd64", binary).await;
+    let manifest = json!({
+        "kind": "binary",
+        "tool": {"name": "ranged", "argv_passthrough": true},
+        "platforms": {"linux_amd64": {"sha256": sha, "size": binary.len()}}
+    });
+    publish_manifest(g, token, &upload, &manifest.to_string())
+        .await
+        .expect("publish_manifest");
+    commit_upload(g, token, &upload).await;
+    sha
+}
+
+fn range_request(
+    org: &str,
+    offset: u64,
+    length: u64,
+    expected_sha256: &str,
+) -> DownloadBinaryRequest {
+    DownloadBinaryRequest {
+        organisation: org.to_string(),
+        name: "ranged-tool".into(),
+        version: "0.1.0".into(),
+        os: "linux".into(),
+        arch: "amd64".into(),
+        offset,
+        length,
+        expected_sha256: expected_sha256.to_string(),
+    }
+}
+
+async fn fetch(
+    g: &Given<GlobalToolsData>,
+    token: &str,
+    req: DownloadBinaryRequest,
+) -> Result<Vec<DownloadBinaryResponse>, tonic::Status> {
+    let mut stream = g
+        .fixture()
+        .registry()
+        .download_binary(authed_request(token, req))
+        .await?
+        .into_inner();
+    let mut out = Vec::new();
+    while let Some(m) = stream.message().await? {
+        out.push(m);
+    }
+    Ok(out)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_binary_serves_exactly_the_requested_range_from_object_storage() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+    let binary = patterned_binary();
+    let sha = publish_patterned_tool(&g, &token, &org, &binary).await;
+
+    let (offset, length) = (1_048_000u64, 1_300_000u64);
+    let messages = fetch(&g, &token, range_request(&org, offset, length, &sha))
+        .await
+        .expect("ranged download");
+
+    let mut cursor = offset;
+    let mut bytes = Vec::new();
+    for m in &messages {
+        assert_eq!(
+            m.offset, cursor,
+            "messages arrive in order with their offsets"
+        );
+        cursor += m.chunk.len() as u64;
+        bytes.extend_from_slice(&m.chunk);
+    }
+    assert_eq!(bytes, binary[offset as usize..(offset + length) as usize]);
+    assert_eq!(messages[0].sha256, sha);
+    assert_eq!(messages[0].total_size, binary.len() as u64);
+
+    let tail_start = binary.len() as u64 - 10;
+    let tail = fetch(&g, &token, range_request(&org, tail_start, 8 << 20, ""))
+        .await
+        .expect("clamped range");
+    let tail_bytes: Vec<u8> = tail.iter().flat_map(|m| m.chunk.clone()).collect();
+    assert_eq!(tail_bytes, binary[tail_start as usize..]);
+
+    let whole = fetch(&g, &token, range_request(&org, 0, 0, ""))
+        .await
+        .expect("whole download");
+    let whole_bytes: Vec<u8> = whole.iter().flat_map(|m| m.chunk.clone()).collect();
+    assert_eq!(whole_bytes, binary);
+    assert_eq!(whole[0].sha256, sha);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_binary_refuses_ranges_it_cannot_serve_faithfully() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+    let binary = patterned_binary();
+    let sha = publish_patterned_tool(&g, &token, &org, &binary).await;
+    let size = binary.len() as u64;
+
+    let past_end = fetch(&g, &token, range_request(&org, size, 10, &sha))
+        .await
+        .expect_err("offset at the end");
+    assert_eq!(past_end.code(), tonic::Code::OutOfRange, "{past_end}");
+
+    let no_length = fetch(&g, &token, range_request(&org, 5, 0, &sha))
+        .await
+        .expect_err("offset without a length");
+    assert_eq!(
+        no_length.code(),
+        tonic::Code::InvalidArgument,
+        "{no_length}"
+    );
+
+    let other_binary = "0".repeat(64);
+    let changed = fetch(&g, &token, range_request(&org, 0, 1024, &other_binary))
+        .await
+        .expect_err("pinned to a different digest");
+    assert_eq!(changed.code(), tonic::Code::FailedPrecondition, "{changed}");
+
+    let outsider = register_user(&g).await;
+    let denied = fetch(&g, &outsider, range_request(&org, 1024, 1024, &sha))
+        .await
+        .expect_err("non-member range");
+    assert!(
+        matches!(
+            denied.code(),
+            tonic::Code::PermissionDenied | tonic::Code::NotFound
+        ),
+        "non-member must not read a range: {denied}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
-    // HYBRID_COMPONENT: same binary, two doorways. The describe protocol
-    // (forest run <command>) reads `methods`; the shim path reads `tool`.
-    // Server-side just stores everything in the manifest and the shape.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -571,7 +673,6 @@ async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
         .expect("publish_manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Detail surface exposes both methods and tool facet.
     let detail = g
         .fixture()
         .registry()
@@ -596,9 +697,6 @@ async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_tool_external_no_binary_upload_required() {
-    // TOOL_EXTERNAL: the manifest carries the URL + sha; the registry never
-    // sees bytes. DownloadBinary will refuse (no artifact uploaded). The
-    // client's resolver picks `FetchPlan::Url` instead.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -622,7 +720,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
         .expect("publish external");
     commit_upload(&g, &token, &upload).await;
 
-    // Fetching the manifest exposes the upstream URL for the client to GET.
     let resp = g
         .fixture()
         .registry()
@@ -641,7 +738,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
     let url = v["platforms"]["linux_amd64"]["url"].as_str().unwrap();
     assert!(url.starts_with("https://"), "url must be https: {url}");
 
-    // Server-side discovery view should only show the host, not the full URL.
     let detail = g
         .fixture()
         .registry()
@@ -659,8 +755,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
     assert_eq!(summary.shape, ComponentShape::ToolExternal as i32);
     assert_eq!(summary.upstream_host, "github.com");
 
-    // DownloadBinary against an external tool should fail — there's no
-    // artifact, the binary lives upstream.
     let resp = g
         .fixture()
         .registry()
@@ -672,6 +766,7 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
                 version: "14.1.1".into(),
                 os: "linux".into(),
                 arch: "amd64".into(),
+                ..Default::default()
             },
         ))
         .await;
@@ -687,8 +782,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn discovery_search_returns_shape_and_tool_facet() {
-    // Verifies the §1a.2e ComponentShape + tool/methods/upstream_host
-    // fields are populated on SearchComponents responses.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -739,14 +832,11 @@ async fn discovery_search_returns_shape_and_tool_facet() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
-    // §1a.2c: ListOrgTools streams components whose shape ∈ {hybrid, tool_*}.
-    // Pure COMPONENTs are excluded. Prereleases are not chosen as latest.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
     create_org(&g, &token, &org).await;
 
-    // 1. Pure component (no tool facet) — should NOT appear in ListOrgTools.
     publish_tool(
         &g,
         &token,
@@ -763,7 +853,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 2. Tool binary.
     publish_tool(
         &g,
         &token,
@@ -780,7 +869,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 3. Hybrid.
     publish_tool(
         &g,
         &token,
@@ -798,7 +886,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 4. External tool.
     publish_tool(
         &g,
         &token,
@@ -820,7 +907,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 5. Newer prerelease of `hello` — must NOT win for latest_version.
     publish_tool(
         &g,
         &token,
@@ -837,7 +923,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // Now call ListOrgTools and consume the stream.
     let mut stream = g
         .fixture()
         .registry()
@@ -904,6 +989,120 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     );
 }
 
+fn tool_manifest(name: &str, sha_fill: char) -> serde_json::Value {
+    json!({
+        "kind": "binary",
+        "tool": {"name": name, "argv_passthrough": true},
+        "platforms": {
+            "linux_amd64": {"sha256": sha_fill.to_string().repeat(64)}
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dotted_prereleases_are_listed_by_semver_and_resolve_exactly_while_latest_stays_stable() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+
+    for (version, fill) in [
+        ("1.2.0", 'a'),
+        ("1.3.0-alpha.2", 'b'),
+        ("1.3.0-alpha.10", 'c'),
+        ("1.3.0-rc.1", 'd'),
+    ] {
+        publish_tool(
+            &g,
+            &token,
+            &org,
+            "prtool",
+            version,
+            tool_manifest("prtool", fill),
+        )
+        .await;
+    }
+
+    let listed: Vec<String> = g
+        .fixture()
+        .registry()
+        .list_component_versions(authed_request(
+            &token,
+            ListComponentVersionsRequest {
+                organisation: org.clone(),
+                name: "prtool".into(),
+            },
+        ))
+        .await
+        .expect("list_component_versions")
+        .into_inner()
+        .versions
+        .into_iter()
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(
+        listed,
+        ["1.3.0-rc.1", "1.3.0-alpha.10", "1.3.0-alpha.2", "1.2.0"],
+        "versions must be newest-first by SemVer precedence"
+    );
+
+    let latest = g
+        .fixture()
+        .registry()
+        .get_component(authed_request(
+            &token,
+            GetComponentRequest {
+                name: "prtool".into(),
+                organisation: org.clone(),
+            },
+        ))
+        .await
+        .expect("get_component")
+        .into_inner()
+        .component
+        .expect("component");
+    assert_eq!(latest.version, "1.2.0");
+
+    let manifest = g
+        .fixture()
+        .registry()
+        .get_component_manifest(authed_request(
+            &token,
+            GetComponentManifestRequest {
+                organisation: org.clone(),
+                name: "prtool".into(),
+                version: "1.3.0-alpha.10".into(),
+            },
+        ))
+        .await
+        .expect("get_component_manifest")
+        .into_inner()
+        .manifest_json;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(
+        manifest["platforms"]["linux_amd64"]["sha256"],
+        "c".repeat(64),
+        "an exact dotted prerelease must resolve to its own artifact"
+    );
+
+    let republish = g
+        .fixture()
+        .registry()
+        .begin_upload(authed_request(
+            &token,
+            BeginUploadRequest {
+                name: "prtool".into(),
+                organisation: org.clone(),
+                version: "1.3.0-rc.1".into(),
+            },
+        ))
+        .await;
+    assert!(
+        republish.is_err(),
+        "a published prerelease is immutable; new builds need a new prerelease number"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn list_org_tools_returns_empty_stream_for_org_with_no_tools() {
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
@@ -954,7 +1153,6 @@ async fn list_org_tools_requires_org_membership() {
     )
     .await;
 
-    // Outsider user — not a member of `org`.
     let outsider = register_user(&g).await;
     let resp = g
         .fixture()
@@ -975,14 +1173,12 @@ async fn list_org_tools_requires_org_membership() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_manifest_over_size_cap() {
-    // §1a.2 rule 5.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
     create_org(&g, &token, &org).await;
     let upload = begin_upload(&g, &token, &org, "oversized", "0.1.0").await;
 
-    // Build a >64 KiB manifest by padding the description field.
     let big_description: String = "x".repeat(70 * 1024);
     let manifest = json!({
         "kind": "binary",

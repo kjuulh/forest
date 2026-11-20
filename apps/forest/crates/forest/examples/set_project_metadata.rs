@@ -1,19 +1,3 @@
-//! One-shot project description + blessed metadata pusher.
-//!
-//! Exercises the spec 009 path (UpdateProject with description +
-//! metadata field-mask) without uploading a binary. Useful for proving
-//! the round-trip on an existing project, or pre-populating a project
-//! that hasn't been published from CUE yet.
-//!
-//! Env:
-//!   FOREST_SERVER          gRPC endpoint (http://localhost:4040)
-//!   FOREST_ACCESS_TOKEN    bearer token (`forest auth token create`)
-//!   ORG_NAME, PROJECT_NAME
-//!   PROJECT_DESCRIPTION    (optional)
-//!   PROJECT_GIT_URL, PROJECT_HOMEPAGE, PROJECT_DOCS_URL,
-//!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER  (all optional)
-//!   PROJECT_TAGS           comma-separated labels (optional)
-
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::{CreateProjectRequest, ProjectMetadata, UpdateProjectRequest};
 use tonic::metadata::MetadataValue;
@@ -47,7 +31,6 @@ async fn main() -> anyhow::Result<()> {
             Ok(req)
         });
 
-    // Idempotent — ON CONFLICT DO NOTHING on the server.
     release
         .create_project(CreateProjectRequest {
             organisation: org.clone(),
@@ -62,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
             readme: None,
             description: Some(description.clone()),
             metadata: Some(metadata.clone()),
+            visibility: None,
         })
         .await?
         .into_inner();
@@ -84,9 +68,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `tags` is a repeated field, so it arrives from the environment as one
-/// comma-separated string. Empty in, empty out — the server treats a missing
-/// tag list as "clear", same as the other blessed fields.
 fn split_tags(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)

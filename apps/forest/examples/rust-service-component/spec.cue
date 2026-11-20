@@ -1,6 +1,5 @@
 package rust_service
 
-// --- Input spec: what consuming projects must provide ---
 #Spec: #ForestSpec & {
 	name:  string & =~"^[a-z][a-z0-9-]*$"
 	image: string
@@ -12,7 +11,6 @@ package rust_service
 	health_checks: #HealthChecks | *{liveness: {path: "/healthz", port: 8080}, readiness: {path: "/readyz", port: 8080}}
 }
 
-// --- Commands: actions the component can perform ---
 #Commands: #ForestCommands & {
 	build: {
 		description: "Compile the release binary"
@@ -60,7 +58,6 @@ package rust_service
 	}
 }
 
-// --- Lifecycle hooks: integration with forest/deployment ---
 #Hooks: #ForestHooks & {
 	"forest/deployment": #ForestHook & {
 		prepare: {
@@ -90,7 +87,6 @@ package rust_service
 	}
 }
 
-// --- Domain types ---
 #Port: {
 	name:     string
 	port:     int & >0 & <=65535

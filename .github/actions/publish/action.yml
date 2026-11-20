@@ -3,32 +3,6 @@ description: >-
   Publish a component's binaries, spec and manifest to the forest registry, and
   prove the version resolves afterwards.
 
-# The counterpart to `release`: that one ships a deployment, this one ships a
-# binary. Both assume the caller has already built.
-#
-# `forest-publish.yml` remains the way to publish a component that has to be
-# built across several runners — it owns the three-job shape (resolve version →
-# matrix build → publish) that a composite action cannot express, because an
-# action is steps inside one job and cannot fan out a matrix or gather
-# artifacts from legs that ran elsewhere.
-#
-# This is for the other case, and it is the common one: a repo that already
-# builds its own binaries in its own workflow — `mise run dist`, a cargo build,
-# a matrix it drives itself — and wants the publish to be one step rather than
-# a copy of the block below. Point it at a tree that already has
-# `.forest/component/output/<os>/<arch>/<binary>` in place and it does the rest.
-#
-#     - run: mise run dist                  # whatever this repo builds with
-#     - uses: understory-io/forest/.github/actions/setup-forest@v0.3.5
-#       with:
-#         version: v0.3.5
-#         gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
-#         token: ${{ secrets.FOREST_TOKEN }}
-#     - uses: understory-io/forest/.github/actions/publish@v0.3.5
-#
-# `cue` must be on PATH — `forest publish` shells out to it to evaluate the
-# spec, and so does this action to read the version back.
-
 inputs:
   version:
     description: >-
@@ -78,9 +52,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # Read the spec the same way `forest publish` does — every *.cue in the
-    # component directory, as one package — so what this reports and what the
-    # publish actually does cannot disagree.
     - name: Resolve component and version
       id: resolve
       shell: bash
@@ -117,10 +88,6 @@ runs:
         echo "component=$component" >> "$GITHUB_OUTPUT"
         echo "::notice::Publishing $component@$version"
 
-    # `forest publish` derives the manifest by executing the binary for the
-    # *runner's own* platform and asking it to describe itself, so a runner
-    # outside the built set fails deep inside the publish with a much worse
-    # message than this one.
     - name: Check this runner's platform was built
       if: inputs.dry-run != 'true'
       shell: bash
@@ -150,10 +117,6 @@ runs:
           exit 1
         fi
 
-    # Re-running a tag is safe: the registry refuses a version that is already
-    # published, so this fails cleanly rather than double-publishing or
-    # silently overwriting. A half-finished upload is rolled back by the CLI's
-    # abort-on-drop guard, leaving the version free to retry.
     - name: Publish
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -168,8 +131,6 @@ runs:
           forest publish
         fi
 
-    # Prove the version actually resolves from the registry rather than
-    # trusting the publish's own exit code.
     - name: Verify the published version resolves
       if: inputs.verify == 'true' && inputs.dry-run != 'true'
       shell: bash

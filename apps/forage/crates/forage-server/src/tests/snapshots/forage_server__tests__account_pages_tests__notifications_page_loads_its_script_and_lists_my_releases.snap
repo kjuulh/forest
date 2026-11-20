@@ -1,0 +1,47 @@
+---
+source: crates/forage-server/src/tests/account_pages_tests.rs
+expression: masked_main(&page.html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12 pb-12">
+<h1 class="text-2xl font-bold mb-8">Notifications</h1>
+<div id="notifications-list">
+<div class="space-y-3">
+<div class="border border-gray-200 rounded-lg overflow-hidden">
+<div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<span class="w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0"></span>
+<a href="/orgs/testorg/projects/my-api/releases/api-%22quoted%22" class="font-medium text-gray-900 hover:text-black truncate">feat: ship</a>
+</div>
+<div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 flex-wrap">
+<a href="/orgs/testorg/projects/my-api" class="hover:underline">testorg/my-api</a>
+<span class="flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"></path></svg>main</span>
+<span class="font-mono">0123456</span>
+<time datetime="2026-03-07T12:00:00Z" class="">07 Mar 2026</time>
+<span class="flex items-center gap-1">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+<a href="/users/testuser" class="hover:underline">testuser</a>
+</span>
+</div>
+</div>
+<details class="border-t border-gray-100 group" data-slug="api-&quot;quoted&quot;">
+<summary class="px-4 py-2 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50 flex-wrap">
+<svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+<span class="text-gray-400 text-sm">Pending</span>
+<svg class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+</summary>
+<div class="px-4 py-3 border-t border-gray-100 space-y-3">
+<p class="text-sm text-gray-700">Adds &lt;b&gt;things&lt;/b&gt;</p>
+<div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
+<span class="font-mono text-gray-400">api-&quot;quoted&quot;</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">v1.2.0</span>
+</div>
+</div>
+
+
+</details>
+</div>
+</div>
+</div>
+</section>
+</main>

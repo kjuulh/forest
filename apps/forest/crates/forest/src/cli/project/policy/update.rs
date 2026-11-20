@@ -23,7 +23,6 @@ pub struct UpdateCommand {
     #[arg(long = "type", short = 't')]
     policy_type: Option<String>,
 
-    // ── soak_time fields ────────────────────
     #[arg(long)]
     source_environment: Option<String>,
 
@@ -33,7 +32,6 @@ pub struct UpdateCommand {
     #[arg(long)]
     duration: Option<i64>,
 
-    // ── branch_restriction fields ───────────
     #[arg(long)]
     branch_pattern: Option<String>,
 }

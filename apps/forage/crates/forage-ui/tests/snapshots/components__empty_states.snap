@@ -1,0 +1,12 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<div class="p-6 border border-gray-200 rounded-lg text-center">
+<p class="text-gray-600">No releases yet.</p>
+
+</div>
+<div class="p-6 border border-gray-200 rounded-lg text-center">
+<p class="text-gray-600">No releases yet.</p>
+<p class="text-sm text-gray-400 mt-2">Push an artifact to start.</p>
+</div>

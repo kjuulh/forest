@@ -11,8 +11,6 @@ use crate::{
     state::State,
 };
 
-/// Stand-in printed instead of a credential. Same width regardless of the
-/// value's real length, so the output leaks nothing about it.
 const REDACTED: &str = "••••••••";
 
 #[derive(clap::Parser)]
@@ -31,9 +29,6 @@ impl ListCommand {
 
         let format = &state.config.format;
 
-        // Everything but the default goes through the shared renderer, so
-        // `--format json` is JSON (it used to print the pretty layout whatever
-        // was asked for) and `--format name | xargs` works as it does elsewhere.
         if !matches!(format, OutputFormat::Pretty) {
             let rows: Vec<DestinationRow> = destinations.iter().map(DestinationRow::from).collect();
             if rows.is_empty() && matches!(format, OutputFormat::Json) {
@@ -56,8 +51,6 @@ impl ListCommand {
 
         for destination in &destinations {
             println!("{} @ {}", destination.environment, destination.name);
-            // The type is what decides which projects a destination receives
-            // (forest#288), so it belongs in the listing.
             println!("type: {}", destination.destination_type.qualified());
 
             let rows = metadata_rows(destination);
@@ -78,7 +71,6 @@ impl ListCommand {
             }
         }
 
-        // Name the escape hatch, but only when something was actually hidden.
         if let Some((destination, key)) = hidden_example {
             eprintln!(
                 "\nsome values are hidden. reveal one with:\n  forest destination reveal --org {} --name {} --key {}",
@@ -90,10 +82,6 @@ impl ListCommand {
     }
 }
 
-/// One destination as a row, for every format but the default.
-///
-/// Sensitive values are never here: withheld keys appear with the same
-/// placeholder the pretty listing prints, and are named in `sensitive_keys`.
 #[derive(Debug, Serialize, Tabled)]
 struct DestinationRow {
     #[tabled(rename = "Name")]
@@ -146,13 +134,6 @@ enum MetadataRow {
     Hidden { key: String },
 }
 
-/// One row per metadata key, sorted so the output is stable across runs.
-///
-/// A key is hidden when the server withheld its value — which it does for keys
-/// the destination type declares `sensitive` and for keys the destination
-/// itself declares sensitive. Anything else is shown: sensitivity is declared,
-/// never guessed from the key's name, so free-form extras stay visible unless
-/// somebody marked them.
 fn metadata_rows(destination: &Destination) -> Vec<MetadataRow> {
     let mut rows: Vec<MetadataRow> = destination
         .metadata
@@ -232,8 +213,6 @@ mod tests {
 
     #[test]
     fn undeclared_keys_stay_visible() {
-        // The terraform case: keys the type never declares are forwarded as
-        // TF_VAR_* and are not secret by default.
         let dest = destination(
             &[
                 ("tf_workspace", "platform-dev"),
@@ -253,7 +232,6 @@ mod tests {
 
     #[test]
     fn declared_free_form_keys_are_hidden() {
-        // DATA-575: these live outside the terraform type's field schema.
         let dest = destination(
             &[
                 ("tf_workspace", "platform-dev"),
@@ -291,8 +269,6 @@ mod tests {
         assert_eq!(keys, vec!["alpha", "bravo", "mike", "yankee", "zulu"]);
     }
 
-    /// forest#288's smaller half: `--format json` must be JSON, carry the
-    /// type, and still never carry a credential.
     #[test]
     fn json_is_json_with_the_type_and_no_secret_values() {
         let dest = destination(&[("region", "eu-west-1")], &["git_token"]);

@@ -1,0 +1,33 @@
+use forage_ui::components::{Badge, EmptyState};
+use forage_ui::layouts::Shell;
+use forage_ui::Tone;
+use crate::views::projects::version_href;
+props crate::views::projects::ProjectComponentsPage { chrome, org, project, versions };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12 pb-8">
+    <h1 class="text-2xl font-bold mb-6">Components</h1>
+    {if !versions.is_empty() {
+      <div class="space-y-3">
+        {for (i, v) in versions.iter().enumerate() {
+          <a href={version_href(org, project, &v.version)} class="block border border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold text-base">v{v.version}</span>
+                {if i == 0 { <Badge label="latest" tone={Tone::Green} /> }}
+                {if !v.protocol_version.is_empty() {
+                  <span class="text-xs text-gray-400">protocol {v.protocol_version}</span>
+                }}
+              </div>
+              <div class="flex gap-1.5 flex-wrap">
+                {for platform in v.platforms.iter() { <Badge label={platform} /> }}
+              </div>
+            </div>
+          </a>
+        }}
+      </div>
+    } else {
+      <EmptyState message="No components published yet." hint="Publish from this project directory: forest publish" />
+    }}
+  </section>
+</Shell>

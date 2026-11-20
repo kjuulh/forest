@@ -1,11 +1,3 @@
-//! `forest-contrib/checkout@v0.1` — git clone wrapper.
-//!
-//! Shells out to the system `git` for the actual clone (so we don't pull
-//! in a full git library), parses HEAD's commit + branch from the result.
-//! GitHub's `actions/checkout` is the spiritual ancestor; this is the
-//! Forest-shaped equivalent for any URL git understands (https, ssh,
-//! file://, local path).
-
 #[allow(dead_code)]
 mod forestgen;
 
@@ -32,9 +24,6 @@ impl CommandHandler for Commands {
         }
         clone.arg(&input.repo).arg(&input.dest);
 
-        // Capture stderr instead of letting it pass through — the component
-        // owns its stdout for the JSON output contract, and the runner
-        // separates streams so a noisy clone can't corrupt the result.
         let out = clone
             .output()
             .map_err(|e| forest_sdk::Error::Handler(format!("spawn git clone: {e}").into()))?;
@@ -48,8 +37,6 @@ impl CommandHandler for Commands {
                 .into(),
             ));
         }
-        // Forward git's progress noise to the component's stderr so it
-        // surfaces in workflow logs without polluting stdout.
         eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim_end());
 
         let commit_sha = git_output(&input.dest, &["rev-parse", "HEAD"])?;

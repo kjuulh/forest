@@ -1,15 +1,3 @@
-//! Toolchain build logic shared by forest's build components (DATA-312).
-//!
-//! This crate owns the actual `cargo` / `go` / `docker` invocations that used
-//! to live in `forest`'s bespoke `build` command. Forest the CLI does NOT
-//! depend on this crate's build functions on its command path — they are
-//! invoked by the per-toolchain build *components* (`forest-contrib/build-rust`
-//! et al). Forest keeps owning cache / meta.json / descriptor bookkeeping; this
-//! crate's only job is to turn source into an artifact on disk.
-//!
-//! Scope is deliberately just the compile step: resolve targets, shell out to
-//! the toolchain (streaming output to stderr), and write a `checksums.sha256`.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -19,7 +7,6 @@ use sha2::{Digest, Sha256};
 pub mod component;
 pub mod manifest;
 
-/// The toolchains a build component can drive. One component per variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Toolchain {
     Rust,
@@ -27,8 +14,6 @@ pub enum Toolchain {
     Docker,
 }
 
-/// A resolved build target: one (os, arch) pair plus the toolchain-specific
-/// identifiers needed to drive the compiler.
 #[derive(Debug)]
 pub struct BuildTarget {
     pub os: String,
@@ -39,7 +24,6 @@ pub struct BuildTarget {
     pub docker_platform: Option<String>,
 }
 
-/// One built artifact, reported back in the build summary.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuiltArtifact {
     pub os: String,
@@ -49,7 +33,6 @@ pub struct BuiltArtifact {
     pub size: u64,
 }
 
-/// The JSON summary a build component returns on success.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuildSummary {
     pub name: String,
@@ -57,12 +40,7 @@ pub struct BuildSummary {
     pub artifacts: Vec<BuiltArtifact>,
 }
 
-/// End-to-end build for a build component: read the project manifest from
-/// `work_dir`, resolve targets, compile each, write `checksums.sha256`, and
-/// return a summary. Artifacts land in `<work_dir>/.forest/component/output`
-/// and the cargo target dir — forest's publish/run paths pick them up from
-/// there (this crate intentionally does NOT touch forest's component cache or
-/// meta.json). DATA-312.
+/// Leaves forest's component cache and meta.json untouched; artifacts stay under `work_dir`.
 pub async fn run_build(toolchain: Toolchain, work_dir: &Path) -> anyhow::Result<BuildSummary> {
     let req = manifest::read_build_request(toolchain, work_dir).await?;
 
@@ -156,38 +134,15 @@ fn docker_platform(os: &str, arch: &str) -> anyhow::Result<String> {
     Ok(format!("{plat_os}/{plat_arch}"))
 }
 
-/// Environment variable restricting a build to a subset of the declared
-/// architecture matrix (DATA-583).
-///
-/// Comma-separated `os/arch` selectors, e.g. `linux/amd64,linux/arm64`. Unset
-/// or blank builds everything `upload.architectures` declares, which is the
-/// behaviour every build had before this existed and still the right default.
-///
-/// It exists because cross-compiling is not always possible. A pure-Go
-/// component with `CGO_ENABLED=0` builds all four platforms from one Linux
-/// runner happily; one that binds a system framework, or a Rust component with
-/// awkward native deps, needs a *native* runner per platform. This lets CI fan
-/// the matrix out across runners — each leg building only what it can — and
-/// gather the artifacts back into one `forest publish`, which uploads whatever
-/// it finds in the output tree regardless of how many machines produced it.
 pub const FOREST_BUILD_TARGETS_ENV: &str = "FOREST_BUILD_TARGETS";
 
-/// Read [`FOREST_BUILD_TARGETS_ENV`], treating blank as unset — CI writes it
-/// from an interpolated input, and an unset input expands to "".
 fn target_selectors() -> Option<String> {
     let raw = std::env::var(FOREST_BUILD_TARGETS_ENV).ok()?;
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-/// Narrow the resolved targets to those named by `selectors`.
-///
-/// `None` (no selection) returns everything untouched. A selector naming a
-/// platform the component does not declare is an error rather than a silent
-/// no-op: the failure mode it guards against is a matrix leg with a typo'd
-/// platform quietly building nothing, passing green, and leaving a gap in the
-/// published set that only surfaces when a colleague on that platform tries to
-/// install the tool.
+/// An undeclared platform is an error, so a typo'd matrix leg cannot pass green building nothing.
 pub fn select_targets(
     targets: Vec<BuildTarget>,
     selectors: Option<&str>,
@@ -241,8 +196,6 @@ pub fn select_targets(
     Ok(selected)
 }
 
-/// Resolve build targets from the CUE `upload.architectures` map
-/// (`{os: {arch: {}}}`) for the given toolchain.
 pub fn resolve_targets(
     architectures: &HashMap<String, HashMap<String, serde_json::Value>>,
     toolchain: Toolchain,
@@ -278,20 +231,16 @@ pub fn resolve_targets(
         }
     }
 
-    // Sort for deterministic build order.
     targets.sort_by(|a, b| (&a.os, &a.arch).cmp(&(&b.os, &b.arch)));
     Ok(targets)
 }
 
-/// `<out_base>/<os>/<arch>/`, created if absent.
 pub fn output_dir(out_base: &Path, os: &str, arch: &str) -> anyhow::Result<PathBuf> {
     let dir = out_base.join(format!("{os}/{arch}/"));
     std::fs::create_dir_all(&dir).context("failed to create output dir")?;
     Ok(dir)
 }
 
-/// Artifact filename for a target: `<name>.tar` for docker, `<name>.exe` for
-/// windows, bare `<name>` otherwise.
 pub fn output_filename(component_name: &str, target: &BuildTarget) -> String {
     if target.docker_platform.is_some() {
         format!("{component_name}.tar")
@@ -302,7 +251,6 @@ pub fn output_filename(component_name: &str, target: &BuildTarget) -> String {
     }
 }
 
-/// Write `<out_base>/checksums.sha256` covering every target's artifact.
 pub fn generate_checksums(
     component_name: &str,
     targets: &[BuildTarget],
@@ -332,8 +280,6 @@ pub fn generate_checksums(
     Ok(())
 }
 
-/// Build a single target with the given toolchain. `source` is the directory to
-/// run the build in; artifacts land under `out_base/<os>/<arch>/`.
 pub async fn build_target(
     toolchain: Toolchain,
     component_name: &str,
@@ -374,9 +320,6 @@ async fn build_rust(
 
     let mut cmd = tokio::process::Command::new("cargo");
     cmd.current_dir(source);
-    // Rust can read this at compile time via option_env!, so the crate can
-    // report the component version rather than its Cargo.toml version — the two
-    // drift, and the registry only knows the former.
     cmd.env(FOREST_VERSION_ENV, component_version);
     cmd.arg("+nightly")
         .arg("build")
@@ -388,9 +331,6 @@ async fn build_rust(
         .arg("unstable-options");
 
     cmd.stdout(std::io::stdout());
-    // TASKS/031: capture stderr so we can pattern-match it for actionable
-    // hints on failure. We still tee it to the user's terminal in real time
-    // so build output isn't blocked behind the full child exit.
     cmd.stderr(std::process::Stdio::piped());
 
     let mut proc = cmd.spawn()?;
@@ -414,10 +354,6 @@ async fn build_rust(
     Ok(())
 }
 
-/// Drain a child's stderr to our own stderr line by line while accumulating
-/// the full text. Returns once EOF is reached. Used so we can match cargo's
-/// error output for actionable hints (TASKS/031) without losing the live
-/// streaming behaviour users expect from cargo.
 async fn tee_stderr(stderr: tokio::process::ChildStderr) -> anyhow::Result<String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -434,10 +370,6 @@ async fn tee_stderr(stderr: tokio::process::ChildStderr) -> anyhow::Result<Strin
     Ok(buffer)
 }
 
-/// Pattern-driven build hints. Each rule matches a substring of cargo's
-/// stderr and emits a targeted hint. Multiple matching rules ALL fire so
-/// users get every relevant pointer. If no rule matches, no hint is emitted —
-/// silence beats a misleading default (TASKS/031, items #3 + #9).
 struct HintRule {
     pattern: &'static str,
     hint: &'static str,
@@ -488,7 +420,6 @@ fn emit_rust_build_hints(stderr: &str, triple: &str) {
                 eprintln!();
                 emitted_any = true;
             }
-            // Substitute the placeholder for the actual triple where applicable.
             eprintln!("{}", rule.hint.replace("<triple>", triple));
         }
     }
@@ -497,18 +428,6 @@ fn emit_rust_build_hints(stderr: &str, triple: &str) {
     }
 }
 
-/// The full argv for `go`, after the program name.
-///
-/// Split out from the spawn so the *ordering* is testable. It was wrong:
-/// `-ldflags` was pushed before `build`, producing `go -ldflags … build …`,
-/// which go rejects with its usage text — `go` accepts no flags ahead of the
-/// subcommand. It went unnoticed because `forest-contrib/build-go` has not
-/// been republished since the stamping was added, so the released build
-/// component predates the broken code and the path never ran.
-///
-/// The `-X main.version=…` stamp makes `mytool version` and the registry agree.
-/// The linker ignores `-X` for a symbol that does not exist, so components that
-/// never declare `var version string` in package main are unaffected.
 fn go_build_args(component_version: &str, output_path: &Path) -> Vec<std::ffi::OsString> {
     vec![
         "build".into(),
@@ -555,12 +474,6 @@ async fn build_golang(
     cmd.env("GOARCH", go_arch);
     cmd.env("CGO_ENABLED", &cgo);
 
-    // Cross-compiling with cgo needs a compiler told which architecture to
-    // target, or the build fails on the C toolchain rather than on anything Go.
-    // Apple's clang can target both macOS architectures from either, so a
-    // darwin→darwin cross is supported once CC says which one. Other
-    // combinations need a toolchain we cannot assume, so they are left alone and
-    // fail with the compiler's own message.
     if cgo == "1"
         && std::env::var("CC").is_err()
         && target.os == "macos"
@@ -576,8 +489,6 @@ async fn build_golang(
         }
     }
 
-    // Also exposed as an environment variable, matching the Rust path, for
-    // anything that would rather read it at build time than link it in.
     cmd.env(FOREST_VERSION_ENV, component_version);
 
     cmd.args(go_build_args(component_version, &output_path));
@@ -599,37 +510,12 @@ async fn build_golang(
     Ok(())
 }
 
-/// Environment variable carrying the component version into a build.
-///
-/// Rust reads it with `option_env!(...)`, falling back to CARGO_PKG_VERSION;
-/// Go gets the same value linked in via -ldflags, since env vars are not
-/// visible at compile time there.
-///
-/// DATA-583 gave it a second job on the way *in*: set in the environment, it
-/// overrides `forest.component.version` for this build, so a tag-triggered CI
-/// release builds and publishes the same version without editing forest.cue.
-/// `forest publish --version` is bound to the same name (see that command's
-/// `arg_is_wired_to_the_env_var` test) — the two must not drift, or the version
-/// stamped into the binary stops matching the one the registry records.
 pub const FOREST_VERSION_ENV: &str = "FOREST_COMPONENT_VERSION";
 
-/// Resolve CGO_ENABLED for a Go build.
-///
-/// Defaults to "0", which keeps builds static and reproducible and is right for
-/// the majority of components. It is not right for all of them: a component that
-/// binds a platform API — the macOS Keychain, SQLite, anything behind a system
-/// framework — has those files guarded by `//go:build cgo`, so with cgo off they
-/// are silently compiled out. The binary still builds and still runs; it just
-/// quietly lacks the capability, which is a far worse failure than a build error.
-///
-/// So an explicit CGO_ENABLED in the environment now wins. Absent, nothing
-/// changes.
 fn golang_cgo_setting() -> String {
     cgo_setting_from(std::env::var("CGO_ENABLED").ok())
 }
 
-/// Split out from the environment lookup so it can be tested without mutating
-/// process state, which is shared across tests and makes them order-dependent.
 fn cgo_setting_from(raw: Option<String>) -> String {
     match raw {
         Some(v) if !v.trim().is_empty() => v.trim().to_string(),
@@ -747,9 +633,6 @@ mod build_hint_tests {
     use super::*;
 
     fn capture_hints(stderr: &str, triple: &str) -> String {
-        // Re-run the matching logic and accumulate into a string, since the
-        // production code writes to the real stderr. Mirror the iteration
-        // order and substitution exactly.
         let mut out = String::new();
         for rule in BUILD_HINT_RULES {
             if stderr.contains(rule.pattern) {
@@ -769,8 +652,6 @@ mod build_hint_tests {
             hints.contains("must match forest.component.name"),
             "expected name-alignment hint, got: {hints}"
         );
-        // Critical regression guard: the misleading cross-compile hint must
-        // NOT show up for this category of error.
         assert!(
             !hints.contains("rustup target add"),
             "no_bin_target must not trigger the cross-compile hint, got: {hints}"
@@ -806,8 +687,6 @@ mod build_hint_tests {
 
     #[test]
     fn multiple_matching_rules_all_fire() {
-        // Synthetic case: stderr contains both a linker error and a target
-        // error. We want BOTH hints, not just the first matching one.
         let stderr = "error: linker `cc` not found\n\
                       error: the target may not be installed";
         let hints = capture_hints(stderr, "aarch64-apple-darwin");
@@ -832,12 +711,6 @@ mod build_hint_tests {
     }
 }
 
-/// DATA-583 — narrowing a build to a subset of the declared matrix, so CI can
-/// fan the platforms out across native runners.
-///
-/// `select_targets` takes the selector string as an argument rather than
-/// reading the environment, precisely so these can be plain deterministic tests
-/// with no process-global state to serialise on.
 #[cfg(test)]
 mod select_targets_tests {
     use super::*;
@@ -867,16 +740,12 @@ mod select_targets_tests {
 
     #[test]
     fn no_selector_builds_everything() {
-        // The pre-DATA-583 behaviour, which every existing build depends on.
         let all = names(&select_targets(targets(), None).unwrap());
         assert_eq!(all, vec!["linux/amd64", "linux/arm64", "macos/arm64"]);
     }
 
     #[test]
     fn blank_selector_builds_everything() {
-        // An unset CI matrix entry interpolates to "", which must mean "all",
-        // not "none" — a leg that silently built nothing would pass green and
-        // leave a hole in the published platform set.
         assert_eq!(select_targets(targets(), Some("")).unwrap().len(), 3);
         assert_eq!(select_targets(targets(), Some("  ")).unwrap().len(), 3);
     }
@@ -896,8 +765,6 @@ mod select_targets_tests {
 
     #[test]
     fn selecting_an_undeclared_platform_is_an_error() {
-        // The typo case. Failing here beats publishing a component missing the
-        // platform a colleague is about to install it on.
         let err = select_targets(targets(), Some("linux/amd64,windows/amd64")).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("windows/amd64"), "msg: {msg}");
@@ -913,8 +780,6 @@ mod select_targets_tests {
 mod cgo_tests {
     use super::*;
 
-    /// Default off: static, reproducible builds suit most components, and this
-    /// is the long-standing behaviour.
     #[test]
     fn defaults_to_disabled() {
         assert_eq!(cgo_setting_from(None), "0");
@@ -922,10 +787,6 @@ mod cgo_tests {
         assert_eq!(cgo_setting_from(Some("   ".to_string())), "0");
     }
 
-    /// A component binding a platform API — the macOS Keychain, SQLite — has
-    /// those files behind `//go:build cgo`. With cgo off they are silently
-    /// compiled out: the binary builds, runs, and quietly lacks the capability,
-    /// which is worse than failing. An explicit request must be honoured.
     #[test]
     fn honours_an_explicit_request() {
         assert_eq!(cgo_setting_from(Some("1".to_string())), "1");
@@ -938,10 +799,6 @@ mod cgo_tests {
 mod version_stamp_tests {
     use super::*;
 
-    /// The linker ignores -X for a symbol that does not exist, so always passing
-    /// it is safe; components that never declare `main.version` keep their old
-    /// behaviour. This pins the flag's shape, which is what consumers document
-    /// against.
     #[test]
     fn ldflags_shape_is_stable() {
         let version = "0.1.6";
@@ -950,20 +807,9 @@ mod version_stamp_tests {
 
     #[test]
     fn version_env_name_is_stable() {
-        // Documented in component READMEs and read by Rust via option_env!;
-        // renaming it silently stops version stamping rather than failing.
         assert_eq!(FOREST_VERSION_ENV, "FOREST_COMPONENT_VERSION");
     }
 
-    /// Regression: `-ldflags` was emitted *before* `build`, so every Go
-    /// component build ran `go -ldflags … build …` and go answered with its
-    /// usage text. `go` takes no flags ahead of the subcommand.
-    ///
-    /// It shipped unnoticed because forest-contrib/build-go was never
-    /// republished after the stamping landed, so the released build component
-    /// predates the bug and the broken path never executed. The moment it is
-    /// republished — which the CI publish flow requires — every Go build breaks.
-    /// Assert the whole argv, in order, rather than just the flag's shape.
     #[test]
     fn go_argv_puts_build_first() {
         let args: Vec<String> = go_build_args("0.1.6", Path::new("/out/mytool"))

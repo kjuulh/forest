@@ -38,8 +38,6 @@ impl CreateTokenCommand {
             .await
             .context("failed to create token")?;
 
-        // Metadata + warnings to stderr so `forest auth token create > token.txt`
-        // captures only the raw token (data).
         if let Some(token) = resp.token {
             eprintln!("Token ID:   {}", token.token_id);
             eprintln!("Name:       {}", token.name);

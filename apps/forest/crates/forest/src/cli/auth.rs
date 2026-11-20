@@ -32,8 +32,6 @@ enum Commands {
 }
 
 impl AuthCommand {
-    /// True for subcommands that change server-side or persisted auth
-    /// state. `Status` is purely read-only.
     pub fn is_mutation(&self) -> bool {
         !matches!(self.commands, Commands::Status(_))
     }

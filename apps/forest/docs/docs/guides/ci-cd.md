@@ -154,9 +154,9 @@ the annotated line — a dependency pinned elsewhere in the file is left alone.
 A semver prerelease tag (`v0.2.0-rc.1`, `v0.1.7-ci.1`) is the one case where
 the tag wins. This exists so the pipeline can be exercised, or a release
 candidate cut, without a commit bumping the manifest. The workflow passes the
-version through `FOREST_COMPONENT_VERSION`, which both `forest run build` and
-`forest publish` read — so the version stamped into the binary matches the one
-the registry records.
+version through `FOREST_COMPONENT_VERSION`. `forest publish` publishes under
+it, and a build run by one of forest's rust/go/docker build components
+(`forest run build`) stamps it into the binary, so the two agree.
 
 Doing this by hand:
 
@@ -165,17 +165,32 @@ export FOREST_COMPONENT_VERSION=0.2.0-rc.1
 forest run build && forest publish
 ```
 
+A component that builds its own binary (`upload.type: "prebuilt"`, built by
+e.g. `mise run dist`) gets no stamping from forest. Its build script has to
+read the version itself. `forest components version` prints the version
+`forest publish` would use from that directory, with the same precedence:
+
+```bash
+export FOREST_COMPONENT_VERSION=0.2.0-rc.1
+VERSION=$(forest components version) mise run dist   # stamp "$VERSION" into the binary
+forest publish
+```
+
 Precedence is `--version` > `FOREST_COMPONENT_VERSION` > `forest.cue`. Prefer
 the environment form: `--version` reaches the upload but not the build, leaving
 the binary reporting the manifest's version. `forest publish` warns when it
 detects this.
 
-:::warning
-Forest does not exclude prereleases when resolving a bare `<org>/<name>` — it
-takes the semver maximum. A prerelease numbered above the current release
-becomes what everyone installs. Number test prereleases *below* the current
-release (`0.1.7-ci.1`, not `0.1.99-ci.1`), or publish them to a dev registry.
-:::
+A published prerelease does not reach anyone who did not ask for it. A bare
+`<org>/<name>` resolves to the highest stable release, and the org tool
+catalogue lists stable releases only. A tool with only prereleases is installed
+by exact version or by opting in with `forest global add <org>/<name>
+--prerelease`; see [`forest global add --prerelease`](../reference/cli.md#forest-global-add-prerelease).
+
+A currently published version cannot be overwritten, prereleases included, so
+each new build needs a new number: `0.2.0-rc.1`, then `0.2.0-rc.2`. Admin unpublish
+permits version reuse; an exact pin alone is not lifetime content identity.
+SemVer orders the numeric parts numerically, so `rc.10` follows `rc.9`.
 
 ### The build runs in CI, not on the registry
 
@@ -385,6 +400,30 @@ project: env: "prod": {
 it over the destination's metadata before the release runs, with the project
 winning. One destination per place then serves every service in it.
 
+A value only CI knows, such as the image tag the build pushed, goes in through
+`set`. Each line is trimmed and passed to `forest release prepare` as one
+`--set` value, never evaluated by the shell. It is not for secrets: values are
+echoed to the log and recorded on the annotation. `config.<key>=<value>` sets a generic destination's block on every
+environment, which is how the ECS provider's `pin_image` strategy learns the
+exact tag to deploy:
+
+```yaml
+jobs:
+  release:
+    needs: [test, build-and-push]
+    uses: understory-io/forest/.github/workflows/service-release.yml@stable
+    secrets: inherit
+    with:
+      set: |
+        config.image_tag=${{ needs.build-and-push.outputs.image-tag }}
+```
+
+Pass the tag the build job pushed, not one re-derived from the commit. A
+generic destination does not hand the provider the release's commit SHA, so an
+`image_tag_template` containing `{sha}` cannot resolve there. Because the
+override reaches every environment, each one needs `strategy: "pin_image"`:
+the provider rejects pin-only keys under its default strategy.
+
 ### Why CI does not wait
 
 Because the destination does. An ECS provider, for instance, holds a rollout to
@@ -460,15 +499,15 @@ Configure triggers on the server side:
 
 ```bash
 # Auto-deploy to staging on main
-forest project trigger create ci-staging \
+forest project trigger create --name ci-staging \
   --branch "^main$" \
   --source-type "^ci$" \
-  --target-environment staging
+  --env staging
 
-# Auto-deploy to prod via pipeline on tags
-forest project trigger create ci-prod \
+# Deploy release tags through the pipeline (all of its stages, prod included)
+forest project trigger create --name ci-prod \
   --branch "^v[0-9]" \
-  --target-environment prod \
+  --source-type "^ci$" \
   --use-pipeline
 ```
 
@@ -476,24 +515,24 @@ This separates **what** gets deployed (CI annotation) from **where** and **how**
 
 ## Explicit Release Flow
 
-For full control, annotate and release explicitly:
+For an explicitly requested direct staging release, first prepare and annotate with `--annotation-only`, retaining the printed slug as `SLUG`. Otherwise annotation can also start a trigger-driven pipeline, including prod. Do not combine trigger dispatch and the separate release below.
 
 ```yaml
 - name: Release to staging
   run: |
-    forest release release \
+    forest release release "$SLUG" \
       --organisation my-org \
       --project my-service \
       --environment staging
 
 - name: Wait for staging
   run: |
-    forest release wait "$INTENT_ID"
+    forest release show "$SLUG" --follow
 ```
 
 ## Policy Evaluation
 
-Before releasing, check if policies allow it:
+Use policy evaluation as a partial environment/branch diagnostic, not a release authorization or CI gate. It has no artifact selector: soak describes the latest successful deploy of **any artifact**, not the one being released. PASS does not prove that artifact soaked, an unrelated newer deploy can cause FAIL, and the command exits 0 even with failed policies. The server evaluates the actual artifact during release.
 
 ```yaml
 - name: Check policies
@@ -501,7 +540,7 @@ Before releasing, check if policies allow it:
     forest project policy evaluate \
       --organisation my-org \
       --project my-service \
-      --environment prod
+      --target-environment prod --branch "$GITHUB_REF_NAME"
 ```
 
 ## Who a release is attributed to
@@ -575,8 +614,9 @@ IMAGE_TAG=$(git rev-parse --short HEAD)
 docker build -t git.example.io/org/my-service:$IMAGE_TAG .
 docker push git.example.io/org/my-service:$IMAGE_TAG
 
-# Release with the exact tag that was just built
-forest release create --env dev \
+# Annotate with the exact tag that was just built; the project's trigger
+# releases it, usually through the pipeline (add --env dev to release dev only)
+forest release create --source-type ci \
   --set my-org/service.tag=$IMAGE_TAG
 ```
 
@@ -593,7 +633,7 @@ config: {
 Multiple overrides can be combined:
 
 ```bash
-forest release create --env prod \
+forest release create --source-type ci \
   --set my-org/service.tag=$IMAGE_TAG \
   --set my-org/service.env_vars.BUILD_SHA=$COMMIT_SHA
 ```
@@ -605,9 +645,7 @@ All `--set` overrides are recorded in the release annotation metadata for audit 
 Subscribe to release events for notifications or dashboards:
 
 ```bash
-forest notifications subscribe \
+forest notifications listen \
   --organisation my-org \
-  --project my-service \
-  --resource-types release \
-  --actions status_changed
+  --project my-service
 ```

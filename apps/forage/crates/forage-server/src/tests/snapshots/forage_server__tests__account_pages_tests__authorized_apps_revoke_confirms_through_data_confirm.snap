@@ -1,0 +1,26 @@
+---
+source: crates/forage-server/src/tests/account_pages_tests.rs
+expression: masked_main(&page.html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container pt-12">
+<div class="mb-8">
+<h1 class="text-2xl font-bold">Authorized applications</h1>
+<p class="text-sm text-gray-500 mt-1">Third-party apps you've granted access to your Forest account.</p>
+</div>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="flex items-center justify-between px-5 py-4">
+<div>
+<div class="font-medium text-gray-900">Seeded App</div>
+<div class="flex gap-1 mt-1">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">profile</span><span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">email</span>
+</div>
+</div>
+<form method="POST" action="/settings/authorized-apps/app-1/revoke" data-confirm="Revoke access for Seeded App? It will no longer be able to act on your behalf.">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50">Revoke</button>
+</form>
+</div>
+</div>
+</section>
+</main>

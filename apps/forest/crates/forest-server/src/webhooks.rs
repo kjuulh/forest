@@ -47,8 +47,6 @@ struct FluxInvolvedObject {
     namespace: String,
 }
 
-/// Verify HMAC-SHA256 signature from Flux generic-hmac provider.
-/// Flux sends the header as `sha256=<hex-encoded HMAC>`.
 fn verify_hmac_signature(secret: &[u8], body: &[u8], signature_header: &str) -> bool {
     let Some(hex_sig) = signature_header.strip_prefix("sha256=") else {
         return false;
@@ -69,7 +67,6 @@ async fn handle_flux_notification(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    // 1. Look up destination by (org, name) to get webhook_secret from metadata
     let dest =
         match lookup_destination_with_secret(&state.db, &organisation, &destination_name).await {
             Ok(Some(dest)) => dest,
@@ -98,7 +95,6 @@ async fn handle_flux_notification(
         return StatusCode::FORBIDDEN;
     };
 
-    // 2. Verify HMAC signature
     let signature = match headers.get("x-signature") {
         Some(val) => val.to_str().unwrap_or(""),
         None => {
@@ -118,7 +114,6 @@ async fn handle_flux_notification(
         return StatusCode::UNAUTHORIZED;
     }
 
-    // 3. Parse payload
     let payload: FluxNotificationPayload = match serde_json::from_slice(&body) {
         Ok(p) => p,
         Err(e) => {
@@ -141,7 +136,6 @@ async fn handle_flux_notification(
         "flux webhook: received notification"
     );
 
-    // 4. Determine success or failure based on Flux event semantics
     let is_success = payload.severity == "info"
         && matches!(
             payload.reason.as_str(),
@@ -150,7 +144,6 @@ async fn handle_flux_notification(
     let is_failure = payload.severity == "error";
 
     if !is_success && !is_failure {
-        // Informational event we don't need to act on (e.g. progressing)
         tracing::debug!(
             destination = %destination_name,
             reason = %payload.reason,
@@ -159,7 +152,6 @@ async fn handle_flux_notification(
         return StatusCode::OK;
     }
 
-    // 5. Find the most recent RUNNING release for this destination
     let running_release = match get_latest_running_release(&state.db, &dest.destination_id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
@@ -179,7 +171,6 @@ async fn handle_flux_notification(
         }
     };
 
-    // 6. Transition release state
     let (event_type, error_message) = if is_success {
         ("release.succeeded", None)
     } else {
@@ -215,8 +206,6 @@ async fn handle_flux_notification(
 
     StatusCode::OK
 }
-
-// ====== DB HELPERS ======
 
 struct DestinationWithSecret {
     destination_id: uuid::Uuid,
@@ -291,7 +280,6 @@ async fn transition_release(
         _ => anyhow::bail!("unexpected event type: {event_type}"),
     };
 
-    // Guard: only transition from RUNNING
     let updated = sqlx::query(
         "UPDATE release_states
          SET status = $2, error_message = $3,
@@ -305,7 +293,6 @@ async fn transition_release(
     .await?;
 
     if updated.rows_affected() == 0 {
-        // Release is no longer RUNNING — another transition beat us
         tracing::debug!(
             release_id = %release_id,
             "flux webhook: release already transitioned, skipping"
@@ -314,7 +301,6 @@ async fn transition_release(
         return Ok(());
     }
 
-    // Insert event (actor_id is NULL for system-initiated webhook events)
     let payload = serde_json::json!({
         "error_message": error_message,
         "reason": "flux_webhook_notification",
@@ -369,7 +355,6 @@ mod tests {
         let mut mac = HmacSha256::new_from_slice(secret).unwrap();
         mac.update(body);
         let bare_hex = hex::encode(mac.finalize().into_bytes());
-        // Without sha256= prefix, should fail
         assert!(!verify_hmac_signature(secret, body, &bare_hex));
     }
 
@@ -425,7 +410,7 @@ mod tests {
 
         let payload: FluxNotificationPayload = serde_json::from_str(json).unwrap();
         assert_eq!(payload.severity, "error");
-        assert_eq!(payload.reason, ""); // default
+        assert_eq!(payload.reason, "");
         assert!(payload.metadata.is_none());
         assert!(payload.timestamp.is_none());
     }

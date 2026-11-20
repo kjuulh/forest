@@ -8,37 +8,20 @@ message CreateDestinationRequest {
   map<string, string> metadata = 3;
   DestinationType type = 4;
   string organisation = 5;
-  // Metadata keys to treat as credentials, in addition to those the
-  // destination type declares sensitive. Lets free-form keys (e.g. terraform
-  // TF_VAR_* credentials) be marked without changing the type schema.
   repeated string sensitive_keys = 6;
 }
 message CreateDestinationResponse {
-  // Projects this destination was just added to without asking for it: they
-  // release into its environment, declare no destinations for it, and render
-  // something of its type (or cannot say what they render). A project that
-  // declares nothing for an environment is released to every destination in
-  // it of a kind it renders, so these projects' next release there will also
-  // target the new one. `organisation/project`, sorted. forest#288.
   repeated string widened_projects = 1;
 }
 
 message UpdateDestinationRequest {
   string name = 1;
-  // Replaces the stored metadata wholesale, unless `merge_metadata` is set.
-  // Wholesale is the right shape for an editor that renders every key at once
-  // (removing a row has to delete the key), and the wrong shape for a caller
-  // that only names the pairs it cares about.
   map<string, string> metadata = 2;
   string organisation = 3;
-  // Replaces the destination's sensitive-key set when `set_sensitive_keys`
-  // is true. Ignored otherwise, so older clients keep the existing set.
   repeated string sensitive_keys = 4;
+  // `sensitive_keys` is applied only when this is true.
   bool set_sensitive_keys = 5;
-  // Overlay `metadata` onto what is stored instead of replacing it: keys not
-  // named are left alone. An empty map then means "change nothing", which is
-  // what a caller that only touches sensitive_keys sends. Defaults to false so
-  // existing clients keep replacing.
+  // When false, `metadata` replaces the stored map wholesale.
   bool merge_metadata = 6;
 }
 message UpdateDestinationResponse {}
@@ -56,9 +39,6 @@ message GetDestinationsResponse {
   repeated Destination destinations = 1;
 }
 
-// Fetches the value of exactly one sensitive metadata key. Deliberately
-// per-key: there is no "reveal everything" call, so pulling a credential is
-// always an explicit act against a named key.
 message RevealDestinationMetadataRequest {
   string organisation = 1;
   string name = 2;
@@ -86,13 +66,10 @@ service DestinationService {
 message Destination {
   string name = 1;
   string environment = 2;
-  // Non-sensitive metadata only. Values for sensitive keys are never sent
-  // here; fetch them one at a time via RevealDestinationMetadata.
+  // Omits sensitive keys; fetch those with RevealDestinationMetadata.
   map<string, string> metadata = 3;
   DestinationType type = 4;
   string organisation = 5;
-  // Names of the metadata keys whose values were withheld from `metadata`.
-  // Key names only — never values.
   repeated string sensitive_keys = 6;
 }
 
@@ -111,9 +88,5 @@ message MetadataFieldSchema {
   bool required = 4;
   string field_type = 5;
   string default_value = 6;
-  // When true, this field holds a credential. Servers omit its value from
-  // Destination.metadata in read RPCs and list the key in
-  // Destination.sensitive_keys instead; clients must not render the value.
-  // Absent/false on older types, so this is additive and backward compatible.
   bool sensitive = 7;
 }

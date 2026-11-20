@@ -1,10 +1,3 @@
-//! `forest-contrib/git-commit-push@v0.1` — stage, commit, push.
-//!
-//! Idempotent against partially-set-up repos: if `repo` isn't a git
-//! working tree we `git init`; if there's no `origin` we add it; if the
-//! requested branch doesn't exist we create it via `git checkout -B`.
-//! Author identity is configured locally on the repo (not globally).
-
 #[allow(dead_code)]
 mod forestgen;
 
@@ -30,11 +23,8 @@ impl CommandHandler for Commands {
         git(repo, &["config", "user.name", &input.user_name])?;
         git(repo, &["config", "user.email", &input.user_email])?;
 
-        // Make sure we're on the requested branch (creates if absent).
         git(repo, &["checkout", "-q", "-B", &input.branch])?;
 
-        // Wire `origin` to the requested remote (idempotent: replace if
-        // already set so re-runs against a different remote work).
         let _ = git(repo, &["remote", "remove", "origin"]);
         git(repo, &["remote", "add", "origin", &input.remote_url])?;
 

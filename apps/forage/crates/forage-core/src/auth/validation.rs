@@ -8,15 +8,6 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
     if email.len() > 254 {
         return Err(ValidationError("Email too long".into()));
     }
-    // Exactly one '@' — multi-@ addresses are technically RFC-valid in the
-    // local-part-with-quotes case but produce inconsistent domain extraction
-    // across the stack (some readers split on first '@', some on last). They
-    // also enable a join-offer bypass: an attacker registers
-    //     `target@victim-domain.com@attacker.com`,
-    // verifies via the attacker-controlled mailbox, and the SQL JOIN that
-    // matches verified emails against allowed-domain rows treats the middle
-    // segment as the domain. We don't need to support quoted-multi-@ emails
-    // to ship the rest of the product.
     if email.matches('@').count() != 1 {
         return Err(ValidationError("Invalid email format".into()));
     }
@@ -99,10 +90,6 @@ mod tests {
 
     #[test]
     fn multi_at_rejected() {
-        // Bypass-prevention: a join-offer-eligible domain in the middle
-        // segment must not slip past validation. The verification email
-        // would be delivered based on the rightmost '@', so we can't trust
-        // that the user owns the middle-segment domain.
         assert!(validate_email("attacker@victim.com@evil.com").is_err());
         assert!(validate_email("a@@b.c").is_err());
         assert!(validate_email("@a@b.c").is_err());
@@ -118,11 +105,11 @@ mod tests {
     fn invalid_password() {
         assert!(validate_password("").is_err());
         assert!(validate_password("short").is_err());
-        assert!(validate_password("12345678901").is_err()); // 11 chars
+        assert!(validate_password("12345678901").is_err());
         assert!(validate_password(&"a".repeat(1025)).is_err());
-        assert!(validate_password("alllowercase1").is_err()); // no uppercase
-        assert!(validate_password("ALLUPPERCASE1").is_err()); // no lowercase
-        assert!(validate_password("NoDigitsHere!").is_err()); // no digit
+        assert!(validate_password("alllowercase1").is_err());
+        assert!(validate_password("ALLUPPERCASE1").is_err());
+        assert!(validate_password("NoDigitsHere!").is_err());
     }
 
     #[test]

@@ -1,32 +1,3 @@
-//! Credentials for the `forest/terraform@1` HTTP state backend.
-//!
-//! Before this, the server generated a random password per state id, kept it in
-//! an in-memory map, handed it to every run as `TF_HTTP_PASSWORD` — and never
-//! compared it against anything. Every route of the state server was open to
-//! anything that could reach its port (understory-io/forest#281).
-//!
-//! A credential is now a signed statement of *which state*, *what it may do*,
-//! *until when*, and *on whose behalf*:
-//!
-//! ```text
-//! fst1.<scope>.<expires unix>.<principal, base64url>.<hmac-sha256, base64url>
-//! ```
-//!
-//! The MAC covers all four fields **and the state id**, so a credential minted
-//! for one state is worthless against another even though the state id is not
-//! written into the token itself. Verification is stateless: it needs only the
-//! key, so it survives a forest-server restart and holds across replicas —
-//! neither of which the in-memory map could promise once it was actually
-//! checked.
-//!
-//! The key comes from its own secret, `FOREST_TERRAFORM_STATE_SIGNING_KEY`, so
-//! rotating the access-token secret does not revoke state credentials and
-//! rotating this one does not log anybody out. Unset, it falls back to a key
-//! derived from the access-token secret (the server warns at startup), so a
-//! deploy needs no configuration change. Either way the secret is run through
-//! HMAC with a fixed label before use, so the bytes that sign state credentials
-//! are never the bytes that sign anything else.
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -38,20 +9,13 @@ type HmacSha256 = Hmac<Sha256>;
 const VERSION: &str = "fst1";
 const KEY_LABEL: &[u8] = b"forest/terraform-v1/state-credentials/v1";
 
-/// Longest life an operator may ask for. A runner's credential is minted per
-/// run and sized to the run; see [`RUNNER_TTL`].
 pub const MAX_OPERATOR_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 
-/// A run is init + plan or init + apply. Applies that wait on ACM validation
-/// run long, and a credential that expires mid-apply strands the state lock
-/// with the apply half done — so this is generous rather than tight.
 pub const RUNNER_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
-    /// GET the state. No lock, no write, no unlock.
     ReadOnly,
-    /// Everything terraform's HTTP backend does: read, lock, write, unlock.
     ReadWrite,
 }
 
@@ -72,13 +36,9 @@ impl Scope {
     }
 }
 
-/// What a valid credential says about the request carrying it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verified {
     pub scope: Scope,
-    /// Who the credential was minted for — `runner:<destination>` for a
-    /// release, `user:<id>` for an operator. Logged on every request, which is
-    /// the audit trail for who touched a state.
     pub principal: String,
     pub expires_at: u64,
 }
@@ -102,13 +62,10 @@ impl std::fmt::Debug for CredentialKey {
 }
 
 impl CredentialKey {
-    /// The key a server signs with: its dedicated signing secret when
-    /// configured, the access-token secret otherwise.
     pub fn from_secrets(dedicated: Option<&[u8]>, access_token_secret: &[u8]) -> Self {
         Self::derive(dedicated.unwrap_or(access_token_secret))
     }
 
-    /// Derive the state-credential key from a secret.
     pub fn derive(access_token_secret: &[u8]) -> Self {
         let mut mac =
             HmacSha256::new_from_slice(access_token_secret).expect("hmac accepts any key length");
@@ -122,7 +79,6 @@ impl CredentialKey {
         self.issue_with_expiry(state_id, scope, principal, ttl).0
     }
 
-    /// As [`issue`](Self::issue), also returning the expiry (unix seconds).
     pub fn issue_with_expiry(
         &self,
         state_id: &str,
@@ -153,9 +109,6 @@ impl CredentialKey {
         )
     }
 
-    /// Check a credential against the state id the request is for.
-    ///
-    /// The signature comparison is `Mac::verify_slice`, which is constant-time.
     pub fn verify(&self, state_id: &str, credential: &str) -> Result<Verified, Rejection> {
         self.verify_at(state_id, credential, now_unix())
     }
@@ -181,8 +134,6 @@ impl CredentialKey {
             .decode(sig)
             .map_err(|_| Rejection::Malformed)?;
 
-        // Signature before expiry, so an expired-but-forged credential is
-        // reported as forged.
         self.mac(state_id, scope, expires_at, principal_b64)
             .verify_slice(&sig)
             .map_err(|_| Rejection::BadSignature)?;
@@ -206,8 +157,6 @@ impl CredentialKey {
 
     fn mac(&self, state_id: &str, scope: &str, expires_at: u64, principal_b64: &str) -> HmacSha256 {
         let mut mac = HmacSha256::new_from_slice(&self.key).expect("hmac accepts any key length");
-        // Length-prefixed rather than joined with a separator, so no choice of
-        // state id or principal can make two different tuples sign the same.
         for field in [
             VERSION.as_bytes(),
             scope.as_bytes(),
@@ -222,9 +171,6 @@ impl CredentialKey {
     }
 }
 
-/// Pull the password out of an `Authorization: Basic …` header. The username
-/// is ignored: terraform sends `TF_HTTP_USERNAME`, the runner sets it to
-/// `forest-terraform-v1`, and everything that matters is in the password.
 pub fn basic_auth_password(header: Option<&http::HeaderValue>) -> Option<String> {
     let value = header?.to_str().ok()?;
     let encoded = value
@@ -268,8 +214,6 @@ mod tests {
 
     #[test]
     fn a_credential_for_one_state_is_refused_for_another() {
-        // The whole point of #281: holding a credential for your own state
-        // must not open anyone else's.
         let cred = key().issue(
             "dev.p1",
             Scope::ReadWrite,
@@ -314,7 +258,6 @@ mod tests {
 
     #[test]
     fn changing_the_principal_breaks_the_signature() {
-        // The principal is the audit trail; it must not be rewritable.
         let cred = key().issue(
             "dev.p1",
             Scope::ReadWrite,
@@ -348,7 +291,6 @@ mod tests {
 
     #[test]
     fn the_old_random_uuid_passwords_are_refused() {
-        // What every run was handed before this change.
         assert_eq!(
             key().verify("dev.p1", "3f0e4c6a-7d1b-4f5e-9a2c-1b2c3d4e5f60"),
             Err(Rejection::Malformed)
@@ -362,8 +304,6 @@ mod tests {
 
     #[test]
     fn length_prefixing_keeps_field_boundaries_unambiguous() {
-        // With naive concatenation, ("dev.p", principal "1…") and
-        // ("dev.p1", principal "…") could collide. Length prefixes rule it out.
         let a = key().issue_expiring_at("ab", Scope::ReadWrite, "c", 10);
         let b = key().issue_expiring_at("a", Scope::ReadWrite, "bc", 10);
         assert_ne!(a.rsplit('.').next(), b.rsplit('.').next());
@@ -383,9 +323,7 @@ mod tests {
             Duration::from_secs(60),
         );
 
-        // Rotating the access-token secret leaves state credentials valid...
         assert!(rotated.verify("dev.p1", &cred).is_ok());
-        // ...and the fallback key is a different key.
         let fallback = CredentialKey::from_secrets(None, b"access-secret-one-xxxxxxxxxxxxxxx");
         assert_eq!(
             fallback.verify("dev.p1", &cred),

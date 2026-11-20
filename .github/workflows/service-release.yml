@@ -1,91 +1,5 @@
 name: service release
 
-# Reusable workflow: annotate a release for a service that already exists, and
-# let the project's pipeline decide where it goes.
-#
-# Every understory service releasing through forest calls this instead of
-# copy-pasting the steps, so a fix here reaches all of them at once. The
-# caller's job is a thin `uses:` block:
-#
-#     release:
-#       needs: [test, build-and-push]
-#       uses: understory-io/forest/.github/workflows/service-release.yml@stable
-#       secrets: inherit
-#
-# ── Note there is no branch condition ──────────────────────────────────
-#
-# This workflow annotates and stops. An annotation is a record that a build
-# exists; it deploys nothing by itself. Which branch is allowed to reach which
-# environment is the trigger's business — `--branch '^main$'` — and the
-# project's policies', which take a `--branch-pattern` of their own.
-#
-# Putting `if: github.ref == 'refs/heads/main'` on the caller duplicates that
-# decision into every repo's YAML, which is the thing this workflow exists to
-# stop. Worse, the two can disagree: a repo whose `if:` says `main` while its
-# trigger says `^release/.*$` silently never deploys, and nothing anywhere
-# reports a conflict.
-#
-# The cost is that a feature branch also uploads its artifact and records an
-# annotation. That is the intended shape — you can see what was built before
-# deciding to promote it — but it is not free, so a repo that pushes very
-# frequently may still want a condition. Set it deliberately if so.
-#
-# ── Why @stable rather than a version tag ──────────────────────────────
-#
-# `stable` is a branch this repo moves deliberately, not on every release. A
-# version tag would be safer in isolation and worse in practice: every service
-# calling this would need its own bump commit to pick up a fix, so twelve repos
-# would drift apart exactly the way the copy-pasted jobs did — which is the
-# thing this workflow exists to stop.
-#
-# The pinning still exists, it just moved. `forest-version` below is an exact
-# version, and it is bumped in the same change that moves `stable`. So the
-# decision "this forest release is safe to deploy with" is made once, here,
-# rather than twelve times or not at all.
-#
-# To move it:
-#
-#     git push origin <sha>:refs/heads/stable --force-with-lease
-#
-# Move it to a commit that has been released and whose install.sh has finished
-# uploading — `setup-forest` resolves a version, and a release whose assets are
-# still in flight is not usable yet.
-#
-# ── Why this annotates rather than releases ────────────────────────────
-#
-# It records a release and stops. The project's trigger — by convention
-# `deploy-main-via-pipeline`, matching branch `^main$` and source type `^ci$` —
-# fires the project's pipeline off that annotation. Releasing from here as well
-# would double-fire or race it.
-#
-# That indirection is the point. Which environments a release reaches, and in
-# what order, is configuration on the project rather than YAML copied between
-# repos:
-#
-#     dev-then-prod   deploy-dev (data-dev) -> deploy-prod (data)
-#     prod-only       deploy-prod (data)
-#
-# Changing a service's rollout shape — adding a dev stage once its dev service
-# is healthy, say — touches no CI at all.
-#
-# `source-type: ci` is load-bearing rather than decorative: a trigger matching
-# `^ci$` will not fire without it, and an annotation made from a laptop does not
-# match, so it records a release without deploying anything.
-#
-# ── Why waiting is safe to leave to forest ─────────────────────────────
-#
-# The destination's provider watches the rollout: stability is
-# `deployments == 1 && running == desired`, a deployment-identity change at the
-# end is a rollback and fails, and its timeout is failure — our `ecs-task`
-# module does not enable the deployment circuit breaker, so a bad image never
-# reports FAILED, it simply never converges.
-#
-# `aws ecs wait services-stable`, which the canopy-deploy step this replaced
-# used, returns *success* after a circuit-breaker rollback, because a
-# rolled-back deployment is itself perfectly stable (US-9330). That is why a
-# dev-then-prod pipeline means something: dev has to genuinely converge before
-# prod is touched.
-
 on:
   workflow_call:
     inputs:
@@ -155,6 +69,18 @@ on:
         type: string
         required: false
         default: understory/service
+      set:
+        description: >-
+          Extra `forest release prepare --set` values, one per line. Each
+          line is trimmed and passed as one argument, never evaluated by the
+          shell: `config.<key>=<value>` for a generic destination's block (on
+          every environment), `<org>/<component>.<key>=<value>` for a
+          component. For the ECS provider's `pin_image`, pass
+          `config.image_tag=<the tag the build job pushed>`. Not for secrets:
+          each value is echoed to the log and recorded on the annotation.
+        type: string
+        required: false
+        default: ""
       runs-on:
         description: >-
           Runner label. Defaults to a hosted runner: this job builds nothing, so
@@ -175,10 +101,6 @@ jobs:
     name: release
     runs-on: ${{ inputs.runs-on }}
 
-    # One rollout at a time per calling repository. Two merges in quick
-    # succession would otherwise race for the same ECS service and the older
-    # image could land last. `cancel-in-progress: false` because a run that has
-    # already started an UpdateService must be allowed to see it through.
     concurrency:
       group: forest-service-release-${{ github.repository }}
       cancel-in-progress: false
@@ -194,17 +116,10 @@ jobs:
         with:
           version: ${{ inputs.cue-version }}
 
-      # Without it, a project depending on a component with deno hooks fails
-      # here with `deno deployment prepare hook failed ... failed to spawn deno`
-      # — canopy-github-ingest's releases did, on every main push from
-      # 2026-09-01 on.
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: ${{ inputs.deno-version }}
 
-      # Fail here, loudly, rather than three steps later inside a gRPC
-      # transport error. A missing token is a setup problem with a one-line fix
-      # and should read like one.
       - name: Check the forest token is configured
         env:
           FOREST_TOKEN: ${{ secrets.FOREST_TOKEN }}
@@ -222,26 +137,32 @@ jobs:
           gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
           token: ${{ secrets.FOREST_TOKEN }}
 
-      # Renders forest/config.json — the file carrying this repo's own config,
-      # notably which ECS service it is, to a destination shared with every
-      # other project releasing into that account.
       - name: Render the deployment
         working-directory: ${{ inputs.working-directory }}
         env:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_COMPONENT: ${{ inputs.image-component }}
+          SET_VALUES: ${{ inputs.set }}
         run: |
           set -euo pipefail
+          args=()
           if [ -n "${IMAGE_TAG}" ]; then
             echo "pinning ${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
-            forest release prepare --set "${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
-          else
-            forest release prepare
+            args+=(--set "${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}")
           fi
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -z "${line}" ] && continue
+            case "${line}" in
+              *=*) ;;
+              *) echo "::error::set line '${line}' is not key=value" >&2; exit 1 ;;
+            esac
+            echo "setting ${line}"
+            args+=(--set "${line}")
+          done <<< "${SET_VALUES}"
+          forest release prepare ${args[@]+"${args[@]}"}
 
-      # `detect` attributes the release to whoever wrote the commit. Without it
-      # the server stamps whoever owns FOREST_TOKEN, which is the same person
-      # for every repo sharing the org secret.
       - name: Annotate the release
         id: annotate
         uses: understory-io/forest/.github/actions/release@v0.3.8

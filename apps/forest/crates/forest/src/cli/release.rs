@@ -37,7 +37,7 @@ pub enum Commands {
     Annotate(AnnotateCommand),
     /// Execute the release (deploy to destinations)
     Release(CommitCommand),
-    /// Prepare, annotate, and release in one step (annotation-only, no auto-release from triggers).
+    /// Prepare and annotate for the project's triggers; with --env or --destination, release there directly instead.
     Create(CreateCommand),
     /// Show detail (header, stages, destinations, plan output, deploy logs) for a release.
     Show(ShowCommand),
@@ -78,20 +78,10 @@ impl ReleaseCommand {
     }
 }
 
-/// Pick the stage an approve/reject should act on.
-///
-/// With `--stage` given, verify it really is awaiting approval rather than
-/// letting the server reject it with a less helpful message. Without it, infer:
-/// exactly one candidate is the overwhelmingly common case (a pipeline parks one
-/// gate at a time), and guessing between several would be worse than asking.
 pub(crate) fn pick_awaiting_stage(
     intent_state: &forest_grpc_interface::ReleaseIntentState,
     requested: Option<&str>,
 ) -> anyhow::Result<String> {
-    // Read `approval_status`, not `status`. A stage parked on its gate stays
-    // `ACTIVE` — approval is tracked alongside the stage status, not as a value
-    // of it, and the `AWAITING_APPROVAL` variant of PipelineRunStageStatus is
-    // never emitted.
     let awaiting: Vec<&str> = intent_state
         .stages
         .iter()
@@ -133,9 +123,6 @@ pub(crate) fn pick_awaiting_stage(
     }
 }
 
-/// The line that tells a person how to release a parked stage. `target` is
-/// what `approve` should be pointed at: the slug where known, since an intent
-/// UUID also needs `--organisation`.
 pub(crate) fn approval_hint(stage_id: &str, target: &str) -> String {
     format!(
         "stage {stage_id} is awaiting approval: forest release approve {target} --stage {stage_id}"
@@ -191,8 +178,6 @@ mod tests {
         }
     }
 
-    /// The last line `show` prints for a parked plan, and what `release
-    /// release` prints when it stops at one: runnable as it stands.
     #[test]
     fn the_approval_hint_names_the_command_that_clears_the_stage() {
         assert_eq!(

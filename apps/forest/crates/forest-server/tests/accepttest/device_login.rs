@@ -1,9 +1,3 @@
-//! Acceptance tests for the RFC 8628 device authorization grant
-//! (TASKS/022-device-login.md).
-//!
-//! These run against the same shared DB as the rest of the accept suite;
-//! identifiers are UUID-suffixed for isolation.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -26,8 +20,6 @@ fn unique_email() -> String {
     format!("dl-{}@understory.io", uuid::Uuid::now_v7())
 }
 
-/// Register + verify a user against `restricted_fixture()` so subsequent
-/// approval calls have a real user_id to attach.
 async fn registered_user(fixture: &crate::accepttest::fixtures::Fixture) -> (String, String) {
     let mut users = fixture.users();
     let username = unique_username();
@@ -54,8 +46,6 @@ async fn registered_user(fixture: &crate::accepttest::fixtures::Fixture) -> (Str
 
     (user_id, email)
 }
-
-// ── Initiate ──────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn initiate_returns_codes_and_verification_uri() {
@@ -89,8 +79,6 @@ async fn initiate_returns_codes_and_verification_uri() {
     assert_eq!(resp.expires_in_seconds, 900);
     assert_eq!(resp.interval_seconds, 5);
 }
-
-// ── Initial poll ─────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn poll_returns_pending_before_approval() {
@@ -126,7 +114,6 @@ async fn poll_unknown_device_code_returns_expired() {
 
     let resp = users
         .poll_device_login(PollDeviceLoginRequest {
-            // Random base64url-shaped string the server won't recognise.
             device_code: "AAAA_unknown_BBBB_unknown_CCCC_unknown_DDDD".into(),
         })
         .await
@@ -139,8 +126,6 @@ async fn poll_unknown_device_code_returns_expired() {
         "unknown codes must be indistinguishable from expired (anti-enumeration)"
     );
 }
-
-// ── Full happy path ───────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn approve_then_poll_returns_tokens() {
@@ -187,8 +172,6 @@ async fn approve_then_poll_returns_tokens() {
     assert_eq!(user.user_id, user_id);
 }
 
-// ── Replay protection ─────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn second_poll_after_success_returns_expired_not_approved() {
     let fixture = restricted_fixture().await.unwrap();
@@ -218,7 +201,6 @@ async fn second_poll_after_success_returns_expired_not_approved() {
         .await
         .expect("approve");
 
-    // First poll succeeds…
     let first = users
         .poll_device_login(PollDeviceLoginRequest {
             device_code: init.device_code.clone(),
@@ -228,8 +210,6 @@ async fn second_poll_after_success_returns_expired_not_approved() {
         .into_inner();
     assert_eq!(first.status, DeviceLoginStatus::Approved as i32);
 
-    // …second poll with the SAME device_code is masked as Expired so a
-    // replay attacker can't tell the code was already consumed.
     let second = users
         .poll_device_login(PollDeviceLoginRequest {
             device_code: init.device_code,
@@ -244,8 +224,6 @@ async fn second_poll_after_success_returns_expired_not_approved() {
     );
     assert!(second.tokens.is_none());
 }
-
-// ── Denial ────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn deny_then_poll_returns_denied() {
@@ -286,8 +264,6 @@ async fn deny_then_poll_returns_denied() {
     assert!(resp.tokens.is_none());
 }
 
-// ── Authz: approve without service-account ────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn approve_without_service_account_is_rejected() {
     let fixture = restricted_fixture().await.unwrap();
@@ -313,7 +289,6 @@ async fn approve_without_service_account_is_rejected() {
         .await
         .expect_err("unauthed approve must be rejected");
 
-    // Auth layer rejects before the handler runs.
     assert_eq!(err.code(), tonic::Code::Unauthenticated, "{err:?}");
 }
 
@@ -343,8 +318,6 @@ async fn deny_without_service_account_is_rejected() {
     assert_eq!(err.code(), tonic::Code::Unauthenticated, "{err:?}");
 }
 
-// ── User-code normalization ───────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn approve_accepts_lowercase_and_no_dash() {
     let fixture = restricted_fixture().await.unwrap();
@@ -361,8 +334,6 @@ async fn approve_accepts_lowercase_and_no_dash() {
         .expect("initiate")
         .into_inner();
 
-    // Strip dashes and lowercase — what a user pasting from terminal
-    // might submit.
     let messy = init.user_code.replace('-', "").to_lowercase();
 
     users
@@ -388,10 +359,6 @@ async fn approve_accepts_lowercase_and_no_dash() {
     assert_eq!(resp.status, DeviceLoginStatus::Approved as i32);
 }
 
-// ── Slow-down ─────────────────────────────────────────────────────────
-
-// ── Tamper / input-bound tests ────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn initiate_rejects_oversized_client_name() {
     let fixture = fixture().await.unwrap();
@@ -405,9 +372,6 @@ async fn initiate_rejects_oversized_client_name() {
         })
         .await
         .expect_err("oversize client_name must be rejected");
-    // Server maps anyhow errors to Status::internal by default. Either
-    // way, this must NOT succeed — the row insertion would otherwise
-    // store a 10 KB attacker-controlled string per request.
     assert_ne!(err.code(), tonic::Code::Ok);
 }
 
@@ -432,11 +396,6 @@ async fn poll_rejects_oversized_device_code_as_expired() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn double_approve_with_different_user_is_rejected() {
-    // Once a grant is approved by user A it transitions out of Pending,
-    // so an attacker who somehow learns the user_code cannot
-    // re-approve it as themselves. This is the natural guard from the
-    // domain state machine (`approve` requires Status::Pending); the
-    // test exists to lock the behaviour in against future regressions.
     let fixture = restricted_fixture().await.unwrap();
     let (user_a, _) = registered_user(&fixture).await;
     let (user_b, _) = registered_user(&fixture).await;
@@ -465,7 +424,6 @@ async fn double_approve_with_different_user_is_rejected() {
         .await
         .expect("first approve");
 
-    // User B (attacker) tries to re-approve the same code.
     let err = users
         .approve_device_login(authed_request(
             RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
@@ -483,9 +441,6 @@ async fn double_approve_with_different_user_is_rejected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn approve_unknown_code_does_not_leak_distinct_error() {
-    // Whether the user_code never existed or was already consumed,
-    // both must surface as the same opaque error class — otherwise an
-    // attacker can probe for valid codes by error-string analysis.
     let fixture = restricted_fixture().await.unwrap();
     let (user_id, _) = registered_user(&fixture).await;
     let mut users = fixture.users();
@@ -503,7 +458,6 @@ async fn approve_unknown_code_does_not_leak_distinct_error() {
         .await
         .expect_err("unknown code must be rejected");
 
-    // Initiate + approve + try to re-approve a consumed-or-expired code.
     let init = users
         .initiate_device_login(InitiateDeviceLoginRequest {
             client_name: "forest-cli".into(),
@@ -538,11 +492,6 @@ async fn approve_unknown_code_does_not_leak_distinct_error() {
         .await
         .expect_err("re-approval must be rejected");
 
-    // Both errors should be in the same gRPC class (not Ok). The actual
-    // message strings differ today; that's an info-leak we accept since
-    // the caller is service-account-only (forage), not a public client.
-    // The user-facing forage UI must render a uniform "code invalid"
-    // page either way.
     assert_ne!(unknown_err.code(), tonic::Code::Ok);
     assert_ne!(replay_err.code(), tonic::Code::Ok);
 }
@@ -562,7 +511,6 @@ async fn back_to_back_poll_returns_slow_down() {
         .expect("initiate")
         .into_inner();
 
-    // First poll establishes last_polled_at.
     let first = users
         .poll_device_login(PollDeviceLoginRequest {
             device_code: init.device_code.clone(),
@@ -572,7 +520,6 @@ async fn back_to_back_poll_returns_slow_down() {
         .into_inner();
     assert_eq!(first.status, DeviceLoginStatus::Pending as i32);
 
-    // Immediate re-poll within interval_seconds should return SlowDown.
     let second = users
         .poll_device_login(PollDeviceLoginRequest {
             device_code: init.device_code,

@@ -1,9 +1,3 @@
-//! Acceptance tests for the email-verification flow at signup (019).
-//!
-//! Runs against `restricted_fixture()` which has both
-//! `FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX=@understory\.io$` and
-//! `FOREST_REQUIRE_EMAIL_VERIFICATION=true`.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -77,8 +71,6 @@ async fn login_with_unverified_email_returns_failed_precondition() {
         tonic::Code::FailedPrecondition,
         "expected FailedPrecondition, got {err:?}"
     );
-    // Forage parses this canonical detail string; do not change it
-    // without coordinating the forage handler.
     assert_eq!(err.message(), "email_not_verified", "{err:?}");
 }
 
@@ -100,7 +92,6 @@ async fn confirm_email_verification_marks_email_verified() {
         .into_inner();
     let user_id = registered.user.expect("user").user_id;
 
-    // Service-account caller (forage stand-in) confirms verification.
     users
         .confirm_email_verification(authed_request(
             RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
@@ -111,7 +102,6 @@ async fn confirm_email_verification_marks_email_verified() {
         .await
         .expect("confirm email verification");
 
-    // Login should now succeed.
     let login = users
         .login(LoginRequest {
             identifier: Some(login_request::Identifier::Email(email)),
@@ -142,14 +132,12 @@ async fn confirm_email_verification_without_service_account_is_rejected() {
         .into_inner();
     let _ = registered.user.expect("user").user_id;
 
-    // Unauthenticated.
     let err = users
         .confirm_email_verification(ConfirmEmailVerificationRequest {
             email: email.clone(),
         })
         .await
         .expect_err("unauthed call must be rejected");
-    // Auth layer denies before the handler runs.
     assert_eq!(err.code(), tonic::Code::Unauthenticated, "{err:?}");
 }
 
@@ -158,7 +146,6 @@ async fn verify_email_with_user_jwt_for_other_user_is_rejected() {
     let fixture = restricted_fixture().await.unwrap();
     let mut users = fixture.users();
 
-    // Register attacker, confirm verification, log in.
     let attacker_email = unique_understory_email();
     let attacker_reg = users
         .register(RegisterRequest {
@@ -191,7 +178,6 @@ async fn verify_email_with_user_jwt_for_other_user_is_rejected() {
         .into_inner();
     let attacker_token = attacker_login.tokens.expect("tokens").access_token;
 
-    // Register victim (still unverified).
     let victim_email = unique_understory_email();
     let victim_reg = users
         .register(RegisterRequest {
@@ -204,13 +190,9 @@ async fn verify_email_with_user_jwt_for_other_user_is_rejected() {
         .into_inner();
     let victim_user_id = victim_reg.user.expect("user").user_id;
 
-    // Attacker tries to verify the victim's email using attacker's JWT.
     let err = users
         .verify_email(authed_request(
             &attacker_token,
-            // Attacker uses their JWT but supplies the victim's user_id;
-            // forest's verify_email must reject this because the JWT
-            // claim doesn't match req.user_id.
             VerifyEmailRequest {
                 user_id: victim_user_id,
                 email: victim_email,
@@ -220,6 +202,79 @@ async fn verify_email_with_user_jwt_for_other_user_is_rejected() {
         .expect_err("cross-user verify_email must be rejected");
 
     assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_user_cannot_mark_an_address_they_added_as_verified() {
+    let fixture = restricted_fixture().await.unwrap();
+    let mut users = fixture.users();
+
+    let email = unique_understory_email();
+    let registered = users
+        .register(RegisterRequest {
+            username: unique_username(),
+            email: email.clone(),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .expect("register")
+        .into_inner();
+    let user_id = registered.user.expect("user").user_id;
+    users
+        .confirm_email_verification(authed_request(
+            RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
+            ConfirmEmailVerificationRequest {
+                email: email.clone(),
+            },
+        ))
+        .await
+        .expect("confirm own email");
+    let token = users
+        .login(LoginRequest {
+            identifier: Some(login_request::Identifier::Email(email)),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .expect("login")
+        .into_inner()
+        .tokens
+        .expect("tokens")
+        .access_token;
+
+    let colleague = unique_understory_email();
+    users
+        .add_email(authed_request(
+            &token,
+            AddEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect("add email");
+
+    let err = users
+        .verify_email(authed_request(
+            &token,
+            VerifyEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect_err("self-verification without proof must be rejected");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
+
+    users
+        .verify_email(authed_request(
+            RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,
+            VerifyEmailRequest {
+                user_id: user_id.clone(),
+                email: colleague.clone(),
+            },
+        ))
+        .await
+        .expect("the service account can still verify");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -239,7 +294,6 @@ async fn add_email_response_signals_verification_required() {
         .into_inner();
     let user_id = registered.user.expect("user").user_id;
 
-    // Verify the primary email + log in.
     users
         .confirm_email_verification(authed_request(
             RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY,

@@ -1,0 +1,15 @@
+use forage_ui::layouts::Shell;
+use crate::views::components::NotificationsList;
+props crate::views::account::NotificationsPage { chrome, releases, script };
+
+<Shell chrome={chrome}>
+  <section class="app-container pt-12 pb-12">
+    <h1 class="text-2xl font-bold mb-8">Notifications</h1>
+    <div id="notifications-list">
+      <NotificationsList releases={releases.as_slice()} />
+    </div>
+  </section>
+  <:scripts>
+    <script src={script} defer></script>
+  </:scripts>
+</Shell>

@@ -13,26 +13,21 @@ mod notification_worker;
 mod http_metrics;
 mod page_timing;
 mod pretty_json;
+mod providers;
+mod recipients;
 mod routes;
+mod security_headers;
 mod serve_grpc;
 mod serve_http;
 mod session_reaper;
 mod state;
 mod templates;
+mod views;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Read an env var, treating "unset" and "set to empty string" the same way.
-///
-/// The infra-platform layer wires forage's OAuth / SMTP / service-token
-/// slots through a console-managed Secrets Manager secret. Slots that the
-/// operator hasn't populated arrive as empty strings (Secrets Manager
-/// can't store `None` for a JSON value), so we have to filter those out
-/// here — otherwise `if let Ok(...)` happily picks them up and forage
-/// boots with a half-configured Slack/Google/etc. client that fails at
-/// runtime with a worse error.
 fn env_var_nonempty(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
@@ -45,7 +40,6 @@ use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use clap::Parser;
-use minijinja::context;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
@@ -53,15 +47,12 @@ use crate::forest_client::GrpcForestClient;
 use crate::state::AppState;
 use crate::templates::TemplateEngine;
 
-async fn maintenance_page(State(templates): State<TemplateEngine>) -> Response {
-    let body = match templates.render("pages/maintenance.html.jinja", context! {}) {
-        Ok(body) => body,
-        Err(err) => {
-            tracing::error!("failed to render maintenance page: {err}");
-            "<!DOCTYPE html><title>Maintenance</title><h1>Application under maintenance</h1>"
-                .to_string()
-        }
-    };
+async fn maintenance_page() -> Response {
+    use sha2::Digest;
+    let hash = format!("{:x}", sha2::Sha256::digest(MAINTENANCE_CSS.as_bytes()));
+    let body = views::pages::maintenance::render(&views::catalogue::MaintenancePage {
+        css_href: format!("{MAINTENANCE_CSS_PATH}?v={}", &hash[..12]),
+    });
 
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -74,9 +65,25 @@ async fn maintenance_page(State(templates): State<TemplateEngine>) -> Response {
         .into_response()
 }
 
+const MAINTENANCE_CSS_PATH: &str = "/static/css/maintenance.css";
+const MAINTENANCE_CSS: &str = include_str!("../../../static/css/maintenance.css");
+
+async fn maintenance_css() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        MAINTENANCE_CSS,
+    )
+        .into_response()
+}
+
 pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
     Router::new()
+        .route(MAINTENANCE_CSS_PATH, axum::routing::get(maintenance_css))
         .fallback(maintenance_page)
+        .layer(axum::middleware::from_fn(security_headers::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(templates)
@@ -84,46 +91,43 @@ pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
 }
 
 async fn fallback_404(State(state): State<AppState>) -> Response {
-    let html = state.templates.render(
-        "pages/error.html.jinja",
-        context! {
-            title => "Not Found - Forest",
-            description => "The page you're looking for doesn't exist.",
-            status => 404u16,
-            heading => "Page not found",
-            message => "The page you're looking for doesn't exist.",
-        },
+    let html = views::catalogue::error_page(
+        &state.templates,
+        404,
+        "Page not found",
+        "The page you're looking for doesn't exist.",
     );
-    match html {
-        Ok(body) => (StatusCode::NOT_FOUND, Html(body)).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    (StatusCode::NOT_FOUND, Html(html)).into_response()
+}
+
+async fn sedx_js() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        ],
+        sedx::JS,
+    )
+        .into_response()
 }
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
-        .merge(routes::router())
+        .merge(routes::router().layer(axum::middleware::from_fn(sedx::middleware)))
+        .route("/static/sedx.js", axum::routing::get(sedx_js))
+        .route(
+            security_headers::REPORT_PATH,
+            axum::routing::post(security_headers::report)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
-        // `route_layer`, not `layer`: it reads the matched route template out
-        // of the request's extensions, and only a middleware inside the router
-        // sees it. See `http_metrics`.
         .route_layer(axum::middleware::from_fn(http_metrics::layer))
-        // Inside the compression layer on purpose: registered first means
-        // innermost, so it sees uncompressed HTML and its placeholder
-        // substitution can actually match. See `page_timing`.
         .layer(axum::middleware::from_fn(page_timing::layer))
+        .layer(axum::middleware::from_fn(security_headers::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
-        // /health, /health/ready, /health/live — see `checks` for which is
-        // which and what each one is allowed to affect.
-        //
-        // Merged after `with_state` because these routes carry their own
-        // state, which also puts them outside the layers above. That is what
-        // we want: a probe every 30s should not run page-timing placeholder
-        // substitution, should not be gzipped, and should not spend a tracing
-        // span. They are plain status codes.
         .merge(nostatus::axum_routes(nostatus::global()))
 }
 
@@ -152,12 +156,6 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("maintenance mode enabled; application routes return safe defaults");
     }
 
-    let config = cli::Command::parse();
-
-    if config.maintenance_mode {
-        tracing::warn!("maintenance mode enabled; application routes return safe defaults");
-    }
-
     let forest_endpoint =
         std::env::var("FOREST_SERVER_URL").unwrap_or_else(|_| "http://localhost:4040".into());
     tracing::info!("connecting to forest-server at {forest_endpoint}");
@@ -168,11 +166,6 @@ async fn main() -> anyhow::Result<()> {
             forest_client = forest_client.with_service_account_key(service_key);
         }
         _ => {
-            // The CLI device-login flow and the OAuth callback path
-            // both require this key to call forest-server's
-            // service-account-only RPCs. Without it, `/device` falls
-            // back to an explicit "not configured" message rather than
-            // pretending the code is invalid.
             tracing::warn!(
                 "FOREST_SERVICE_ACCOUNT_API_KEY not set — \
                  CLI device login (/device) and any service-account-only \
@@ -188,10 +181,8 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // Build components based on available configuration
     let mut mad = notmad::Mad::builder();
 
-    // Session store + integration store: PostgreSQL if DATABASE_URL is set
     let (sessions, integration_store, magic_link_store, oauth_state_store): (
         Arc<dyn SessionStore>,
         Option<Arc<dyn forage_core::integrations::IntegrationStore>>,
@@ -210,7 +201,6 @@ async fn main() -> anyhow::Result<()> {
 
         let pg_store = Arc::new(PgSessionStore::new(pool.clone()));
 
-        // Integration store (uses same pool)
         let encryption_key = std::env::var("INTEGRATION_ENCRYPTION_KEY").unwrap_or_else(|_| {
             tracing::warn!(
                 "INTEGRATION_ENCRYPTION_KEY not set — using default key (not safe for production)"
@@ -228,7 +218,6 @@ async fn main() -> anyhow::Result<()> {
         let pg_profile_pictures =
             Arc::new(forage_db::PgProfilePictureStore::new(pool));
 
-        // Session reaper component
         mad.add(session_reaper::PgSessionReaper {
             store: pg_store.clone(),
             max_inactive_days: 30,
@@ -251,7 +240,6 @@ async fn main() -> anyhow::Result<()> {
         let file_store =
             Arc::new(FileSessionStore::new(&session_dir).expect("failed to create session dir"));
 
-        // File session reaper component
         mad.add(session_reaper::FileSessionReaper {
             store: file_store.clone(),
         });
@@ -270,7 +258,6 @@ async fn main() -> anyhow::Result<()> {
 
     let forest_client = Arc::new(forest_client);
 
-    // Public URL of this Forest instance (used for OAuth redirect URIs, etc.)
     let forage_host = std::env::var("FORAGE_HOST")
         .unwrap_or_else(|_| format!("http://localhost:{port}"));
 
@@ -293,7 +280,6 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_profile_picture_store(store);
     }
 
-    // Slack OAuth config (optional, enables "Add to Slack" button)
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("SLACK_CLIENT_ID"),
         env_var_nonempty("SLACK_CLIENT_SECRET"),
@@ -306,8 +292,51 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Google OAuth config (optional, enables "Continue with Google" button)
-    // Forest handles the full OIDC exchange — needs both client_id and client_secret.
+    state = state.with_slack_api(
+        crate::providers::SlackApi::new(
+            env_var_nonempty("SLACK_API_BASE_URL")
+                .unwrap_or_else(|| crate::providers::SLACK_API_BASE.to_string()),
+        ),
+        env_var_nonempty("SLACK_AUTHORIZE_URL")
+            .unwrap_or_else(|| crate::providers::SLACK_AUTHORIZE_URL.to_string()),
+    );
+    if let Some(secret) = env_var_nonempty("SLACK_SIGNING_SECRET") {
+        state = state.with_slack_signing_secret(secret);
+    }
+
+    if let (Some(app_id), Some(slug), Some(private_key_pem), Some(client_id), Some(client_secret)) = (
+        env_var_nonempty("GITHUB_APP_ID"),
+        env_var_nonempty("GITHUB_APP_SLUG"),
+        env_var_nonempty("GITHUB_APP_PRIVATE_KEY"),
+        env_var_nonempty("GITHUB_APP_CLIENT_ID"),
+        env_var_nonempty("GITHUB_APP_CLIENT_SECRET"),
+    ) {
+        let app = crate::providers::GitHubApp::new(crate::providers::GitHubAppConfig {
+            app_id,
+            slug,
+            client_id,
+            client_secret,
+            webhook_secret: env_var_nonempty("GITHUB_APP_WEBHOOK_SECRET").unwrap_or_default(),
+            private_key_pem,
+            api_base: env_var_nonempty("GITHUB_API_BASE_URL")
+                .unwrap_or_else(|| "https://api.github.com".into()),
+            web_base: env_var_nonempty("GITHUB_WEB_BASE_URL")
+                .unwrap_or_else(|| "https://github.com".into()),
+        })
+        .map_err(|e| anyhow::anyhow!(e))?;
+        tracing::info!("GitHub organisation connections enabled");
+        state = state.with_github_app(std::sync::Arc::new(app));
+    }
+
+    if let Some(service_token) = forest_client.service_account_key() {
+        state = state.with_recipient_directory(std::sync::Arc::new(
+            crate::recipients::ForestRecipients {
+                grpc: forest_client.clone(),
+                service_token: service_token.to_string(),
+            },
+        ));
+    }
+
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GOOGLE_CLIENT_ID"),
         env_var_nonempty("GOOGLE_CLIENT_SECRET"),
@@ -324,7 +353,6 @@ async fn main() -> anyhow::Result<()> {
             .with_google_oidc_exchange(std::sync::Arc::new(exchange));
     }
 
-    // GitHub OAuth config (optional, enables "Continue with GitHub" button)
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GITHUB_APP_CLIENT_ID"),
         env_var_nonempty("GITHUB_APP_CLIENT_SECRET"),
@@ -366,24 +394,10 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref store) = integration_store {
         state = state.with_integration_store(store.clone());
 
-        // The notification listener subscribes to forest's stream as a
-        // service account — it sets `organisation: None, project: None`
-        // so it gets every notification regardless of recipient. That's
-        // exactly the trust model `FOREST_SERVICE_ACCOUNT_API_KEY`
-        // already represents, so we reuse it here instead of carrying a
-        // second forest-side credential (was `FORAGE_SERVICE_TOKEN`).
-        //
-        // Forest's `poll_notifications` only references the caller's
-        // user_id in the preferences NOT-EXISTS subquery (skip-if-muted);
-        // a service-account caller has no preferences, so nothing gets
-        // muted and the listener receives the full stream — identical
-        // to the previous PAT-based behaviour, with one fewer secret to
-        // manage.
         if let Some(service_token) = forest_client.service_account_key().map(String::from) {
             let forage_url = forage_host.clone();
 
             if let Some(ref js) = nats_jetstream {
-                // JetStream mode: ingester publishes, consumer dispatches
                 tracing::info!("starting notification pipeline (JetStream)");
                 let grpc_for_consumer = forest_client.clone();
                 let token_for_consumer = service_token.clone();
@@ -398,9 +412,9 @@ async fn main() -> anyhow::Result<()> {
                     forage_url,
                     grpc: grpc_for_consumer,
                     service_token: token_for_consumer,
+                    slack: state.slack_api.clone(),
                 });
             } else {
-                // Fallback: direct dispatch (no durability)
                 tracing::warn!(
                     "NATS_URL not set — using direct notification dispatch (no durability)"
                 );
@@ -409,6 +423,7 @@ async fn main() -> anyhow::Result<()> {
                     store: store.clone(),
                     service_token,
                     forage_url,
+                    slack: state.slack_api.clone(),
                 });
             }
         } else {
@@ -422,7 +437,6 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_oauth_state_store(store);
     }
 
-    // Magic link store + email consumer
     if let Some(store) = magic_link_store {
         state = state.with_magic_link_store(store);
 
@@ -438,7 +452,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Compute scheduler (mock for now — simulates container lifecycle)
     let compute_scheduler = Arc::new(forage_core::compute::InMemoryComputeScheduler::new());
     state = state.with_compute_scheduler(compute_scheduler.clone());
 
@@ -453,7 +466,6 @@ async fn main() -> anyhow::Result<()> {
         maintenance_mode: config.maintenance_mode,
     });
 
-    // HTTP server component
     let mode = if config.maintenance_mode {
         serve_http::ServeMode::Maintenance(Box::new(state.templates.clone()))
     } else {
@@ -470,5 +482,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod test_providers;
 #[cfg(test)]
 mod tests;

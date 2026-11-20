@@ -1,0 +1,97 @@
+use crate::Tone;
+use crate::release::{outline_chip_classes, policy_type_badge, DestinationRun, RunStatus, Stage};
+use crate::components::{EnvBadge, ErrorBlock, Icon, Timeago};
+component ReleaseStatusDot(status: RunStatus = RunStatus::Pending) {
+<span class="w-3 h-3 rounded-full {status.dot_classes()} shrink-0"></span>
+}
+component RunStatusIcon(status: RunStatus = RunStatus::Pending, idle: &str = "circle") {
+{match status {
+  RunStatus::Succeeded => { <Icon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" /> }
+  RunStatus::Running => { <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span> }
+  RunStatus::Queued => { <Icon name="clock" class="w-4 h-4 text-blue-400 shrink-0" /> }
+  RunStatus::Failed => { <Icon name="x-circle" class="w-4 h-4 text-red-500 shrink-0" /> }
+  RunStatus::AwaitingApproval => { <Icon name="policies" class="w-4 h-4 text-purple-500 shrink-0" /> }
+  _ => { <Icon name={idle} class="w-4 h-4 text-gray-300 shrink-0" /> }
+}}
+}
+component OutlineChip(tone: Tone = Tone::Gray, icon: &str, href: Option<&str>, children: Html) {
+{let class = format!("inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border {}", outline_chip_classes(*tone));}
+{if let Some(href) = href {
+  <a href={href} class={class}><Icon name={icon} class="w-3.5 h-3.5" />{children}</a>
+} else {
+  <span class={class}><Icon name={icon} class="w-3.5 h-3.5" />{children}</span>
+}}
+}
+component SectionHeading(children: Html) {
+<h2 class="text-sm font-semibold text-gray-900 mb-3">{children}</h2>
+}
+component PolicyTypeBadge(policy_type: &str) {
+{if let Some((label, classes)) = policy_type_badge(policy_type) {
+  <span class="{classes} text-xs font-medium px-1.5 py-0.5 rounded">{label}</span>
+}}
+}
+component PlanOutput(anchor: &str, output: &str, open: bool) {
+<details data-plan-output class="px-4 pb-3" open={*open}>
+  <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
+  <pre id="plan-{anchor}" class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto scroll-mt-4">{output}</pre>
+</details>
+}
+component StageRow(stage: &Stage, actions: Option<Html>) {
+<div id="stage-{stage.anchor}" class="scroll-mt-4 target:bg-yellow-50">
+  <div class="px-4 py-3 flex items-center gap-3 text-sm{if stage.status == RunStatus::Pending { " opacity-50" } else { "" }}">
+    <RunStatusIcon status={stage.status} />
+    {if let Some(label) = stage.label() {
+      <span class="text-sm {stage.label_class()}">{label}</span>
+    }}
+    {if stage.shows_environment() { <EnvBadge env={stage.environment} /> }}
+    {if let Some(actions) = actions { {actions} }}
+    {if let Some(at) = &stage.started_at {
+      <span class="text-xs text-gray-400 tabular-nums"><Timeago value={at} /></span>
+    }}
+  </div>
+  {if let Some(message) = &stage.error_message {
+    <div class="px-4 pb-3"><ErrorBlock message={message} /></div>
+  }}
+  {if let Some(output) = &stage.plan_output {
+    <PlanOutput anchor={stage.anchor} output={output} open={stage.awaiting_approval()} />
+  }}
+</div>
+}
+component DestinationRow(dest: &DestinationRun) {
+<div id="dest-{dest.anchor}" class="scroll-mt-4 target:bg-yellow-50">
+  <div class="px-4 py-3 flex items-center gap-3 text-sm">
+    <RunStatusIcon status={dest.status} idle="check-circle" />
+    <EnvBadge env={dest.environment} />
+    <span class="text-gray-700">{dest.name}</span>
+    {if let Some((text, class)) = dest.status_text() {
+      <span class="text-xs {class}">{text}</span>
+    }}
+    {if let Some(at) = &dest.at {
+      <Timeago value={at} class="text-xs text-gray-400 ml-auto tabular-nums" />
+    }}
+  </div>
+  {if let Some(message) = &dest.error_message {
+    <div class="px-4 pb-3"><ErrorBlock message={message} /></div>
+  }}
+</div>
+}
+component PendingDestinationRow(name: &str, environment: &str) {
+<div class="px-4 py-3 flex items-center gap-3 text-sm">
+  <Icon name="circle" class="w-4 h-4 text-gray-300 shrink-0" />
+  <EnvBadge env={environment} />
+  <span class="text-gray-700">{name}</span>
+  <span class="text-xs text-gray-400">Not deployed</span>
+</div>
+}
+component DetailRow(icon: &str, top: bool = false, children: Html) {
+<div class="px-4 py-3 flex {if *top { "items-start" } else { "items-center" }} gap-3 text-sm">
+  <Icon name={icon} class={if *top { "w-4 h-4 text-gray-400 shrink-0 mt-0.5" } else { "w-4 h-4 text-gray-400 shrink-0" }} />
+  {children}
+</div>
+}
+component ExternalLinkButton(href: &str, children: Html) {
+<a href={href} class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50" target="_blank" rel="noopener">
+  <Icon name="external-link" class="w-4 h-4 mr-1.5 text-gray-400" />
+  {children}
+</a>
+}

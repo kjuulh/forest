@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        INSERT INTO terraform_state_locks (\n                            state_id, lock_id, operation, who, info, tf_version, tf_created,\n                            path, principal, release_id, replica\n                        )\n                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "310aacc6380a3b834b408ac19cfead66cb58b7b95a44a4059159e3ae5bab2f58"
+}

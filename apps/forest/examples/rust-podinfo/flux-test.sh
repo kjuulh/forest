@@ -1,54 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================================
-# rust-podinfo unified Flux v2 e2e test script
-#
-# Modes:
-#   flux              Flux destination test (in-process, bare git, 3 envs)
-#   flux-runner       Flux destination via distributed runner (bare git, 3 envs)
-#   k3d-flux          Full k3d + Flux v2 e2e test (in-process, single env)
-#   k3d-flux-runner   Full k3d + Flux v2 e2e via distributed runner (single env)
-#
-# Prerequisites (all modes):
-#   - mise installed
-#   - docker running (for postgres via docker compose)
-#   - organisation "rawpotion" created in DB
-#
-# Additional prerequisites for non-runner modes (flux, k3d-flux):
-#   - forest server running (mise run develop)
-#
-# Additional prerequisites for k3d modes:
-#   - k3d, flux, kubectl, docker installed
-#   - kernel modules: sudo modprobe xt_multiport vxlan
-#
-# Usage:
-#   cd examples/rust-podinfo
-#   ./flux-test.sh flux
-#   ./flux-test.sh flux-runner
-#   ./flux-test.sh k3d-flux
-#   ./flux-test.sh k3d-flux-runner
-# ============================================================================
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# ============================================================================
-# Configuration
-# ============================================================================
-
-# Test framework counters
 PASS=0
 FAIL=0
 SKIP=0
 
-# Ports for test server (used in runner modes to avoid dev server conflicts)
 TEST_GRPC_PORT=14040
 TEST_TF_PORT=14041
 TEST_HTTP_PORT=14042
 
-# k3d configuration
 CLUSTER_NAME="forest-flux-test"
 REGISTRY_NAME="forest-test-registry"
 REGISTRY_HOST="k3d-${REGISTRY_NAME}.localhost"
@@ -62,13 +26,11 @@ WEBHOOK_HOST_PORT=18888
 
 IMAGE_NAME="${REGISTRY_HOST}:${REGISTRY_PORT}/rust-podinfo:test"
 
-# Process tracking
 SERVER_PID=""
 RUNNER_PID=""
 PF_PID=""
 WEBHOOK_PF_PID=""
 
-# State (set per mode)
 MODE=""
 TEST_DIR=""
 BARE_REPO=""
@@ -82,10 +44,6 @@ DEST_NAME=""
 GITEA_GIT_URL=""
 GITEA_FLUX_URL=""
 RECONCILE_URL=""
-
-# ============================================================================
-# Test Framework
-# ============================================================================
 
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
@@ -107,7 +65,6 @@ results() {
   fi
 }
 
-# Run forest CLI — targets test server in runner modes, dev server otherwise
 forest_cli() {
   if [ "$USE_RUNNER" = true ]; then
     FOREST_SERVER="http://localhost:${TEST_GRPC_PORT}" mise run forest -- "$@"
@@ -115,10 +72,6 @@ forest_cli() {
     mise run forest -- "$@"
   fi
 }
-
-# ============================================================================
-# Prerequisite Checks
-# ============================================================================
 
 check_prerequisites() {
   local ok=true
@@ -152,10 +105,6 @@ check_kernel_modules() {
   fi
 }
 
-# ============================================================================
-# Git Setup
-# ============================================================================
-
 setup_bare_git_repo() {
   git init --bare "$BARE_REPO" > /dev/null 2>&1
 
@@ -177,10 +126,6 @@ setup_bare_git_repo() {
     exit 1
   fi
 }
-
-# ============================================================================
-# Destination Management
-# ============================================================================
 
 create_flux_destinations_3env() {
   local git_url="$1"
@@ -222,7 +167,6 @@ create_flux_destination_single() {
   local git_url="$4"
   local reconcile_url="${5:-}"
 
-  # Clean up any conflicting destinations
   forest_cli destination delete --name "$dest_name" > /dev/null 2>&1 || true
   for old in flux-dev flux-staging flux-prod; do
     forest_cli destination delete --name "$old" > /dev/null 2>&1 || true
@@ -255,10 +199,6 @@ delete_test_destinations() {
     [ -n "$dest" ] && forest_cli destination delete --name "$dest" > /dev/null 2>&1 || true
   done
 }
-
-# ============================================================================
-# Release Pipeline
-# ============================================================================
 
 do_release_prepare() {
   echo "  Running: forest release prepare"
@@ -327,13 +267,8 @@ do_release_to_envs() {
     fi
   done
 
-  # Give scheduler time to dispatch
   sleep 5
 }
-
-# ============================================================================
-# Gitops Verification
-# ============================================================================
 
 verify_gitops_repo() {
   local repo_url="$1"
@@ -352,7 +287,6 @@ verify_gitops_repo() {
     local cluster_dir="$VERIFY_DIR/clusters/$env/$dest/$cluster/rust-podinfo"
     local cluster_cr="$cluster_dir/rawpotion-rust-podinfo.yaml"
 
-    # Manifest files
     for f in 10-namespace.yaml 20-deployment.yaml 30-service.yaml; do
       if [ -f "$release_dir/$f" ]; then
         pass "gitops: $env $f exists"
@@ -361,14 +295,12 @@ verify_gitops_repo() {
       fi
     done
 
-    # Replicas
     if grep -q "replicas: $replicas" "$release_dir/20-deployment.yaml" 2>/dev/null; then
       pass "gitops: $env deployment replicas=$replicas"
     else
       fail "gitops: $env deployment expected replicas=$replicas"
     fi
 
-    # Flux Kustomization CR
     if [ -f "$cluster_cr" ]; then
       pass "gitops: $env kustomization CR exists"
     else
@@ -394,7 +326,6 @@ verify_gitops_repo() {
       fail "gitops: $env kustomization path wrong (expected $expected_path)"
     fi
 
-    # Kustomize aggregation
     if [ -f "$cluster_dir/kustomization.yaml" ]; then
       pass "gitops: $env clusters/kustomization.yaml exists"
     else
@@ -407,7 +338,6 @@ verify_gitops_repo() {
       fail "gitops: $env kustomization.yaml does not reference CR"
     fi
 
-    # .forest/ metadata
     local forest_dir="$release_dir/.forest"
     for f in config.yaml release.yaml spec.yaml; do
       if [ -f "$forest_dir/$f" ]; then
@@ -430,14 +360,12 @@ verify_gitops_repo() {
     fi
   done
 
-  # README preserved
   if [ -f "$VERIFY_DIR/README.md" ]; then
     pass "gitops: README.md preserved"
   else
     fail "gitops: README.md clobbered"
   fi
 
-  # Git history
   local commit_count
   commit_count=$(cd "$VERIFY_DIR" && git log --oneline | wc -l)
   local expected_commits=$((1 + ${#env_data[@]}))
@@ -463,10 +391,6 @@ show_gitops_output() {
   echo "  --- Git log ---"
   (cd "$VERIFY_DIR" && git log --oneline) | sed 's/^/    /'
 }
-
-# ============================================================================
-# Server & Runner Management
-# ============================================================================
 
 build_binaries() {
   echo "  Building forest-server and forest-runner..."
@@ -613,12 +537,7 @@ show_runner_output() {
   echo "  Logs: $SERVER_LOG, $RUNNER_LOG"
 }
 
-# ============================================================================
-# k3d + Gitea + Flux Setup
-# ============================================================================
-
 setup_k3d_cluster() {
-  # Clean up any leftover resources
   k3d cluster delete "$CLUSTER_NAME" 2>/dev/null || true
   k3d registry delete "$REGISTRY_NAME" 2>/dev/null || true
   docker rm -f "$GITEA_CONTAINER" 2>/dev/null || true
@@ -797,14 +716,12 @@ setup_flux() {
     fi
   done
 
-  # Gitea credentials
   echo "  Creating gitea credentials secret"
   kubectl -n flux-system create secret generic gitea-creds \
     --from-literal=username="${GITEA_USER}" \
     --from-literal=password="${GITEA_PASS}" > /dev/null 2>&1
   pass "gitea-creds secret created"
 
-  # GitRepository source
   echo "  Creating GitRepository source: flux-system"
   if flux create source git flux-system \
     --url="${GITEA_FLUX_URL}" \
@@ -816,7 +733,6 @@ setup_flux() {
     fail "GitRepository create"
   fi
 
-  # Root Kustomization
   local clusters_path="./clusters/dev/${dest_name}/dev-cluster-01/rust-podinfo"
   echo "  Creating root Kustomization (path: $clusters_path)"
   if flux create kustomization gitops-root \
@@ -830,7 +746,6 @@ setup_flux() {
     fail "Kustomization create"
   fi
 
-  # Flux Receiver for webhook triggers
   echo "  Creating Flux Receiver webhook"
   local receiver_token="forest-webhook-token"
   kubectl -n flux-system create secret generic receiver-token \
@@ -866,7 +781,6 @@ RECEIVER_EOF
     fail "Flux Receiver not ready"
   fi
 
-  # Port-forward webhook-receiver
   echo "  Port-forwarding webhook-receiver to localhost:$WEBHOOK_HOST_PORT"
   kubectl -n flux-system port-forward svc/webhook-receiver "$WEBHOOK_HOST_PORT":80 > /dev/null 2>&1 &
   WEBHOOK_PF_PID=$!
@@ -875,7 +789,6 @@ RECEIVER_EOF
   RECONCILE_URL="http://localhost:${WEBHOOK_HOST_PORT}${webhook_path}"
   echo "  Reconcile URL: $RECONCILE_URL"
 
-  # Verify webhook reachable
   local status
   status=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "$RECONCILE_URL" 2>&1) || true
   pass "webhook reachable (status: $status)"
@@ -968,10 +881,6 @@ show_flux_status() {
   kubectl -n rust-podinfo get deployment,pods,svc 2>&1 | sed 's/^/    /'
 }
 
-# ============================================================================
-# Cleanup
-# ============================================================================
-
 CLEANED_UP=false
 cleanup() {
   if [ "$CLEANED_UP" = true ]; then return; fi
@@ -981,11 +890,9 @@ cleanup() {
   echo ""
   echo "=== Cleanup ==="
 
-  # Kill port-forwards
   if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi
   if [ -n "$WEBHOOK_PF_PID" ]; then kill "$WEBHOOK_PF_PID" 2>/dev/null || true; fi
 
-  # Kill runner + server
   if [ -n "$RUNNER_PID" ]; then
     kill "$RUNNER_PID" 2>/dev/null || true
     wait "$RUNNER_PID" 2>/dev/null || true
@@ -995,10 +902,8 @@ cleanup() {
     wait "$SERVER_PID" 2>/dev/null || true
   fi
 
-  # Delete test destinations
   delete_test_destinations 2>/dev/null || true
 
-  # k3d cleanup
   if [ "$USE_K3D" = true ]; then
     k3d cluster delete "$CLUSTER_NAME" 2>/dev/null || true
     k3d registry delete "$REGISTRY_NAME" 2>/dev/null || true
@@ -1008,10 +913,6 @@ cleanup() {
   rm -rf .forest
 }
 trap cleanup EXIT
-
-# ============================================================================
-# Mode: flux — in-process, bare git, 3 environments
-# ============================================================================
 
 mode_flux() {
   section "0. Prerequisites"
@@ -1041,7 +942,6 @@ mode_flux() {
   section "4. Release prepare"
   do_release_prepare
 
-  # Spot-check rendered content
   if find .forest/deployment -type d -name "flux@1" | grep -q .; then
     pass "release prepare: uses forest/flux@1 template dir"
   else
@@ -1100,10 +1000,6 @@ mode_flux() {
   echo "  Note: $TEST_DIR is preserved for inspection."
 }
 
-# ============================================================================
-# Mode: flux-runner — distributed runner, bare git, 3 environments
-# ============================================================================
-
 mode_flux_runner() {
   section "0. Prerequisites"
   check_prerequisites mise cargo
@@ -1152,10 +1048,6 @@ mode_flux_runner() {
   echo "  Note: $TEST_DIR is preserved for inspection."
 }
 
-# ============================================================================
-# Mode: k3d-flux — in-process, real Kubernetes, single environment
-# ============================================================================
-
 mode_k3d_flux() {
   DEST_NAME="flux-dev-k3d"
 
@@ -1195,7 +1087,6 @@ mode_k3d_flux() {
     skip "release to dev (no slug)"
   fi
 
-  # Verify gitea received the release commit
   local pushed=false
   for i in $(seq 1 10); do
     local commits
@@ -1224,16 +1115,6 @@ mode_k3d_flux() {
   show_flux_status
 }
 
-# ============================================================================
-# Mode: k3d-flux-runner — distributed runner, real Kubernetes, single env
-#
-# NOTE: Does NOT use --disable-in-process because forest.cue defines both
-# kubernetes and flux destination types per environment. Kubernetes releases
-# need the in-process fallback (no runner supports kubernetes@1). The
-# scheduler already prefers remote runners first, so flux releases go through
-# the runner while kubernetes releases fall back to in-process.
-# ============================================================================
-
 mode_k3d_flux_runner() {
   DEST_NAME="flux-dev-k3d"
 
@@ -1248,7 +1129,6 @@ mode_k3d_flux_runner() {
   build_binaries
 
   section "2. Start forest-server"
-  # NO --disable-in-process: kubernetes destinations need in-process fallback
   start_test_server false
 
   section "3. Start forest-runner"
@@ -1283,7 +1163,6 @@ mode_k3d_flux_runner() {
     skip "release to dev (no slug)"
   fi
 
-  # Give scheduler time to dispatch
   sleep 5
 
   section "9. Verify runner execution"
@@ -1299,10 +1178,6 @@ mode_k3d_flux_runner() {
   show_runner_output
   show_flux_status
 }
-
-# ============================================================================
-# Main Entry Point
-# ============================================================================
 
 usage() {
   echo "Usage: $0 <mode>"

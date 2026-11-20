@@ -21,7 +21,6 @@ impl ComponentDeploymentService {
             "deploying component"
         );
 
-        // Check version difference
         let component = self
             .grpc
             .get_component(
@@ -56,7 +55,6 @@ impl ComponentDeploymentService {
             }
         }
 
-        // Begin upload
         let upload_context = self
             .grpc
             .begin_upload(
@@ -66,7 +64,6 @@ impl ComponentDeploymentService {
             )
             .await?;
 
-        // Send files
         for path in walkdir::WalkDir::new(&raw_component.path) {
             let path = path?;
             let metadata = path.metadata()?;

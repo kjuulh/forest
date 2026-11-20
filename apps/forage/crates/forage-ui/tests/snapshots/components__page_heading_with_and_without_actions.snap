@@ -1,0 +1,12 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<div class="flex items-center justify-between mb-8">
+<h1 class="text-2xl font-bold">Releases</h1>
+
+</div>
+<div class="flex items-center justify-between mb-8">
+<h1 class="text-2xl font-bold">Releases</h1>
+<a href="/new">New</a>
+</div>

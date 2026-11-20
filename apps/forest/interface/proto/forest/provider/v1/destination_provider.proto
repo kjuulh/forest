@@ -1,63 +1,24 @@
 syntax = "proto3";
 
-// A destination provider is an external service that implements a forest
-// destination type. forest dials it; the provider needs no forest code and no
-// forest dependency — only this file, which is deliberately self-contained so it
-// can be vendored on its own and generated for any language.
-//
-// The type a provider implements is reached through forest's built-in
-// `forest/generic@1` destination: a destination of that type carries
-// `provider_url` in its metadata, and every other metadata key is passed
-// through to the provider untouched.
-//
-// Two calls, and forest drives both:
-//
-//   Describe  — at destination-creation time, so the metadata schema lives with
-//               the implementation rather than being mirrored into forest's
-//               configuration. forest validates the destination's metadata
-//               against what comes back, and renders a form from it.
-//   Execute   — to run a release. Log lines stream back as they happen and are
-//               written to the release log; the final event carries the outcome.
-//
-// Authentication: when the destination sets `provider_token`, forest sends it on
-// every call as the gRPC metadata header `authorization: Bearer <token>`.
-// Providers reachable only on an internal network may ignore it, but anything
-// that can act on production should not.
 package forest.provider.v1;
 
 service DestinationProvider {
-  // Describe the destination type this provider implements.
-  //
-  // Called when a destination is created or updated, and again as a
-  // reachability check before each release. Must be side-effect free.
+  // Must be side-effect free; also called as a reachability check before each release.
   rpc Describe(DescribeRequest) returns (DescribeResponse);
 
-  // Execute a release, streaming progress.
-  //
-  // The stream must end with exactly one `outcome` event. A stream that ends
-  // without one is treated as a failure — a provider that dies mid-release has
-  // not succeeded, and forest will not guess otherwise.
+  // The stream must end with exactly one `outcome` event, or the release fails.
   rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
 }
 
 message DescribeRequest {}
 
 message DescribeResponse {
-  // Human-readable summary of what this provider releases to, shown next to the
-  // destination in forest.
   string description = 1;
 
-  // Metadata this provider accepts, beyond `generic`'s own `provider_url` and
-  // `provider_token`. forest enforces `required` at destination-creation time;
-  // everything else is for rendering and for the provider's own validation.
   repeated MetadataField fields = 2;
 
-  // Whether Execute handles RELEASE_MODE_PLAN. When false, forest does not offer
-  // a plan for destinations backed by this provider.
   bool supports_plan = 3;
 
-  // Optional identifier for the type being implemented, e.g. "understory/ecs@1".
-  // Logged with each release so it is clear which provider served it.
   string type_name = 4;
 }
 
@@ -66,19 +27,14 @@ message MetadataField {
   string label = 2;
   string description = 3;
   bool required = 4;
-  // Rendering hint: "text", "url", "number", "password", …
   string field_type = 5;
   string default_value = 6;
-  // Credentials. forest redacts these in API responses and never logs them.
   bool sensitive = 7;
 }
 
 enum ReleaseMode {
   RELEASE_MODE_UNSPECIFIED = 0;
-  // Execute the release.
   RELEASE_MODE_DEPLOY = 1;
-  // Dry run. Make no change; report what a deploy would do in
-  // `Outcome.plan_output`, which is what a reviewer approves.
   RELEASE_MODE_PLAN = 2;
 }
 
@@ -87,13 +43,6 @@ message ExecuteRequest {
   Destination destination = 2;
   Release release = 3;
 
-  // A scoped, short-lived token plus the address to use it against. A provider
-  // that needs the release's rendered artifacts calls
-  // `forest.v1.RunnerService/GetReleaseFiles` (or `GetSpecFiles`) with them.
-  //
-  // Most providers act on infrastructure that already exists and need neither;
-  // both can be ignored. The token is scoped to this release alone and expires
-  // with it.
   string release_token = 4;
   string forest_addr = 5;
 
@@ -108,8 +57,6 @@ message Destination {
   string environment = 2;
   string organisation = 3;
 
-  // The destination's metadata with `generic`'s own `provider_*` keys removed,
-  // so a provider sees only its own configuration.
   map<string, string> metadata = 4;
 }
 
@@ -118,8 +65,6 @@ message Release {
   string project = 2;
   string slug = 3;
 
-  // Empty when the release has no source reference. A provider that pins an
-  // immutable artifact from the commit should fail rather than invent one.
   string reference_commit_sha = 4;
   string reference_commit_branch = 5;
   string reference_version = 6;
@@ -134,46 +79,23 @@ message ExecuteEvent {
   oneof event {
     LogLine log = 1;
     Outcome outcome = 2;
-    // Something the provider observed and forest should record. Optional, and
-    // a provider may send any number of them.
     Signal signal = 3;
   }
 }
 
-// A named observation about this release, pushed as it is made.
-//
-// A provider knows things about a rollout that its final outcome cannot carry:
-// that the new tasks are up, that a smoke check passed, that the thing is
-// serving. Sending them as they happen lets a pipeline gate on them — see
-// forest.v1.SignalService and the `gate` stage type.
-//
-// Deliberately an event on this stream rather than a call back into forest.
-// This protocol is self-contained on purpose, so that a provider needs no
-// forest dependency and can be vendored on its own; a signal that required
-// dialling forest's SignalService would take that away. forest already knows
-// which release and organisation this stream belongs to, so the provider only
-// has to say what it saw.
 message Signal {
-  // The provider's own name for it — `rollout`, `smoke`. A pipeline gate waits
-  // on this name.
   string name = 1;
 
-  // One of forest.v1.HealthStatus, by name: HEALTHY, PROGRESSING, DEGRADED,
-  // UNHEALTHY, MISSING. A string rather than the enum so this file stays
-  // free of forest imports; forest validates it and rejects anything else.
+  // A forest.v1.HealthStatus name; forest rejects anything else.
   string status = 2;
 
-  // What a person reads first when a gate did not open. The ECS provider puts
-  // its poll line here: "deployments=1 running=1/1".
   string detail = 3;
 
-  // RFC 3339, and the provider's own clock. Empty means "when forest received
-  // it", which is close enough for a signal sent as it happens.
+  // RFC 3339; empty means when forest received it.
   string observed_at = 4;
 }
 
 message LogLine {
-  // "stdout" or "stderr". Anything else is treated as stdout.
   string channel = 1;
   string line = 2;
 }
@@ -181,10 +103,7 @@ message LogLine {
 message Outcome {
   bool success = 1;
 
-  // Why it failed. Surfaced as the release's failure message, so it should say
-  // what went wrong and where — this is what someone reads at 3am.
   string error_message = 2;
 
-  // Plan text, for RELEASE_MODE_PLAN.
   string plan_output = 3;
 }

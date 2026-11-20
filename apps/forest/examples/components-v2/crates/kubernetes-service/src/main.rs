@@ -9,10 +9,6 @@ struct DeploymentHooks;
 struct ObservabilityHooks;
 struct SecurityHooks;
 
-// ---------------------------------------------------------------------------
-// YAML generation helpers (unchanged — pure functions)
-// ---------------------------------------------------------------------------
-
 fn generate_deployment(spec: &Spec) -> String {
     let mut y = String::new();
     writeln!(y, "apiVersion: apps/v1").unwrap();
@@ -299,10 +295,6 @@ fn generate_service_monitor(spec: &Spec) -> Option<String> {
     Some(y)
 }
 
-// ---------------------------------------------------------------------------
-// Command implementations (now async)
-// ---------------------------------------------------------------------------
-
 impl CommandHandler for K8sCommands {
     async fn prepare(
         &self,
@@ -395,10 +387,6 @@ impl CommandHandler for K8sCommands {
         Ok(LogsOutput {})
     }
 }
-
-// ---------------------------------------------------------------------------
-// Hook implementations (now async)
-// ---------------------------------------------------------------------------
 
 impl ForestDeploymentHookHandler for DeploymentHooks {
     async fn prepare(

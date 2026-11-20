@@ -499,7 +499,6 @@ fn test_can_lower_to_ir() -> anyhow::Result<()> {
     let doc = forest_sdk_codegen::openapi::parse(test_fixture())?;
     let module = forest_sdk_codegen::lower::lower(&doc)?;
 
-    // Snapshot the IR debug output
     insta::assert_debug_snapshot!("ir_module", module);
 
     Ok(())
@@ -516,7 +515,6 @@ fn test_full_codegen_pipeline() -> anyhow::Result<()> {
 
     let output = codegen.generate(test_fixture())?;
 
-    // Snapshot the generated Rust code
     insta::assert_snapshot!("generated_rust", output);
 
     Ok(())

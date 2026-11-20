@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO policies (project_id, name, policy_type, config)\n               VALUES ($1, 'collapse-prod', 'supersede_pending', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7a289ffb3189b49b1da2a7997d5dff23c1e2955dc05ec33cd377fd2ad5c30228"
+}

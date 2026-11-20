@@ -1,12 +1,3 @@
-//! Public OAuth 2.0 authorization-server endpoints ("Sign in with Forest").
-//!
-//! Forage is the public HTTP edge; all validation/issuance is delegated to
-//! forest-server over gRPC (the `ForestOAuthApps` client, authenticated as a
-//! service account). The browser session is the resource owner.
-//!
-//! - `GET  /oauth/authorize` — consent screen (session-gated)
-//! - `POST /oauth/authorize` — consent decision (CSRF-protected)
-//! - `POST /oauth/token`     — code → token exchange (machine-to-machine)
 #![allow(clippy::result_large_err)]
 
 use axum::Router;
@@ -14,8 +5,7 @@ use axum::extract::{Form, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Redirect, Response};
 use axum::routing::{get, post};
-use forage_core::platform::{OAuthClientInfo, OAuthFlowError};
-use minijinja::context;
+use forage_core::platform::{OAuthClientInfo, OAuthDeviceToken, OAuthFlowError};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -30,6 +20,7 @@ pub fn router() -> Router<AppState> {
             get(authorize_page).post(authorize_decision),
         )
         .route("/oauth/token", post(token))
+        .route("/oauth/device_authorization", post(device_authorization))
         .route("/oauth/userinfo", get(userinfo).post(userinfo))
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/settings/authorized-apps", get(authorized_apps_page))
@@ -38,8 +29,6 @@ pub fn router() -> Router<AppState> {
             post(revoke_authorized_app),
         )
 }
-
-// ─── Authorized apps (resource-owner view) ───────────────────────────
 
 async fn authorized_apps_page(
     State(state): State<AppState>,
@@ -51,27 +40,18 @@ async fn authorized_apps_page(
         .await
         .map_err(|e| internal_error(&state, "list oauth grants", &e))?;
 
-    let html = state
-        .templates
-        .render(
-            "pages/authorized_apps.html.jinja",
-            context! {
-                title => "Authorized applications - Forest",
-                description => "Apps you've granted access to your account",
-                user => context! { username => &session.user.username },
-                current_org => session.user.orgs.first().map(|o| &o.name),
-                orgs => session.user.orgs.iter().map(|o| context! { name => &o.name, role => &o.role }).collect::<Vec<_>>(),
-                csrf_token => &session.csrf_token,
-                active_tab => "authorized-apps",
-                grants => grants.iter().map(|g| context! {
-                    app_id => &g.app_id,
-                    name => &g.name,
-                    scopes => &g.scopes,
-                }).collect::<Vec<_>>(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::account::AuthorizedAppsPage {
+        chrome: crate::views::account::chrome(
+            &state,
+            &session,
+            crate::views::account::first_org(&session),
+            "Authorized applications - Forest",
+            "Apps you've granted access to your account",
+        ),
+        csrf_token: session.csrf_token.clone(),
+        grants,
+    };
+    Ok(Html(crate::views::pages::authorized_apps::render(&page)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -96,8 +76,6 @@ async fn revoke_authorized_app(
         .map_err(|e| internal_error(&state, "revoke oauth grant", &e))?;
     Ok(Redirect::to("/settings/authorized-apps").into_response())
 }
-
-// ─── Authorize (GET) ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct AuthorizeQuery {
@@ -129,9 +107,6 @@ async fn authorize_page(
 ) -> Result<Response, Response> {
     let client = require_client(&state).await?;
 
-    // Resolve and validate the client + redirect_uri BEFORE trusting either (or
-    // before sending an unauthenticated user to login) — on failure we render
-    // an on-site error, never redirect (open-redirect / mix-up defence).
     let app = match client.lookup_oauth_client(&q.client_id).await {
         Ok(Some(app)) => app,
         Ok(None) => return Err(invalid_client_page(&state)),
@@ -141,11 +116,21 @@ async fn authorize_page(
         return Err(invalid_redirect_page(&state));
     }
 
-    // From here, redirect_uri is trusted: protocol errors go back to it.
     if q.response_type != "code" {
         return Ok(redirect_error(
             &q.redirect_uri,
             "unsupported_response_type",
+            q.state.as_deref(),
+        ));
+    }
+    if app.public
+        && (non_empty(q.code_challenge.as_deref()).is_none()
+            || q.code_challenge_method.as_deref() != Some("S256"))
+    {
+        return Ok(redirect_error_described(
+            &q.redirect_uri,
+            "invalid_request",
+            PUBLIC_CLIENT_PKCE_REQUIRED,
             q.state.as_deref(),
         ));
     }
@@ -160,10 +145,6 @@ async fn authorize_page(
         }
     };
 
-    // Authentication. With `prompt=none` we must NOT show UI, so an
-    // unauthenticated request returns `login_required` rather than bouncing to
-    // the login page (OIDC §3.1.2.6). Otherwise send the user to login,
-    // returning to this authorize URL afterwards.
     let session = match maybe_session.session {
         Some(s) => s,
         None => {
@@ -175,12 +156,6 @@ async fn authorize_page(
         }
     };
 
-    // Remembered consent + OIDC `prompt` (§3.1.2.1):
-    //   - prompt=none    → never show UI: auto-approve if already consented for
-    //                      these scopes, else error=consent_required.
-    //   - prompt=consent → always show the screen (force re-consent).
-    //   - default        → auto-approve when prior consent covers the request,
-    //                      otherwise show the screen.
     let prior = client
         .get_oauth_consent(&q.client_id, &session.user.user_id)
         .await
@@ -211,50 +186,34 @@ async fn authorize_page(
                 redirect_error(&q.redirect_uri, "consent_required", q.state.as_deref())
             });
         }
-        "consent" => { /* force the screen below */ }
+        "consent" => {}
         _ if covered => return Ok(auto_approve().await),
         _ => {}
     }
 
-    let html = state
-        .templates
-        .render(
-            "pages/oauth_consent.html.jinja",
-            context! {
-                title => format!("Authorize {} - Forest", app.name),
-                description => "Authorize application",
-                user => context! {
-                    username => &session.user.username,
-                    user_id => &session.user.user_id,
-                },
-                csrf_token => &session.csrf_token,
-                app_name => &app.name,
-                app_homepage => &app.homepage_url,
-                scopes => scopes.iter().map(|s| context! {
-                    name => s,
-                    description => scope_description(s),
-                }).collect::<Vec<_>>(),
-                // Echo the validated request back through the consent form.
-                client_id => &q.client_id,
-                redirect_uri => &q.redirect_uri,
-                scope => scopes.join(" "),
-                consent_binding => consent_binding(
-                    &session.csrf_token,
-                    &q.client_id,
-                    &q.redirect_uri,
-                    &scopes.join(" "),
-                ),
-                state => q.state.clone().unwrap_or_default(),
-                code_challenge => q.code_challenge.clone().unwrap_or_default(),
-                code_challenge_method => q.code_challenge_method.clone().unwrap_or_default(),
-                nonce => q.nonce.clone().unwrap_or_default(),
-            },
-        )
-        .map_err(|e| internal_error(&state, "template error", &e))?;
-    Ok(Html(html).into_response())
+    let page = crate::views::auth::OAuthConsentPage::new(
+        &state,
+        &session,
+        &app.name,
+        &app.homepage_url,
+        crate::views::auth::ConsentRequest {
+            client_id: &q.client_id,
+            redirect_uri: &q.redirect_uri,
+            scopes: &scopes,
+            consent_binding: consent_binding(
+                &session.csrf_token,
+                &q.client_id,
+                &q.redirect_uri,
+                &scopes.join(" "),
+            ),
+            state: q.state.as_deref(),
+            code_challenge: q.code_challenge.as_deref(),
+            code_challenge_method: q.code_challenge_method.as_deref(),
+            nonce: q.nonce.as_deref(),
+        },
+    );
+    Ok(Html(crate::views::pages::oauth_consent::render(&page)).into_response())
 }
-
-// ─── Authorize (POST — consent decision) ─────────────────────────────
 
 #[derive(Deserialize)]
 struct ConsentForm {
@@ -287,8 +246,6 @@ async fn authorize_decision(
         return Err((StatusCode::FORBIDDEN, "CSRF token mismatch").into_response());
     }
 
-    // Re-validate the client + redirect_uri server-side (never trust the
-    // posted hidden fields for the redirect target).
     let app = match client.lookup_oauth_client(&form.client_id).await {
         Ok(Some(app)) => app,
         Ok(None) => return Err(invalid_client_page(&state)),
@@ -308,8 +265,6 @@ async fn authorize_decision(
         ));
     }
 
-    // The displayed consent params must match what was rendered (review #2):
-    // reject if the hidden client_id / redirect_uri / scope were tampered.
     let expected = consent_binding(
         &session.csrf_token,
         &form.client_id,
@@ -345,10 +300,6 @@ async fn authorize_decision(
     .await)
 }
 
-/// Mint an authorization code for a consented request and 302 back to the
-/// client with `code` (+ `state`). On a flow error, redirect with the matching
-/// OAuth error. Shared by the explicit consent POST and the remembered-consent
-/// auto-approve path.
 #[allow(clippy::too_many_arguments)]
 async fn issue_code_redirect(
     client: &std::sync::Arc<dyn forage_core::platform::ForestOAuthApps>,
@@ -380,18 +331,21 @@ async fn issue_code_redirect(
             }
             Redirect::to(&append_query(redirect_uri, &params)).into_response()
         }
+        Err(OAuthFlowError::InvalidRequest(msg)) => match msg.strip_prefix("invalid_request: ") {
+            Some(description) => {
+                redirect_error_described(redirect_uri, "invalid_request", description, state)
+            }
+            None => redirect_error(redirect_uri, "invalid_request", state),
+        },
         Err(e) => {
             let oauth_err = match e {
                 OAuthFlowError::InvalidScope => "invalid_scope",
-                OAuthFlowError::InvalidRequest(_) => "invalid_request",
                 _ => "server_error",
             };
             redirect_error(redirect_uri, oauth_err, state)
         }
     }
 }
-
-// ─── Token endpoint ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct TokenForm {
@@ -409,11 +363,13 @@ struct TokenForm {
     code_verifier: Option<String>,
     #[serde(default)]
     refresh_token: String,
-    /// Space-delimited, per RFC 6749 §3.3. Only read for
-    /// `client_credentials`; empty means "everything this app has".
     #[serde(default)]
     scope: String,
+    #[serde(default)]
+    device_code: String,
 }
+
+pub(crate) const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 async fn token(
     State(state): State<AppState>,
@@ -424,16 +380,11 @@ async fn token(
         return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
     };
 
-    // Client credentials may arrive via HTTP Basic (RFC 6749 §2.3.1) or in the
-    // body (`client_secret_post`). Basic takes precedence when present.
     let (client_id, client_secret) = match parse_basic_auth(&headers) {
         Some((id, secret)) => (id, secret),
         None => (form.client_id.clone(), form.client_secret.clone()),
     };
 
-    // client_credentials answers with a different shape — no refresh
-    // token, no id_token — so it returns straight from here rather than
-    // being forced through the user-token response builder below.
     if form.grant_type == "client_credentials" {
         let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
         return match client
@@ -451,6 +402,36 @@ async fn token(
                 let (status, code) = oauth_error_code(&e);
                 token_error(status, code)
             }
+        };
+    }
+
+    if form.grant_type == DEVICE_CODE_GRANT {
+        if form.device_code.is_empty() {
+            return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+        }
+        return match client
+            .exchange_oauth_device_code(&client_id, &client_secret, &form.device_code)
+            .await
+        {
+            Ok(OAuthDeviceToken::Issued(tokens)) => Json(json!({
+                "access_token": tokens.access_token,
+                "token_type": tokens.token_type,
+                "expires_in": tokens.expires_in_seconds,
+                "refresh_token": tokens.refresh_token,
+                "scope": tokens.scopes.join(" "),
+            }))
+            .into_response(),
+            Ok(OAuthDeviceToken::AuthorizationPending) => {
+                token_error(StatusCode::BAD_REQUEST, "authorization_pending")
+            }
+            Ok(OAuthDeviceToken::SlowDown) => token_error(StatusCode::BAD_REQUEST, "slow_down"),
+            Ok(OAuthDeviceToken::AccessDenied) => {
+                token_error(StatusCode::BAD_REQUEST, "access_denied")
+            }
+            Ok(OAuthDeviceToken::ExpiredToken) => {
+                token_error(StatusCode::BAD_REQUEST, "expired_token")
+            }
+            Err(e) => device_flow_error(&e),
         };
     }
 
@@ -494,7 +475,61 @@ async fn token(
     }
 }
 
-// ─── OIDC discovery ──────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct DeviceAuthorizationForm {
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    client_secret: String,
+    #[serde(default)]
+    scope: String,
+}
+
+async fn device_authorization(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<DeviceAuthorizationForm>,
+) -> Response {
+    let Some(client) = state.oauth_apps_client.as_ref() else {
+        return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
+    };
+    let (client_id, client_secret) = match parse_basic_auth(&headers) {
+        Some((id, secret)) => (id, secret),
+        None => (form.client_id, form.client_secret),
+    };
+    if client_id.is_empty() {
+        return token_error(StatusCode::UNAUTHORIZED, "invalid_client");
+    }
+    let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
+
+    match client
+        .initiate_oauth_device_authorization(&client_id, &client_secret, &scopes)
+        .await
+    {
+        Ok(grant) => Json(json!({
+            "device_code": grant.device_code,
+            "user_code": grant.user_code,
+            "verification_uri": grant.verification_uri,
+            "verification_uri_complete": grant.verification_uri_complete,
+            "expires_in": grant.expires_in_seconds,
+            "interval": grant.interval_seconds,
+        }))
+        .into_response(),
+        Err(e) => device_flow_error(&e),
+    }
+}
+
+fn device_flow_error(e: &OAuthFlowError) -> Response {
+    match e {
+        OAuthFlowError::InvalidRequest(msg) if msg == "unsupported_grant_type" => {
+            token_error(StatusCode::BAD_REQUEST, "unauthorized_client")
+        }
+        e => {
+            let (status, code) = oauth_error_code(e);
+            token_error(status, code)
+        }
+    }
+}
 
 async fn discovery(State(state): State<AppState>) -> Response {
     let base = &state.forage_host;
@@ -502,11 +537,25 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "issuer": base,
         "authorization_endpoint": format!("{base}/oauth/authorize"),
         "token_endpoint": format!("{base}/oauth/token"),
+        "device_authorization_endpoint": format!("{base}/oauth/device_authorization"),
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
-        "scopes_supported": ["openid", "profile", "email", "components:publish"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "grant_types_supported": [
+            "authorization_code",
+            "refresh_token",
+            "client_credentials",
+            DEVICE_CODE_GRANT
+        ],
+        "scopes_supported": [
+            "openid",
+            "profile",
+            "email",
+            "components:publish",
+            "tokens:introspect",
+            "datagateway:apply",
+            "datagateway:read"
+        ],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "code_challenge_methods_supported": ["S256", "plain"],
         "prompt_values_supported": ["none", "consent"],
@@ -515,8 +564,6 @@ async fn discovery(State(state): State<AppState>) -> Response {
     }))
     .into_response()
 }
-
-// ─── Userinfo endpoint ───────────────────────────────────────────────
 
 async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(client) = state.oauth_apps_client.as_ref() else {
@@ -533,7 +580,6 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
 
     match client.oauth_userinfo(token).await {
         Ok(info) => {
-            // Build a claims object containing only the granted/non-empty fields.
             let mut claims = serde_json::Map::new();
             claims.insert("sub".into(), json!(info.sub));
             if let Some(u) = info.username {
@@ -559,7 +605,6 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
     }
 }
 
-/// RFC 6749 §5.2 error code and its HTTP status.
 fn oauth_error_code(e: &OAuthFlowError) -> (StatusCode, &'static str) {
     match e {
         OAuthFlowError::InvalidClient => (StatusCode::UNAUTHORIZED, "invalid_client"),
@@ -570,7 +615,6 @@ fn oauth_error_code(e: &OAuthFlowError) -> (StatusCode, &'static str) {
     }
 }
 
-/// A 401 with the RFC 6750 `WWW-Authenticate` challenge.
 fn unauthorized(error: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -582,8 +626,6 @@ fn unauthorized(error: &str) -> Response {
     )
         .into_response()
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 async fn require_client(
     state: &AppState,
@@ -598,13 +640,52 @@ async fn require_client(
     })
 }
 
-/// Exact-match check against the registered redirect URIs.
 fn redirect_uri_allowed(app: &OAuthClientInfo, redirect_uri: &str) -> bool {
-    app.redirect_uris.iter().any(|u| u == redirect_uri)
+    app.redirect_uris
+        .iter()
+        .any(|u| redirect_uri_matches(u, redirect_uri))
 }
 
-/// Resolve requested scopes against the app's allowlist. Empty request →
-/// all app scopes (RFC 6749 §3.3 default). Any unknown scope → `Err`.
+pub(crate) fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
+    if registered == requested {
+        return true;
+    }
+    match (loopback_parts(registered), loopback_parts(requested)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn loopback_parts(uri: &str) -> Option<(&str, String)> {
+    let rest = uri.strip_prefix("http://")?;
+    if rest.contains('#') {
+        return None;
+    }
+    let split = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(split);
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    if host != "127.0.0.1" && host != "localhost" {
+        return None;
+    }
+    if let Some(port) = port
+        && (port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    let tail = if tail.starts_with('/') {
+        tail.to_string()
+    } else {
+        format!("/{tail}")
+    };
+    Some((host, tail))
+}
+
+const PUBLIC_CLIENT_PKCE_REQUIRED: &str =
+    "a public client must use PKCE with code_challenge_method S256";
+
 fn resolve_scopes(app: &OAuthClientInfo, requested: &str) -> Result<Vec<String>, ()> {
     let requested: Vec<&str> = requested.split_whitespace().collect();
     if requested.is_empty() {
@@ -622,13 +703,15 @@ fn resolve_scopes(app: &OAuthClientInfo, requested: &str) -> Result<Vec<String>,
     Ok(out)
 }
 
-fn scope_description(scope: &str) -> &'static str {
+pub(crate) fn scope_description(scope: &str) -> &'static str {
     match scope {
         "openid" => "Confirm your identity",
         "profile" => "Your username, account ID and avatar",
         "email" => "Your verified email addresses",
-
         "components:publish" => "Publish Forest components from CI",
+        "tokens:introspect" => "Check other apps' tokens (for a service that accepts them)",
+        "datagateway:apply" => "Define data gateway project metrics",
+        "datagateway:read" => "Query data gateway project metrics",
         _ => "",
     }
 }
@@ -637,11 +720,6 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|v| !v.is_empty())
 }
 
-/// Bind the consent-critical parameters (client_id, redirect_uri, scope) to the
-/// session so they cannot be tampered between the rendered consent screen and
-/// the submitted decision. The tag is `HMAC-SHA256(csrf_token, params)`: an
-/// attacker editing a hidden field can't forge a matching tag without the
-/// session's secret csrf_token. Closes review finding #2 (consent integrity).
 pub(crate) fn consent_binding(
     csrf_token: &str,
     client_id: &str,
@@ -666,7 +744,6 @@ pub(crate) fn consent_binding(
     hex
 }
 
-/// Constant-time comparison of two consent tags.
 fn consent_binding_valid(expected: &str, presented: &str) -> bool {
     expected.len() == presented.len()
         && expected
@@ -676,10 +753,6 @@ fn consent_binding_valid(expected: &str, presented: &str) -> bool {
             == 0
 }
 
-/// Parse client credentials from an HTTP Basic `Authorization` header
-/// (RFC 6749 §2.3.1). The userid/password are `application/x-www-form-urlencoded`
-/// before base64 encoding, so we URL-decode each component after splitting.
-/// Returns `None` if there is no usable Basic header.
 fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     use base64::Engine;
     let raw = headers
@@ -720,6 +793,19 @@ fn redirect_error(redirect_uri: &str, error: &str, state: Option<&str>) -> Respo
     Redirect::to(&append_query(redirect_uri, &params)).into_response()
 }
 
+fn redirect_error_described(
+    redirect_uri: &str,
+    error: &str,
+    description: &str,
+    state: Option<&str>,
+) -> Response {
+    let mut params = vec![("error", error), ("error_description", description)];
+    if let Some(s) = state {
+        params.push(("state", s));
+    }
+    Redirect::to(&append_query(redirect_uri, &params)).into_response()
+}
+
 fn token_error(status: StatusCode, error: &str) -> Response {
     (status, Json(json!({ "error": error }))).into_response()
 }
@@ -744,7 +830,69 @@ fn invalid_redirect_page(state: &AppState) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_basic_auth;
+    use super::{parse_basic_auth, redirect_uri_matches};
+
+    #[test]
+    fn a_registered_loopback_redirect_matches_any_port() {
+        for registered in [
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:8080/callback",
+        ] {
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1:53817/callback"
+            ));
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1/callback"
+            ));
+        }
+        assert!(redirect_uri_matches(
+            "http://localhost/cb?x=1",
+            "http://localhost:4000/cb?x=1"
+        ));
+    }
+
+    #[test]
+    fn a_loopback_redirect_still_needs_the_same_host_path_and_query() {
+        let registered = "http://127.0.0.1/callback";
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/other"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://localhost:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/callback?a=b"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1.evil.example/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1@evil.example/callback"
+        ));
+    }
+
+    #[test]
+    fn only_http_on_a_loopback_host_ignores_the_port() {
+        assert!(!redirect_uri_matches(
+            "https://127.0.0.1/callback",
+            "https://127.0.0.1:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "https://app.example:8443/callback",
+            "https://app.example:9443/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "http://app.example/callback",
+            "http://app.example:8080/callback"
+        ));
+    }
     use axum::http::{HeaderMap, HeaderValue};
     use base64::Engine;
 
@@ -769,7 +917,6 @@ mod tests {
 
     #[test]
     fn url_decodes_components() {
-        // RFC 6749 §2.3.1: components are form-urlencoded before base64.
         let h = basic("cli%40ent:s%2Fcret");
         assert_eq!(
             parse_basic_auth(&h),
@@ -805,9 +952,7 @@ mod tests {
             HeaderValue::from_static("Basic !!!notbase64!!!"),
         );
         assert_eq!(parse_basic_auth(&h), None);
-        // No colon separator.
         assert_eq!(parse_basic_auth(&basic("nocolon")), None);
-        // Empty client_id.
         assert_eq!(parse_basic_auth(&basic(":secret")), None);
     }
 }

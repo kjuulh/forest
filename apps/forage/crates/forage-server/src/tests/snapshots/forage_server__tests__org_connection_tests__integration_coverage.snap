@@ -1,0 +1,74 @@
+---
+source: crates/forage-server/src/tests/org_connection_tests.rs
+expression: "page_main(&body, &id)"
+---
+<main class="flex-1 pb-16">
+<section class="app-container py-12">
+<div class="mb-8">
+<a href="/orgs/testorg/settings/integrations/ID" class="text-sm text-gray-500 hover:text-gray-700">&larr; slack</a>
+</div>
+<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+<div>
+<h1 class="text-2xl font-bold">Member coverage</h1>
+<p class="text-sm text-gray-500 mt-1">Who in testorg would receive individual Slack messages about their own releases. Only Forest members are listed; nothing else from the Slack directory is shown or stored.</p>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/coverage" class="shrink-0">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Check again with Slack</button>
+</form>
+</div>
+
+
+<div class="grid grid-cols-2 gap-4 mb-6 max-w-md">
+<div class="border border-gray-200 rounded-lg p-4">
+<div class="text-2xl font-bold" data-testid="coverage-reachable">2</div>
+<div class="text-sm text-gray-500">reachable</div>
+</div>
+<div class="border border-gray-200 rounded-lg p-4">
+<div class="text-2xl font-bold" data-testid="coverage-gaps">2</div>
+<div class="text-sm text-gray-500">not reached</div>
+</div>
+</div>
+
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+<div class="sm:w-48 shrink-0">
+<span class="text-sm font-medium text-gray-900">alice-name</span>
+<span class="text-xs text-gray-400 ml-1">member</span>
+</div>
+<div class="flex items-start gap-2 min-w-0">
+<span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Reached</span>
+<span class="text-sm text-gray-600 break-words">Matched by verified Forest email</span>
+</div>
+</div><div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+<div class="sm:w-48 shrink-0">
+<span class="text-sm font-medium text-gray-900">bob-name</span>
+<span class="text-xs text-gray-400 ml-1">member</span>
+</div>
+<div class="flex items-start gap-2 min-w-0">
+<span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Reached</span>
+<span class="text-sm text-gray-600 break-words">Personal Slack link (their own choice)</span>
+</div>
+</div><div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+<div class="sm:w-48 shrink-0">
+<span class="text-sm font-medium text-gray-900">carol-name</span>
+<span class="text-xs text-gray-400 ml-1">member</span>
+</div>
+<div class="flex items-start gap-2 min-w-0">
+<span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-800">Setup gap</span>
+<span class="text-sm text-gray-600 break-words">No Slack account matches a verified email. They can link Slack under Account settings.</span>
+</div>
+</div><div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+<div class="sm:w-48 shrink-0">
+<span class="text-sm font-medium text-gray-900">dave-name</span>
+<span class="text-xs text-gray-400 ml-1">member</span>
+</div>
+<div class="flex items-start gap-2 min-w-0">
+<span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-800">Setup gap</span>
+<span class="text-sm text-gray-600 break-words">The matching Slack account belongs to another workspace. They can link Slack under Account settings.</span>
+</div>
+</div>
+
+</div>
+</section>
+</main>

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_intents SET status = 'CANCELLED' WHERE project_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "87863e3c1b5ffdc227ae639b7677f9b36abeedf005a819028a97dbc789ddb5b4"
+}

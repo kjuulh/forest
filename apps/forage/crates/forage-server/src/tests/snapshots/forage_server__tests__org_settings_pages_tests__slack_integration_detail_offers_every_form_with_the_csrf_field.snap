@@ -1,0 +1,200 @@
+---
+source: crates/forage-server/src/tests/org_settings_pages_tests.rs
+expression: masked_main(&html)
+---
+<main class="flex-1 pb-16">
+<section class="app-container py-12">
+<div class="mb-8">
+<a href="/orgs/testorg/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">← All integrations</a>
+</div>
+<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
+<svg class="w-6 h-6 text-gray-600" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"></path></svg>
+</div>
+<div>
+<h1 class="text-2xl font-bold">#deploys</h1>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-sm text-gray-500">Slack</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Active</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/reinstall" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Reinstall</button>
+</form>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/toggle" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Pause</button>
+</form>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/delete" class="inline" data-confirm="Uninstall this integration? This cannot be undone.">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">Uninstall</button>
+</form>
+</div>
+</div>
+
+
+
+
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Configuration</h2>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="px-4 py-3">
+<span class="text-sm text-gray-900">My Team · #deploys</span>
+</div>
+</div>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Events</h2>
+<p class="text-sm text-gray-500 mb-3">Choose which deployment events trigger this integration.</p>
+<div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release annotated</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_annotated">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release annotated">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release started</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_started">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release started">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release succeeded</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_succeeded">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release succeeded">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div><div class="flex items-center justify-between px-4 py-3">
+<div>
+<span class="text-sm text-gray-700">Release failed</span>
+</div>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/rules" class="inline">
+<input type="hidden" name="_csrf" value="test-csrf">
+<input type="hidden" name="notification_type" value="release_failed">
+<input type="hidden" name="enabled" value="false">
+<button type="submit" class="w-9 h-5 rounded-full relative transition-colors bg-gray-900" title="Disable release failed">
+<span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all left-[calc(100%-1.125rem)]"></span>
+</button>
+</form>
+</div>
+</div>
+</div>
+<div class="mb-8" id="individual">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Individual notifications</h2>
+<p class="text-sm text-gray-500 mb-3">Forest messages the person a release belongs to (whoever ran it, or the commit author when their GitHub account is linked to Forest) about their own releases. Bots, CI and service accounts have no individual recipient; those releases only reach the channel above.</p>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/baseline" class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<input type="hidden" name="_csrf" value="test-csrf">
+<label class="flex items-start gap-3 px-4 py-3 cursor-pointer">
+<input type="checkbox" name="directory_mapping" class="mt-1">
+<span>
+<span class="block text-sm font-medium text-gray-900">Reach members without a personal Slack link</span>
+<span class="block text-sm text-gray-500">Members of this Forest organisation are matched to the one active, non-guest account in this workspace with the same <em>verified</em> Forest email. Unverified emails, names and commit emails are never used. Nobody gets a Forest account, organisation membership or sign-in method from this.</span>
+</span>
+</label>
+<div class="px-4 py-3">
+<span class="block text-sm font-medium text-gray-900 mb-1">Organisation defaults</span>
+<span class="block text-sm text-gray-500 mb-2">Used when a member hasn't chosen for themselves. A member's own choice on their account page always wins.</span>
+<div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-6">
+<label class="inline-flex items-center gap-2 text-sm text-gray-700">
+<input type="checkbox" name="dm_release_started" checked>
+Release started
+</label><label class="inline-flex items-center gap-2 text-sm text-gray-700">
+<input type="checkbox" name="dm_release_succeeded" checked>
+Release succeeded
+</label><label class="inline-flex items-center gap-2 text-sm text-gray-700">
+<input type="checkbox" name="dm_release_failed" checked>
+Release failed
+</label>
+</div>
+</div>
+<div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+<span class="text-xs text-gray-400">Not configured yet: personal Slack links only.</span>
+<div class="flex items-center gap-2">
+<a href="/orgs/testorg/settings/integrations/ID/coverage" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Member coverage</a>
+<button type="submit" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Save</button>
+</div>
+</div>
+</form>
+</div>
+<div class="mb-8" id="emoji">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Status emoji</h2>
+<p class="text-sm text-gray-500 mb-3">Release messages show each stage with an emoji. Use your workspace's custom emoji (an animated one makes a real spinner), without the colons. These apply to every Slack integration in this organisation. Leave a field empty for the standard emoji shown.</p>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/emoji" class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+<input type="hidden" name="_csrf" value="test-csrf">
+<div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+<label class="block text-sm">
+<span class="block font-medium text-gray-900">Queued stage</span>
+<input type="text" name="queued" value="" placeholder="hourglass_flowing_sand" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Running stage and in-progress header</span>
+<input type="text" name="running" value="" placeholder="arrows_counterclockwise" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Finished stage</span>
+<input type="text" name="succeeded" value="" placeholder="white_check_mark" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Failed stage</span>
+<input type="text" name="failed" value="" placeholder="x" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Waiting for approval</span>
+<input type="text" name="approval" value="" placeholder="raised_hand" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Skipped or cancelled stage</span>
+<input type="text" name="skipped" value="" placeholder="black_right_pointing_double_triangle_with_vertical_bar" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Rolled back</span>
+<input type="text" name="rolled_back" value="" placeholder="leftwards_arrow_with_hook" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Header when the release succeeded</span>
+<input type="text" name="celebrate" value="" placeholder="tada" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label><label class="block text-sm">
+<span class="block font-medium text-gray-900">Header when the release failed</span>
+<input type="text" name="mourn" value="" placeholder="rotating_light" maxlength="100" class="mt-1 w-full px-2 py-1 border border-gray-300 rounded-md font-mono text-sm">
+</label>
+</div>
+<div class="px-4 py-3 flex justify-end">
+<button type="submit" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">Save</button>
+</div>
+</form>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent deliveries</h2>
+<div class="border border-gray-200 rounded-lg p-6 text-center">
+<p class="text-sm text-gray-500">No deliveries yet. Send a test event or wait for a deployment notification.</p>
+</div>
+</div>
+<div class="mb-8">
+<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h2>
+<div class="border border-gray-200 rounded-lg p-4">
+<p class="text-sm text-gray-500 mb-3">Send a test <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">release_succeeded</code> event to verify your endpoint is receiving payloads correctly.</p>
+<form method="POST" action="/orgs/testorg/settings/integrations/ID/test">
+<input type="hidden" name="_csrf" value="test-csrf">
+<button type="submit" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">Send test event</button>
+</form>
+</div>
+</div>
+</section>
+</main>

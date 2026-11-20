@@ -1,13 +1,5 @@
 version: v2
-# Single source of truth lives at apps/forest/interface/proto/. We expose it
-# here via the `interface/proto` symlink (see git-tracked symlink in this
-# directory), so generated outputs in crates/forage-grpc/src/grpc/ always
-# reflect the upstream definitions without manual copy-paste.
 modules:
   - path: interface/proto
-    # forest/provider/v1 is the contract an external destination provider
-    # implements. forage is not one, and generating a client and server for it
-    # here would be several hundred lines of bindings nothing calls — which
-    # `buf generate` would then re-add on every run.
     excludes:
       - interface/proto/forest/provider

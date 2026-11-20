@@ -1,0 +1,27 @@
+---
+source: crates/forage-ui/tests/components.rs
+expression: out
+---
+<nav class="flex items-center gap-1.5 text-sm text-gray-500 min-w-0 flex-wrap" aria-label="Breadcrumb">
+
+<a href="/orgs/acme/projects" class="hover:text-gray-900 hover:underline">acme</a><span class="text-gray-300" aria-hidden="true">›</span>
+<a href="/orgs/acme/projects/api" class="hover:text-gray-900 hover:underline">api</a><span class="text-gray-300" aria-hidden="true">›</span>
+<span class="text-gray-900">Triggers</span>
+</nav>
+<a href="/orgs/acme/projects/api" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 shrink-0">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+  Back to api
+</a>
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
+<ul class="space-y-0.5">
+<li><a href="/t" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Triggers</a></li><li><a href="/p" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li>
+</ul>
+</nav>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Project settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/t" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Triggers</a></li><li><a href="/p" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Policies</a></li>
+</ul>
+</nav>
+<div class="flex gap-1 -mb-px overflow-x-auto scrollbar-none">
+<a href="/t" aria-current="page" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300 text-gray-900 border-gray-900">Triggers</a><a href="/p" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300">Policies</a>
+</div>

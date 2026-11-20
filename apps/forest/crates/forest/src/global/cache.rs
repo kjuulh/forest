@@ -1,22 +1,3 @@
-//! Content-addressable binary cache (effectful).
-//!
-//! Reads/writes `~/.cache/forest/components/bin/<sha256>/<name>` with the
-//! explicit P3 invariant that `finalize` verifies sha BEFORE renaming. The warm
-//! path (`read_by_sha`) trusts the content-address (§1a.9b / T1).
-//!
-//! **Layout (DATA-510).** The sha256 addresses a *directory*; the executable
-//! sits inside it under the component's real name. `forest global run` execs
-//! that path, so the child's `argv[0]` basename is the tool name rather than a
-//! hex digest — which busybox-style dispatch, usage text, and self-re-exec all
-//! read. A single hash may be materialised under more than one name (an alias,
-//! or two components whose artifacts hash identically); the extra names are
-//! hard links to the first, so they cost an inode and nothing else.
-//!
-//! **Migration.** Caches written before DATA-510 have `bin/<sha>` as a plain
-//! *file*. Every entry point here migrates that shape in place, lazily, on
-//! first touch — see [`BinaryCache::migrate_legacy_entry`]. Already-installed
-//! tools keep working and are never re-downloaded.
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -38,39 +19,18 @@ impl BinaryCache {
         Self { paths }
     }
 
-    /// Locate a cached binary by sha, under the name it should be exec'd as.
-    /// Returns `Some(path)` iff `bin/<sha>/<bin_name>` is present (or can be
-    /// materialised from a sibling name of the same content).
-    /// **Does not re-hash** — see Q9.a (content-address trust).
-    ///
-    /// Migrates a pre-DATA-510 `bin/<sha>` file into the new shape first, so
-    /// the first run after an upgrade fixes the store instead of refetching.
     pub async fn read_by_sha(&self, sha: &str, bin_name: &str) -> Result<Option<PathBuf>> {
         let bin_name = checked_bin_name(bin_name)?;
 
-        // Migration briefly moves the legacy file out of the way, so a second
-        // process can look in the window where the entry is neither the old
-        // file nor the new directory. Reporting a miss there would be safe but
-        // wasteful — it re-downloads a tool that is already on disk, and on
-        // the offline warm path it would fail outright. So a miss that
-        // coincides with an in-flight migration waits for the mover to land.
         let mut waited = std::time::Duration::ZERO;
         let step = std::time::Duration::from_millis(10);
         let limit = std::time::Duration::from_millis(500);
         loop {
             self.migrate_legacy_entry(sha, bin_name).await?;
-            // Sample the marker *before* looking, not after. A mover that
-            // lands in between has, by definition, published its entry after
-            // this read and before the lookup — so `racing` is still true and
-            // the next pass finds it. Read the other way round, that mover is
-            // invisible to both: the lookup is too early and the marker check
-            // too late, and a warm entry is reported as a miss.
             let racing = self.migration_in_flight(sha).await;
             if let Some(p) = self.lookup(sha, bin_name).await? {
                 return Ok(Some(p));
             }
-            // Not a race — or a mover that died holding the file, in which
-            // case the cold path re-fetches. Either way, stop waiting.
             if waited >= limit || !racing {
                 return Ok(None);
             }
@@ -79,8 +39,6 @@ impl BinaryCache {
         }
     }
 
-    /// Locate `bin/<sha>/<bin_name>`, materialising it from a sibling name of
-    /// the same content when only the name is missing.
     async fn lookup(&self, sha: &str, bin_name: &str) -> Result<Option<PathBuf>> {
         let p = self.paths.cached_binary(sha, bin_name);
         match fs::metadata(&p).await {
@@ -89,16 +47,12 @@ impl BinaryCache {
             Err(e) => return Err(e).with_context(|| format!("stat {}", p.display())),
         }
 
-        // The content is here under a different name — same bytes, different
-        // component or alias. Link it into place rather than re-downloading.
         if link_from_sibling(&self.paths.cached_binary_dir(sha), &p).await? {
             return Ok(Some(p));
         }
         Ok(None)
     }
 
-    /// Whether another process is part-way through migrating this sha — its
-    /// staged file is still sitting in the cache root under the scratch name.
     async fn migration_in_flight(&self, sha: &str) -> bool {
         let hex = sha.strip_prefix("sha256:").unwrap_or(sha);
         let prefix = format!(".migrating.{hex}.");
@@ -117,9 +71,6 @@ impl BinaryCache {
         false
     }
 
-    /// Verify a tempfile hashes to `expected_sha`, then atomically move into
-    /// the cache at `bin/<sha>/<bin_name>` with mode 0755. Concurrent writers
-    /// producing identical bytes converge to the same content-addressed name.
     pub async fn finalize(
         &self,
         tempfile_bytes: &[u8],
@@ -141,17 +92,6 @@ impl BinaryCache {
         Ok(dest)
     }
 
-    /// Install an already-streamed tempfile (DATA-505).
-    ///
-    /// The sha was computed incrementally while the bytes were being written,
-    /// so this verifies `computed_sha == expected_sha` and then `rename(2)`s
-    /// the file into `bin/<sha>/<name>` — no second pass over the artifact, no
-    /// need to hold it in memory. Same P3 invariant as [`Self::finalize`]:
-    /// **verify before rename**, so a mismatch can never become a cache entry.
-    ///
-    /// The tempfile is removed on mismatch. `temp_path` must be on the same
-    /// filesystem as the cache dir (pass the cache dir to the downloader) or
-    /// the rename will fail with `EXDEV`.
     pub async fn finalize_streamed(
         &self,
         temp_path: &Path,
@@ -186,22 +126,12 @@ impl BinaryCache {
                 .with_context(|| format!("chmod 0755 {}", temp_path.display()))?;
         }
 
-        // Content-addressed destination: a concurrent writer racing us here is
-        // installing byte-identical content under the same name, so whichever
-        // rename lands last is still correct.
         fs::rename(temp_path, &dest)
             .await
             .with_context(|| format!("renaming {} -> {}", temp_path.display(), dest.display()))?;
         Ok(dest)
     }
 
-    /// Walk the cache and re-hash every entry. Returns mismatched paths
-    /// that were deleted. Used by `forest global verify`.
-    ///
-    /// Understands both shapes: a `bin/<sha>` directory (every file inside it
-    /// must hash to the directory name) and a legacy `bin/<sha>` file. A hash
-    /// directory left empty by deletions is pruned so the cache doesn't
-    /// accumulate hollow entries.
     pub async fn re_verify(&self) -> Result<Vec<PathBuf>> {
         let root = self.paths.binary_cache_dir();
         if !root.exists() {
@@ -216,7 +146,6 @@ impl BinaryCache {
             let Some(sha) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
-            // `.incoming.*` / `.migrating.*` scratch files are not entries.
             if sha.starts_with('.') {
                 continue;
             }
@@ -226,9 +155,6 @@ impl BinaryCache {
             };
 
             if !is_dir {
-                // Legacy file entry. Verify in place; migration to
-                // `<sha>/<name>` happens lazily on next run, when the name is
-                // known.
                 if hash_of(&path).await.is_some_and(|h| h != sha) {
                     fs::remove_file(&path).await.ok();
                     mismatched.push(path);
@@ -260,36 +186,15 @@ impl BinaryCache {
                 }
             }
             if survivors == 0 {
-                // Nothing valid left under this hash — drop the shell.
                 fs::remove_dir(&path).await.ok();
             }
         }
         Ok(mismatched)
     }
 
-    /// Bring a pre-DATA-510 `bin/<sha>` **file** into the `bin/<sha>/<name>`
-    /// shape, in place and without re-downloading. No-op when the entry is
-    /// absent or already a directory, so it is safe — and cheap — to call on
-    /// every lookup and every install.
-    ///
-    /// The destination path is the one the legacy file currently occupies, so
-    /// the swap is staged in a scratch *directory* beside it:
-    ///
-    /// 1. hard-link the legacy file into `.migrating.<sha>.<rand>/<name>`, so
-    ///    the content exists in both places at once;
-    /// 2. unlink the legacy file (the data survives via the second link);
-    /// 3. rename the scratch directory onto the now-free `bin/<sha>`.
-    ///
-    /// Every step is a single atomic syscall, and every way one can fail means
-    /// another process got there first: a directory can't be hard-linked or
-    /// unlinked as a file, and a rename onto a populated directory is refused.
-    /// So a lost race is detected rather than corrupting the store, and no
-    /// lock file is needed. A crash between (2) and (3) strands the content in
-    /// the scratch directory — the entry then simply misses and is refetched.
     async fn migrate_legacy_entry(&self, sha: &str, bin_name: &str) -> Result<()> {
         let legacy = self.paths.legacy_cached_binary_file(sha);
         match fs::metadata(&legacy).await {
-            // Already migrated (or never existed in the old shape).
             Ok(m) if m.is_dir() => return Ok(()),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -304,8 +209,6 @@ impl BinaryCache {
         ensure_dir(&staged).await?;
         let staged_bin = staged.join(bin_name);
 
-        // 1. Duplicate the entry into the staging dir. A directory here means
-        //    the store is already migrated, and hard_link refuses directories.
         if let Err(e) = fs::hard_link(&legacy, &staged_bin).await {
             fs::remove_dir_all(&staged).await.ok();
             if fs::metadata(&legacy)
@@ -315,8 +218,6 @@ impl BinaryCache {
             {
                 return Ok(());
             }
-            // Some filesystems refuse hard links outright — fall back to a
-            // copy, which costs the bytes once and is otherwise identical.
             ensure_dir(&staged).await?;
             if fs::copy(&legacy, &staged_bin).await.is_err() {
                 fs::remove_dir_all(&staged).await.ok();
@@ -325,10 +226,8 @@ impl BinaryCache {
             }
         }
 
-        // 2. Drop the old name. The content lives on through the staged link.
         if let Err(e) = fs::remove_file(&legacy).await {
             fs::remove_dir_all(&staged).await.ok();
-            // Not a file any more ⇒ someone else migrated it under us.
             if e.kind() == std::io::ErrorKind::NotFound
                 || fs::metadata(&legacy)
                     .await
@@ -340,8 +239,6 @@ impl BinaryCache {
             return Err(e).with_context(|| format!("removing legacy {}", legacy.display()));
         }
 
-        // 3. Move the finished directory into place. A populated directory at
-        //    the destination is the winner of a race — keep theirs, drop ours.
         if let Err(e) = fs::rename(&staged, &legacy).await {
             fs::remove_dir_all(&staged).await.ok();
             if fs::metadata(&legacy)
@@ -365,16 +262,12 @@ impl BinaryCache {
     }
 }
 
-/// Reject a bin name that could escape its hash directory. Names come from
-/// component/tool identifiers, which are already validated at publish time —
-/// this is the defence-in-depth check at the point the name becomes a path.
 fn checked_bin_name(name: &str) -> Result<&str> {
     validate_tool_name(name)
         .map_err(|e| anyhow!("refusing to use {name:?} as a cached binary name: {e:?}"))?;
     Ok(name)
 }
 
-/// Hash a file, or `None` if it can't be read (a directory, a racing delete).
 async fn hash_of(path: &Path) -> Option<String> {
     fs::read(path)
         .await
@@ -382,9 +275,6 @@ async fn hash_of(path: &Path) -> Option<String> {
         .map(|b| hex::encode(Sha256::digest(&b)))
 }
 
-/// Materialise `dest` from any existing name in the same hash directory —
-/// identical bytes by construction, so a hard link is enough. Returns whether
-/// `dest` now exists.
 async fn link_from_sibling(dir: &Path, dest: &Path) -> Result<bool> {
     let mut entries = match fs::read_dir(dir).await {
         Ok(e) => e,
@@ -401,9 +291,7 @@ async fn link_from_sibling(dir: &Path, dest: &Path) -> Result<bool> {
         }
         match fs::hard_link(&src, dest).await {
             Ok(()) => return Ok(true),
-            // A concurrent run linked the same name first.
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(true),
-            // Filesystems that refuse hard links still get a working entry.
             Err(_) => {
                 fs::copy(&src, dest)
                     .await
@@ -422,13 +310,10 @@ async fn link_from_sibling(dir: &Path, dest: &Path) -> Result<bool> {
     Ok(false)
 }
 
-/// Compute the sha256 hex of an arbitrary byte slice.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// Stream bytes from an `AsyncRead` into a tempfile, simultaneously hashing.
-/// Returns the temp path + computed sha. The caller then `finalize`s.
 pub async fn write_to_tempfile(cache_root: &Path, bytes: &[u8]) -> Result<(PathBuf, String)> {
     ensure_dir(cache_root).await?;
     let rand: u64 = rand::random();
@@ -455,8 +340,6 @@ mod tests {
         )
     }
 
-    /// Write `bytes` at `bin/<sha>` as a plain executable file — the layout
-    /// every cache written before DATA-510 has on disk.
     async fn legacy_entry(paths: &GlobalPaths, bytes: &[u8]) -> String {
         let sha = sha256_hex(bytes);
         ensure_dir(&paths.binary_cache_dir()).await.unwrap();
@@ -518,7 +401,6 @@ mod tests {
         let bytes = b"abc";
         let prefixed = format!("sha256:{}", sha256_hex(bytes));
         c.finalize(bytes, &prefixed, "hello").await.unwrap();
-        // Cached under the hex-only hash dir:
         assert!(c.read_by_sha(&prefixed, "hello").await.unwrap().is_some());
         assert!(
             c.read_by_sha(&sha256_hex(bytes), "hello")
@@ -527,8 +409,6 @@ mod tests {
                 .is_some()
         );
     }
-
-    // --- `<hash>/<name>` layout (DATA-510) ---
 
     #[tokio::test]
     async fn finalize_installs_under_hash_dir_named_after_the_component() {
@@ -541,8 +421,6 @@ mod tests {
         let dest = c.finalize(bytes, &sha, "shiitake").await.unwrap();
 
         assert_eq!(dest, paths.cached_binary(&sha, "shiitake"));
-        // The property the whole change exists for: exec'ing this path gives
-        // the child an argv[0] whose basename is the tool name.
         assert_eq!(dest.file_name().unwrap(), "shiitake");
         assert_eq!(dest.parent().unwrap().file_name().unwrap(), sha.as_str());
         assert!(paths.cached_binary_dir(&sha).is_dir());
@@ -566,8 +444,6 @@ mod tests {
 
     #[tokio::test]
     async fn one_hash_can_hold_several_names() {
-        // Two components whose artifacts hash identically (or one tool reached
-        // under an alias) share the hash dir, each under its own name.
         let td = TempDir::new().unwrap();
         let paths = paths_under(&td);
         let c = BinaryCache::new(paths.clone());
@@ -587,8 +463,6 @@ mod tests {
 
     #[tokio::test]
     async fn read_by_sha_materialises_a_new_name_from_an_existing_sibling() {
-        // Same content already cached under another name ⇒ link it into place
-        // rather than reporting a miss and re-downloading.
         let td = TempDir::new().unwrap();
         let paths = paths_under(&td);
         let c = BinaryCache::new(paths.clone());
@@ -611,7 +485,6 @@ mod tests {
         c.finalize(b"one", &sha256_hex(b"one"), "one")
             .await
             .unwrap();
-        // A different sha: no dir to link a sibling from.
         assert!(
             c.read_by_sha(&sha256_hex(b"two"), "two")
                 .await
@@ -640,8 +513,6 @@ mod tests {
             "nothing may be written outside the hash dir"
         );
     }
-
-    // --- migration from the pre-DATA-510 file layout ---
 
     #[tokio::test]
     async fn migrates_a_legacy_file_entry_in_place_on_read() {
@@ -700,7 +571,6 @@ mod tests {
         assert_eq!(second, third);
         assert_eq!(entry_names(&paths, &sha).await, vec!["hello"]);
         assert_eq!(tokio::fs::read(&third).await.unwrap(), bytes);
-        // No scratch files left behind.
         let mut rd = tokio::fs::read_dir(paths.binary_cache_dir()).await.unwrap();
         let mut top = Vec::new();
         while let Some(e) = rd.next_entry().await.unwrap() {
@@ -711,8 +581,6 @@ mod tests {
 
     #[tokio::test]
     async fn migration_runs_on_install_too_so_a_legacy_entry_never_blocks_a_write() {
-        // A legacy *file* sits exactly where the new hash *dir* must go — an
-        // install that didn't migrate first would fail to create the dir.
         let td = TempDir::new().unwrap();
         let paths = paths_under(&td);
         let c = BinaryCache::new(paths.clone());
@@ -754,9 +622,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn parallel_processes_migrating_the_same_entry_never_corrupt_it() {
-        // The real shape of the race: several `forest global run`s landing on
-        // one not-yet-migrated entry at once, on separate threads, some of
-        // them wanting different names for the same content.
         let td = TempDir::new().unwrap();
         let paths = paths_under(&td);
         let c = std::sync::Arc::new(BinaryCache::new(paths.clone()));
@@ -787,7 +652,6 @@ mod tests {
         }
         assert_eq!(entry_names(&paths, &sha).await, vec!["alias", "hello"]);
 
-        // The store settles on exactly one hash entry, no scratch left over.
         let mut rd = tokio::fs::read_dir(paths.binary_cache_dir()).await.unwrap();
         let mut top = Vec::new();
         while let Some(e) = rd.next_entry().await.unwrap() {
@@ -795,8 +659,6 @@ mod tests {
         }
         assert_eq!(top, vec![sha]);
     }
-
-    // --- finalize_streamed (DATA-505) ---
 
     async fn streamed_temp(paths: &GlobalPaths, bytes: &[u8]) -> PathBuf {
         let dir = paths.binary_cache_dir();
@@ -906,9 +768,6 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_streamed_finalize_of_identical_content_converges() {
-        // Two downloads of the same artifact racing to install it. Both must
-        // succeed and the cache must end up with the one content-addressed
-        // entry.
         let td = TempDir::new().unwrap();
         let paths = paths_under(&td);
         let c = BinaryCache::new(paths.clone());
@@ -942,8 +801,6 @@ mod tests {
         assert_eq!(entry_names(&paths, &sha).await, vec!["hello"]);
     }
 
-    // --- re_verify ---
-
     #[tokio::test]
     async fn re_verify_deletes_mismatched_entries() {
         let td = TempDir::new().unwrap();
@@ -953,7 +810,6 @@ mod tests {
         let sha = sha256_hex(bytes);
         c.finalize(bytes, &sha, "hello").await.unwrap();
 
-        // Corrupt the cached binary.
         tokio::fs::write(paths.cached_binary(&sha, "hello"), b"tampered")
             .await
             .unwrap();
@@ -990,7 +846,6 @@ mod tests {
         let bytes = b"good content";
         let sha = sha256_hex(bytes);
         c.finalize(bytes, &sha, "keep").await.unwrap();
-        // A second name under the same hash, corrupted.
         tokio::fs::write(paths.cached_binary(&sha, "drop"), b"tampered")
             .await
             .unwrap();

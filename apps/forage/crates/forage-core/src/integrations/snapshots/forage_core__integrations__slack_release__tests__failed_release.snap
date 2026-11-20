@@ -1,0 +1,81 @@
+---
+source: crates/forage-core/src/integrations/slack_release_tests.rs
+expression: case.parent()
+---
+{
+  "blocks": [
+    {
+      "text": {
+        "text": ":rotating_light: *<https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|Release failed: understory/agent-gateway>*",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "text": {
+        "text": ":memo: feat(tasks): default a task to task-general (#152)",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "*<https://forest.understory.sh/orgs/understory/projects/agent-gateway|agent-gateway>* / <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor|vivaciously-ultimate-condor>  ·  `main`  ·  `dc989e4`  ·  kjuulh  ·  <https://github.com/understory-io/agent-gateway/commit/dc989e4|source>",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "text": {
+        "text": ":white_check_mark:  Deployed to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-dev|dev>  ·  1m 12s\n:x:  Deploy to <https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#stage-prod|prod> failed  ·  1m 12s",
+        "type": "mrkdwn"
+      },
+      "type": "section"
+    },
+    {
+      "elements": [
+        {
+          "text": "2/2 stages finished  ·  took 1m 12s  ·  details in thread",
+          "type": "mrkdwn"
+        }
+      ],
+      "type": "context"
+    },
+    {
+      "elements": [
+        {
+          "action_id": "view_failure",
+          "style": "primary",
+          "text": {
+            "text": "See what failed",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway/releases/vivaciously-ultimate-condor#logs"
+        },
+        {
+          "action_id": "view_source",
+          "text": {
+            "text": "Source",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://github.com/understory-io/agent-gateway/commit/dc989e4"
+        },
+        {
+          "action_id": "view_project",
+          "text": {
+            "text": "Project",
+            "type": "plain_text"
+          },
+          "type": "button",
+          "url": "https://forest.understory.sh/orgs/understory/projects/agent-gateway"
+        }
+      ],
+      "type": "actions"
+    }
+  ],
+  "text": "Release failed: understory/agent-gateway"
+}

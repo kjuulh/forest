@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Setup git ssh, and load the public key for known hosts
 RUN \
   git config --global url."ssh://git@github.com".insteadOf https://github.com && \
   git config --global url."ssh://git@git.kjuulh.io".insteadOf https://git.kjuulh.io && \

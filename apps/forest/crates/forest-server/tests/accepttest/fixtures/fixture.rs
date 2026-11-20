@@ -18,15 +18,8 @@ use tonic::transport::Channel;
 pub struct Fixture {
     pub channel: Channel,
     pub db: sqlx::PgPool,
-    /// Mock DNS resolver injected at startup so tests can preload TXT
-    /// records (`fixture.dns.set_txt(name, value)`) without performing
-    /// real network lookups. Used by the org-allowed-domain verification
-    /// flow (DATA-252).
     pub dns: std::sync::Arc<forest_server::dns::MockDnsResolver>,
 
-    /// The server's own state, so a test can drive a component the fixture does
-    /// not run — currently `intent_coordinator::evaluate`. See its doc comment
-    /// for why the coordinator is not spawned here.
     pub state: forest_server::State,
 }
 
@@ -76,8 +69,6 @@ impl Fixture {
     }
 }
 
-/// Dedicated runtime that outlives all tests, so spawned server/scheduler tasks
-/// are never dropped when an individual `#[tokio::test]` runtime shuts down.
 static FIXTURE_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -95,9 +86,10 @@ fn base_test_config() -> forest_server::Config {
         password_secret_key: "test-password-secret-key-32chars".into(),
         access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
         refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
-        // Unset on purpose: exercises the fallback every existing deployment
-        // takes until the variable is configured.
         terraform_state_signing_key: None,
+        terraform_stale_lock_after:
+            forest_server::destinations::terraform_locks::DEFAULT_STALE_LOCK_AFTER,
+        replica_gone_after: forest_server::replicas::DEFAULT_GONE_AFTER,
         service_account_token_hash: None,
         registration_email_domain_regex: None,
         require_email_verification: false,
@@ -111,15 +103,11 @@ fn bring_up(config: forest_server::Config) -> Fixture {
         FIXTURE_RUNTIME.block_on(async move {
             dotenvy::dotenv().ok();
 
-            // Initialize tracing for test output
             let _ = tracing_subscriber::fmt()
                 .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
                 .with_test_writer()
                 .try_init();
 
-            // Inject a mock DNS resolver — tests must not perform real
-            // network DNS lookups, and HickoryResolver::from_system() also
-            // requires a usable /etc/resolv.conf which CI may not have.
             let mock_dns = std::sync::Arc::new(forest_server::dns::MockDnsResolver::new());
             let state = forest_server::State::new_with_dns(config, mock_dns.clone())
                 .await
@@ -127,7 +115,6 @@ fn bring_up(config: forest_server::Config) -> Fixture {
 
             let db = state.db.clone();
 
-            // Bind to random port
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
                 .expect("bind to random port");
@@ -136,7 +123,6 @@ fn bring_up(config: forest_server::Config) -> Fixture {
 
             let runner_manager = forest_server::runner_manager::RunnerManager::new();
 
-            // Start gRPC server on the fixture runtime so it outlives individual tests
             let cancel = tokio_util::sync::CancellationToken::new();
             {
                 let state = state.clone();
@@ -152,20 +138,24 @@ fn bring_up(config: forest_server::Config) -> Fixture {
                 });
             }
 
-            // Start scheduler as a Component
             {
                 let state = state.clone();
                 let runner_manager = runner_manager.clone();
                 let cancel = cancel.clone();
                 FIXTURE_RUNTIME.spawn(async move {
                     use notmad::Component;
-                    let sched =
-                        forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
+                    let sched = forest_server::scheduler::Scheduler::new(
+                        &state,
+                        runner_manager,
+                        false,
+                        forest_server::release_drain::ReleaseDrain::new(
+                            forest_server::release_drain::DEFAULT_DRAIN_TIMEOUT,
+                        ),
+                    );
                     sched.run(cancel).await.ok();
                 });
             }
 
-            // Wait for server to be ready
             probe_grpc(addr).await;
 
             let channel = Channel::from_shared(format!("http://{}", addr))
@@ -189,31 +179,6 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
     Ok(scoped_to_this_test(fixture))
 }
 
-/// A view of the fixture whose database handles belong to *this* test.
-///
-/// The gRPC server, the scheduler and the pool they share are built on
-/// `FIXTURE_RUNTIME` and outlive the whole suite. A test body that reaches the
-/// database directly — `fixture.db`, or `fixture.state` for a component the
-/// fixture does not run — does not: it runs on the runtime `#[tokio::test]`
-/// built for it, and that runtime is dropped the moment the test returns.
-///
-/// sqlx binds a connection's socket, and the task that returns the connection
-/// to the pool, to whichever runtime was current when it was opened. So a
-/// connection a test borrowed came back broken, and the next caller — usually
-/// the server, answering some *other* test's RPC — got `error communicating
-/// with database: A Tokio 1.x context was found, but it is being shutdown`.
-/// The slot went with it, and once enough had gone the pool ran dry: whoever
-/// asked next blocked for the 30-second acquire timeout and failed on
-/// `PoolTimedOut`. Which test that was depended on scheduling, which is why
-/// the name changed every run and no single test looked guilty.
-///
-/// Giving direct database work its own pool, created and dropped with the
-/// test, keeps the server's pool on the one runtime that owns it. The pool is
-/// lazy, so a test that never queries the database opens no connection.
-///
-/// `supersede_pending`'s module comment describes the same failure and the
-/// narrower fix it took at the time — running that module's scenarios on one
-/// runtime. That is still true of it; it no longer has to be.
 fn scoped_to_this_test(base: &Fixture) -> Fixture {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
     let db = sqlx::postgres::PgPoolOptions::new()
@@ -234,15 +199,8 @@ fn scoped_to_this_test(base: &Fixture) -> Fixture {
     }
 }
 
-/// Plaintext service-account key configured on `restricted_fixture()`.
-/// Tests pass this in an `authorization: Bearer …` header to call
-/// service-account-only RPCs (e.g. `ConfirmEmailVerification`).
 pub const RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY: &str = "test-service-account-key";
 
-/// Fixture with the registration domain regex set to `@understory\.io$`
-/// (and the email-verification flag on so startup validation passes).
-/// Shares the underlying DB with the default fixture; tests rely on
-/// UUID-suffixed identifiers for isolation.
 pub async fn restricted_fixture() -> anyhow::Result<Fixture> {
     let fixture = RESTRICTED_FIXTURE.get_or_init(|| {
         use sha2::Digest;
@@ -257,10 +215,6 @@ pub async fn restricted_fixture() -> anyhow::Result<Fixture> {
     Ok(scoped_to_this_test(fixture))
 }
 
-/// Test helper: flip `user_emails.verified` to true via direct DB
-/// access, simulating the side-effect of redeeming a verification token
-/// in forage. Acceptance tests use this when the gate
-/// `require_email_verification = true` blocks login otherwise.
 pub async fn mark_email_verified(
     db: &sqlx::PgPool,
     user_id: uuid::Uuid,

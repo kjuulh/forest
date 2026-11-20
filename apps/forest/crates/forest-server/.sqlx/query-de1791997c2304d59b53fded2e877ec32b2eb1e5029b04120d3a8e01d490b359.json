@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO forest_replicas (name, started_at, last_seen_at)\n            VALUES ($1, now(), now())\n            ON CONFLICT (name) DO UPDATE SET last_seen_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "de1791997c2304d59b53fded2e877ec32b2eb1e5029b04120d3a8e01d490b359"
+}

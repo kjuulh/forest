@@ -1,0 +1,101 @@
+use forage_ui::{ButtonVariant, Tone};
+use forage_ui::components::{Button, Card, Checkbox, ChoiceChip, Chip, Code, CsrfField, DashedEmpty, FieldLabel, Icon, StatusDot};
+use forage_ui::layouts::{ProjectSettings, Shell};
+use forage_ui::project_settings::Section;
+use crate::views::models::{destinations_href, trigger_href, triggers_href};
+props crate::views::models::TriggersPage { chrome, org, project, csrf_token, is_admin, triggers, environments, has_pipelines, trigger_form_js };
+
+<Shell chrome={chrome}>
+  <ProjectSettings org={org} project={project} section={Section::Triggers} description="Automatically release artifacts matching these rules">
+    {if !triggers.is_empty() {
+      <div class="space-y-3 mb-8">
+        {for trigger in triggers.iter() {
+          <Card class="overflow-hidden">
+            <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <StatusDot on={trigger.enabled} />
+                <span class="font-medium text-gray-900">{trigger.name}</span>
+              </div>
+              <div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+                {for (label, value) in [("branch", &trigger.branch_pattern), ("title", &trigger.title_pattern), ("author", &trigger.author_pattern), ("msg", &trigger.commit_message_pattern), ("src", &trigger.source_type_pattern)] {
+                  {if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) { <Code>{label}: {v}</Code> }}
+                }}
+                <span class="text-gray-300">→</span>
+                {for env in trigger.target_environments.iter() { <Chip tone={Tone::Blue}>{env}</Chip> }}
+                {if trigger.use_pipeline { <Chip tone={Tone::Purple}>pipeline</Chip> }}
+                {if trigger.force_release { <Chip tone={Tone::Amber}>force</Chip> }}
+              </div>
+              {if *is_admin {
+                {let href = trigger_href(org, project, &trigger.id);}
+                <div class="flex items-center gap-2 shrink-0">
+                  <Button label="Edit" variant={ButtonVariant::SmallNeutral} href={Some(href.as_str())} />
+                  <form method="post" action="{href}/toggle">
+                    <CsrfField token={csrf_token} />
+                    {if trigger.enabled {
+                      <Button label="Disable" variant={ButtonVariant::SmallNeutral} />
+                    } else {
+                      <input type="hidden" name="enabled" value="true">
+                      <Button label="Enable" variant={ButtonVariant::SmallPositive} />
+                    }}
+                  </form>
+                  <form method="post" action="{href}/delete" data-confirm={format!("Delete trigger \"{}\"?", trigger.name)}>
+                    <CsrfField token={csrf_token} />
+                    <Button label="Delete" variant={ButtonVariant::SmallDanger} />
+                  </form>
+                </div>
+              }}
+            </div>
+          </Card>
+        }}
+      </div>
+    } else {
+      <DashedEmpty>
+        <p class="mb-1">No triggers configured.</p>
+        {if *is_admin { <p class="text-sm">Create one below to automatically release matching artifacts.</p> }}
+      </DashedEmpty>
+    }}
+    {if *is_admin {
+      <Card class="p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Trigger</h2>
+        <form method="post" action={triggers_href(org, project)} class="space-y-4" id="trigger-form">
+          <CsrfField token={csrf_token} />
+          <input type="hidden" name="name" id="trigger-name-hidden" value="">
+          <p class="text-sm text-gray-500 mb-2">Add at least one filter pattern. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
+          <div class="space-y-3" id="pattern-rows"></div>
+          <button type="button" id="add-pattern-btn" class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+            <Icon name="plus" />
+            Add filter
+          </button>
+          <hr class="border-gray-200">
+          <div>
+            <FieldLabel>Target environments</FieldLabel>
+            {if !environments.is_empty() {
+              <div class="flex flex-wrap gap-2">
+                {for env in environments.iter() { <ChoiceChip name="target_environments" value={env} checked={false}>{env}</ChoiceChip> }}
+              </div>
+            } else {
+              <p class="text-sm text-gray-400">No environments configured. <a href={destinations_href(org)} class="underline">Create one first.</a></p>
+            }}
+          </div>
+          {if *has_pipelines {
+            <div>
+              <div class="mb-2"><Checkbox id="use-pipeline" name="use_pipeline" label="Use release pipeline" checked={false} strong={true} /></div>
+              <div id="pipeline-select-row" class="ml-6 hidden">
+                <p class="text-xs text-gray-500 mb-1">Releases matching this trigger will use the selected pipeline's deployment stages.</p>
+              </div>
+            </div>
+          }}
+          <Checkbox id="force-release" name="force_release" label="Force release (skip queue)" checked={false} />
+          <div class="flex items-center gap-2 text-sm text-gray-500">
+            <span>Name:</span>
+            <span id="trigger-name-preview" class="font-mono text-gray-700"></span>
+          </div>
+          <Button label="Create Trigger" />
+        </form>
+      </Card>
+    }}
+  </ProjectSettings>
+  <:scripts>
+    {if *is_admin { <script src={trigger_form_js} defer></script> }}
+  </:scripts>
+</Shell>

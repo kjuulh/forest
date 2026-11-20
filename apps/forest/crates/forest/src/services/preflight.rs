@@ -1,39 +1,5 @@
-//! Publish-readiness preflight (TASKS/028).
-//!
-//! `forest publish` runs every check here as a Phase 1 gate before any
-//! RPC happens. `forest validate` runs the same set so the standalone
-//! command stops returning a misleading "Validated 0 component(s)" on
-//! projects whose names disagree across files.
-//!
-//! Each check is a small `PreflightCheck` impl that takes a fully
-//! evaluated cue doc plus the resolved component identity and returns
-//! either `Ok(())` or a `CheckFailure` with a stable ID + actionable
-//! hint. The runner collects every failure (no short-circuit) so the
-//! user sees the full list on a single invocation instead of fixing
-//! issues one-at-a-time.
-//!
-//! Forest is intentionally agnostic to the build toolchain — checks
-//! inspect what the component DECLARED in CUE and what artifacts are
-//! on disk, never the build system that produced them. A Rust crate, a
-//! Go module, a `.exe` from MSBuild, and a hand-written `chmod +x`
-//! shell script all flow through the same gates.
-//!
-//! Phase scope today:
-//! - **Pre-build (this module):** C3 names-agree, C6 binary artifact
-//!   exists when the component declared a binary upload, C8 version is
-//!   valid semver. Run on every publish + validate.
-//! - **Post-build (deferred):** C7 `_meta/describe` produces a valid
-//!   descriptor — already enforced in-line by the publish flow; will
-//!   move here once a follow-up slice splits Phase 1 / Phase 2.
-//! - **Network (deferred):** C4 registry owner check, C9 version
-//!   already-published, C12 auth context reachable. Need either an
-//!   ambient gRPC client in the context or a separate async-aware
-//!   runner. Tracked for the slice after this one.
-
 use std::path::{Path, PathBuf};
 
-/// Inputs available to every check. Fully populated by the caller before
-/// the runner spins; checks are pure functions of this struct.
 pub struct PreflightContext {
     pub current_dir: PathBuf,
     pub doc: serde_json::Value,
@@ -42,9 +8,6 @@ pub struct PreflightContext {
     pub version: String,
 }
 
-/// A single check verdict. `id` is stable across releases — users may
-/// `grep` it from CI output and the future `--explain <id>` command
-/// looks it up here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckFailure {
     pub id: &'static str,
@@ -57,9 +20,6 @@ pub trait PreflightCheck: Sync + Send {
     fn run(&self, ctx: &PreflightContext) -> Result<(), CheckFailure>;
 }
 
-/// The default check set. Adding a new check is one new impl block plus
-/// an entry here; the framework is intentionally not configurable from
-/// outside the source so reviewers can spot new rules in diffs.
 pub fn standard_checks() -> Vec<Box<dyn PreflightCheck>> {
     vec![
         Box::new(C3NamesAgree),
@@ -68,9 +28,6 @@ pub fn standard_checks() -> Vec<Box<dyn PreflightCheck>> {
     ]
 }
 
-/// Run every check, collect every failure, and return them all together.
-/// Critical property: a check that errors does NOT abort the runner —
-/// the user gets the full punch list.
 pub fn run_checks(
     ctx: &PreflightContext,
     checks: &[Box<dyn PreflightCheck>],
@@ -84,14 +41,11 @@ pub fn run_checks(
     if failures.is_empty() {
         Ok(())
     } else {
-        // Stable sort by ID so output is deterministic across runs.
         failures.sort_by(|a, b| a.id.cmp(b.id));
         Err(failures)
     }
 }
 
-/// User-facing rendering. Each failure becomes a multi-line block with
-/// the ID, the violation, and a fix hint.
 pub fn render_failures(failures: &[CheckFailure]) -> String {
     let mut out = format!(
         "forest publish: preflight failed ({} issue{})\n\n",
@@ -108,17 +62,6 @@ pub fn render_failures(failures: &[CheckFailure]) -> String {
     out
 }
 
-// ============================================================
-// Individual checks
-// ============================================================
-
-/// C3 — `project.name` agrees with `forest.component.name`.
-///
-/// Cue itself rejects conflicting concrete values for the same path,
-/// so a hard mismatch fails earlier. This check catches the subtler
-/// case where the two paths are independent (project.name in
-/// forest.cue, component.name in forest.component.cue) and the user
-/// has set them to different values by accident.
 pub struct C3NamesAgree;
 impl PreflightCheck for C3NamesAgree {
     fn id(&self) -> &'static str {
@@ -145,30 +88,12 @@ impl PreflightCheck for C3NamesAgree {
     }
 }
 
-/// C6 — when the component DECLARED a binary upload, a built artifact
-/// for the current platform must exist on disk.
-///
-/// Language-agnostic. The check looks at the project's declared shape
-/// (`forest.component.upload.architectures` is non-empty → the project
-/// promised a binary) and verifies the artifact was actually produced
-/// by whatever build tooling the user runs (cargo, go build,
-/// dotnet publish, make, a shell script — forest doesn't care).
-///
-/// This closes the original debrief bug: a binary-shaped publish where
-/// the build silently produced nothing usable would, before this check,
-/// fall through to a CUE-only `[files]` shape and ship a ghost version.
-/// Now it refuses with a clear "you promised a binary; none was built"
-/// error.
-///
-/// Skipped when the component declares it's NOT a binary upload (CUE
-/// libraries, Deno-source components, external URL-hosted tools, etc).
 pub struct C6BinaryArtifactExists;
 impl PreflightCheck for C6BinaryArtifactExists {
     fn id(&self) -> &'static str {
         "C6"
     }
     fn run(&self, ctx: &PreflightContext) -> Result<(), CheckFailure> {
-        // Non-binary upload types explicitly opt out of this check.
         let upload_type = ctx
             .doc
             .pointer("/forest/component/upload/type")
@@ -177,10 +102,6 @@ impl PreflightCheck for C6BinaryArtifactExists {
             return Ok(());
         }
 
-        // The "I produce a binary" signal: at least one architecture
-        // declared under upload.architectures. Projects that don't
-        // populate this are CUE-only / source-only and don't owe us
-        // an artifact.
         let architectures = ctx
             .doc
             .pointer("/forest/component/upload/architectures")
@@ -190,13 +111,6 @@ impl PreflightCheck for C6BinaryArtifactExists {
             return Ok(());
         }
 
-        // The project promised a binary. This must apply *exactly* the
-        // resolution the publish flow uses, or the gate is worse than
-        // useless: DATA-654 — with `resolve_binary` here, a stray
-        // `target/debug/<name>` satisfied C6 while publish (which only
-        // reads `.forest/component/output/`) found nothing, so the
-        // publish fell through to a CUE-only shape and shipped the ghost
-        // version this check exists to prevent.
         if crate::services::component_binary::resolve_publishable_binary(
             &ctx.current_dir,
             &ctx.component_name,
@@ -230,7 +144,6 @@ impl PreflightCheck for C6BinaryArtifactExists {
     }
 }
 
-/// C8 — the declared version parses as semver.
 pub struct C8SemverValid;
 impl PreflightCheck for C8SemverValid {
     fn id(&self) -> &'static str {
@@ -250,15 +163,6 @@ impl PreflightCheck for C8SemverValid {
     }
 }
 
-// ============================================================
-// Helpers for `forest publish` / `forest validate`
-// ============================================================
-
-/// Build a [`PreflightContext`] by re-evaluating the cwd's CUE files.
-///
-/// Kept in this module so both publish and validate share one call path.
-/// The cue invocation mirrors what publish does today verbatim, so any
-/// project that publishes successfully can also be preflighted.
 pub async fn build_context(current_dir: &Path) -> anyhow::Result<PreflightContext> {
     let mut cue_args = vec![
         "export".to_string(),
@@ -341,8 +245,6 @@ mod tests {
         }
     }
 
-    // --- C3 -------------------------------------------------------
-
     #[test]
     fn c3_passes_when_names_agree() {
         let doc = serde_json::json!({
@@ -366,14 +268,11 @@ mod tests {
 
     #[test]
     fn c3_passes_when_only_one_is_set() {
-        // CUE-only library declares no project.name — that's not a mismatch.
         let doc = serde_json::json!({
             "forest": { "component": { "name": "widget" } },
         });
         assert!(C3NamesAgree.run(&ctx_with(doc, "0.1.0")).is_ok());
     }
-
-    // --- C6 -------------------------------------------------------
 
     #[test]
     fn c6_skips_for_explicit_external() {
@@ -403,8 +302,6 @@ mod tests {
 
     #[test]
     fn c6_skips_when_no_binary_declared() {
-        // CUE-only library: no upload.architectures map, no upload.type
-        // either. Forest doesn't owe the project a binary, so skip.
         let doc = serde_json::json!({
             "forest": { "component": { "name": "widget" } },
         });
@@ -413,8 +310,6 @@ mod tests {
 
     #[test]
     fn c6_skips_when_architectures_is_empty() {
-        // Defensive: an explicitly empty architectures map is the same
-        // signal as "no binary upload" — don't demand an artifact.
         let doc = serde_json::json!({
             "forest": {
                 "component": {
@@ -428,9 +323,6 @@ mod tests {
 
     #[test]
     fn c6_fails_when_binary_declared_but_missing() {
-        // Project promises a binary for darwin/arm64. The test ctx
-        // points at a tmpdir with no built artifact anywhere, so
-        // resolve_binary returns None — failure expected.
         let doc = serde_json::json!({
             "forest": {
                 "component": {
@@ -452,18 +344,9 @@ mod tests {
             "expected component name in message: {}",
             err.message
         );
-        // The hint must NOT prescribe a specific build tool — the
-        // language-agnostic message lists several as examples but
-        // doesn't single out one.
         assert!(err.hint.contains("build-tool agnostic"));
     }
 
-    /// DATA-654. C6 used to call `resolve_binary`, which walks up to the
-    /// cargo workspace root and probes `target/debug/<name>`. A stale debug
-    /// build sitting there satisfied the gate, publish then found nothing in
-    /// `.forest/component/output/` and — before this change — uploaded the
-    /// decoy; after it, publish would refuse *after* the preflight had passed.
-    /// Either way C6 has to be the one that says no, and say why.
     #[test]
     fn c6_is_not_satisfied_by_a_cargo_target_binary() {
         let tmp = tempfile::tempdir().unwrap();
@@ -499,8 +382,6 @@ mod tests {
         );
     }
 
-    // --- C8 -------------------------------------------------------
-
     #[test]
     fn c8_accepts_basic_semver() {
         let doc = serde_json::json!({});
@@ -534,9 +415,6 @@ mod tests {
         }
     }
 
-    // --- Runner ---------------------------------------------------
-
-    /// Test-only check that always fails with a configurable id.
     struct AlwaysFail(&'static str);
     impl PreflightCheck for AlwaysFail {
         fn id(&self) -> &'static str {
@@ -551,7 +429,6 @@ mod tests {
         }
     }
 
-    /// Test-only check that always passes.
     struct AlwaysPass(&'static str);
     impl PreflightCheck for AlwaysPass {
         fn id(&self) -> &'static str {
@@ -577,7 +454,6 @@ mod tests {
         let err = run_checks(&empty_ctx(), &checks).unwrap_err();
         assert_eq!(err.len(), 3);
         let ids: Vec<&str> = err.iter().map(|f| f.id).collect();
-        // Sorted by ID — stable across runs.
         assert_eq!(ids, vec!["X1", "X3", "X4"]);
     }
 
@@ -634,8 +510,6 @@ mod tests {
 
     #[test]
     fn standard_check_set_is_non_empty() {
-        // Guard against accidental removal of all standard checks in
-        // a future refactor.
         assert!(!standard_checks().is_empty());
     }
 }

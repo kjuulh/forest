@@ -1,11 +1,3 @@
-//! The `forest-sdk` component wrapper shared by the per-toolchain build
-//! components (`forest-contrib/build-rust`, `build-go`, `build-docker`).
-//!
-//! Each build component is a thin binary: `fn main() {
-//! forest_build_core::component::serve(Toolchain::Rust) }`. This module
-//! provides the `ComponentService` that exposes a single streaming
-//! `commands/build` method and declares the toolchain's required tools.
-
 use forest_sdk::{
     CallContext, ComponentService, Error, MethodDescriptor, MethodKind, RequiredTool,
 };
@@ -14,8 +6,6 @@ use crate::Toolchain;
 
 const BUILD_METHOD: &str = "commands/build";
 
-/// A build component for one toolchain. Spec/input are ignored — the build
-/// inputs come from the project manifest at `context.work_dir`.
 pub struct BuildComponent {
     toolchain: Toolchain,
 }
@@ -59,8 +49,6 @@ impl ComponentService<serde_json::Value> for BuildComponent {
             }
             let summary = crate::run_build(toolchain, std::path::Path::new(&work_dir))
                 .await
-                // anyhow::Error doesn't impl std::error::Error; carry the full
-                // chain as a string so the dispatcher surfaces it.
                 .map_err(|e| Error::Handler(format!("{e:#}").into()))?;
             serde_json::to_value(summary).map_err(Error::from)
         }
@@ -104,8 +92,6 @@ impl ComponentService<serde_json::Value> for BuildComponent {
     }
 }
 
-/// Entry point for a build component binary. Drives the forest component
-/// protocol (`_meta/describe`, `commands/build`, …) over stdin/stdout.
 pub fn serve(toolchain: Toolchain) {
     forest_sdk::run_once(&BuildComponent::new(toolchain));
 }

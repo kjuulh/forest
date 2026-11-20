@@ -42,7 +42,6 @@ impl InitCommand {
         let org = &self.organisation;
         let pkg = name.replace('-', "_");
 
-        // cue.mod/module.cue
         let cue_mod_dir = output_dir.join("cue.mod");
         tokio::fs::create_dir_all(&cue_mod_dir).await?;
         write_file(
@@ -65,7 +64,6 @@ deps: {{
         )
         .await?;
 
-        // forest.component.cue
         write_file(
             &output_dir.join("forest.component.cue"),
             &format!(
@@ -123,7 +121,6 @@ import "forest.sh/forest/sdk@v0"
         )
         .await?;
 
-        // forest.cue
         write_file(
             &output_dir.join("forest.cue"),
             &format!(
@@ -160,11 +157,9 @@ forest: component: sdk.#ForestComponent & {{
         )
         .await?;
 
-        // Cargo.toml
         let crate_dir = output_dir.join("crates").join(name);
         tokio::fs::create_dir_all(crate_dir.join("src")).await?;
 
-        // Detect if we're inside the forest workspace (dev mode) or standalone
         let forest_sdk_dep = if std::path::Path::new("../../crates/forest-sdk/Cargo.toml").exists()
         {
             r#"forest-sdk = { path = "../../../../crates/forest-sdk" }"#
@@ -189,7 +184,6 @@ serde_json = "1"
         )
         .await?;
 
-        // src/main.rs
         write_file(
             &crate_dir.join("src").join("main.rs"),
             r#"#[allow(dead_code)]
@@ -252,7 +246,6 @@ fn main() {
         )
         .await?;
 
-        // Placeholder forestgen.rs (needs `forest components generate` to populate)
         write_file(
             &crate_dir.join("src").join("forestgen.rs"),
             "// Run `forest components generate --output .` to generate this file.\n",

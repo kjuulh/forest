@@ -1,0 +1,9 @@
+---
+source: crates/forage-ui/tests/integrations.rs
+expression: out
+---
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/acme/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/acme/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/acme/settings/integrations" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Integrations</a></li><li><a href="/orgs/acme/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/acme/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/acme/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/acme/settings/developers" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Developer settings</a></li>
+</ul>
+</nav>

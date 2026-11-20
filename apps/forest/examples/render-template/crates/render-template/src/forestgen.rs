@@ -1,6 +1,3 @@
-// Hand-mirrored from forest.component.cue. Will be replaced by output of
-// `forest components build` once we wire codegen into the toolchain;
-// kept manually in sync until then.
 #![allow(clippy::upper_case_acronyms)]
 
 use std::collections::HashMap;
@@ -24,9 +21,6 @@ pub struct RenderTemplateOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Walk a source directory, interpolate `{{var}}` placeholders in
-    /// file contents and path components, write the rendered tree to a
-    /// destination directory.
     fn render_template(
         &self,
         spec: &Spec,

@@ -18,3 +18,4 @@ tokio.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+insta = { version = "1", features = ["json"] }

@@ -1,0 +1,22 @@
+---
+source: crates/forage-ui/tests/layouts.rs
+expression: out
+---
+<section class="app-container pt-12">
+<h1 class="text-2xl font-bold mb-8">Settings</h1>
+<nav class="md:hidden -mx-4 px-4 mb-6 overflow-x-auto scrollbar-none" aria-label="Organisation settings sections">
+<ul class="flex gap-1.5 w-max">
+<li><a href="/orgs/acme/settings" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/acme/settings/members" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/acme/settings/integrations" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/acme/settings/access" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/acme/settings/visibility" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/acme/settings/rules" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/acme/settings/developers" aria-current="page" class="block whitespace-nowrap px-3 py-1.5 text-sm rounded-md border bg-gray-100 border-gray-300 text-gray-900 font-medium">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex gap-8">
+<nav class="w-48 shrink-0 hidden md:block" aria-label="Organisation settings sections">
+<ul class="space-y-0.5">
+<li><a href="/orgs/acme/settings" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">General</a></li><li><a href="/orgs/acme/settings/members" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Members</a></li><li><a href="/orgs/acme/settings/integrations" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Integrations</a></li><li><a href="/orgs/acme/settings/access" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Access</a></li><li><a href="/orgs/acme/settings/visibility" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Visibility</a></li><li><a href="/orgs/acme/settings/rules" class="block px-3 py-1.5 text-sm rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">Rules</a></li><li><a href="/orgs/acme/settings/developers" aria-current="page" class="block px-3 py-1.5 text-sm rounded-md bg-gray-100 text-gray-900 font-medium">Developer settings</a></li>
+</ul>
+</nav>
+<div class="flex-1 min-w-0">
+<p>content</p>
+</div>
+</div>
+</section>

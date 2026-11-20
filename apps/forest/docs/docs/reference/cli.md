@@ -39,6 +39,8 @@ forest add <COMPONENT> [--path <PATH>]
 | `COMPONENT` | Component reference: `org/name` or `org/name@version` |
 | `--path` | Use a local path instead of registry version |
 
+Without `@version` it writes the highest stable published version. `@version` is written as given and checked only when a command next loads the project. `forest add` writes `forest.cue` (and a `cue.mod/module.cue` entry), not the lock. A binary download records its version/digest in `forest.lock`; since v0.3.17, forest also records an already-cached binary when the project first resolves it. File/template-only registry dependencies have no version/digest lock.
+
 **Examples:**
 
 ```bash
@@ -237,8 +239,13 @@ forest release annotate [OPTIONS]
 Execute the release to destinations.
 
 ```bash
-forest release release [OPTIONS]
+forest release release [SLUG] [OPTIONS]
 ```
+
+Select an existing artifact by its annotation slug or `--artifact-id <artifact-uuid>`.
+Since v0.3.17, `--ref` / `-r` are rejected during argument parsing, before release
+side effects; older CLIs accepted but ignored them. A git branch is not an
+artifact identity. This also applies to the `forest release` shorthand.
 
 | Option | Description |
 |--------|-------------|
@@ -246,40 +253,80 @@ forest release release [OPTIONS]
 | `--project`, `-p` | Project name |
 | `--environment`, `-e`, `--env` | Target environment |
 | `--destination`, `-d` | Specific destination(s) (repeatable) |
-| `--ref`, `-r` | Artifact reference |
 | `--artifact-id`, `--id` | Artifact ID |
 | `--force` | Cancel queued releases, jump to front |
 | `--pipeline` | Use the project's release pipeline |
 | `--no-wait` | Don't stream progress |
 
+The existing `release release --pipeline` path still selects or prompts for an
+environment before dispatch. Pass `-e <env>` for noninteractive use; the pipeline
+ignores that environment filter and can include prod. This prompt limitation
+does not change `create`'s target-only flag contract below.
+
 ### `forest release create`
 
-Combined command: prepare, annotate (without triggers), and release.
+**Since v0.3.17.** Released v0.3.16 does not have
+this routing. Check `forest release create --help`: newer source makes
+`--environment` optional. A local build may still report `0.3.16`.
+
+Prepare and annotate, then let the project's triggers decide. **Without a
+target, triggers remain enabled and may deploy through the whole pipeline,
+including prod.** With `--environment` or `--destination`, it releases directly
+instead and skips triggers, unless `--skip-commit` is supplied. With `--pipeline`,
+the whole pipeline runs regardless of the target environment.
 
 ```bash
+forest release create [OPTIONS]
 forest release create --environment <ENV> [OPTIONS]
 ```
 
+| Mode | Triggers | Releases |
+|------|----------|----------|
+| no `--environment` / `--destination` | evaluated | whatever a matching trigger starts, usually the project's pipeline |
+| `--environment` or `--destination` | skipped, so they can't race the direct release | that target |
+| either, plus `--skip-commit` | evaluated | whatever a matching trigger starts |
+
+Prefer trigger-to-pipeline release for environment ordering and plan approval.
+Inspect triggers, the whole pipeline and policies first. Released v0.3.16
+servers lack pipeline branch-restriction checks, and their soak can count plans
+or pass with missing source success. Server source since v0.3.17 closes those gaps
+([Policies](../concepts/policies.md)); updating only the CLI does not.
+Review branch, artifact and dev elapsed time before approving prod.
+Anchored trigger filters are not authorization for
+an explicit pipeline start. Never route around a denied policy with `-d`.
+
+An annotation's default source type is detected from CI or falls back to `local`.
+Whether it releases depends on the actual trigger filters, not the machine
+that created it. No matching trigger means `show <slug>` finds no release intent.
+
+On v0.3.16 and older, `create` requires an environment,
+skips triggers and `--skip-commit` releases nothing. For a version-independent
+pipeline path, use `forest release prepare` then `forest release annotate
+--source-type ci`. For an annotation without trigger dispatch, use
+`annotate --annotation-only` after prepare; there is no `--no-release`.
+
 | Option | Description |
 |--------|-------------|
-| `--environment`, `-e`, `--env` | Target environment (required) |
+| `--environment`, `-e`, `--env` | Release to this environment directly |
+| `--destination`, `-d` | Release to these destinations directly (repeatable) |
+| `--skip-commit` | Annotate for the triggers even when a target is given |
+| `--pipeline`, `--force`, `--no-wait`, `--no-health` | Apply to the direct release, so they need `--environment` or `--destination` |
 | `--title` | Release title (default: latest git commit subject) |
 | `--description` | Release description (default: git commit body) |
 | `--organisation`, `-o` | Organisation (auto-detected from `forest.cue`) |
 | `--project`, `-p` | Project (auto-detected from `forest.cue`) |
 | `--commit-sha` | Commit SHA (auto-detected from HEAD) |
+| `--source-type` | Source type the triggers match on (default: detected CI, else `local`) |
 | `--set` | Override config values (same as `prepare --set`). Overrides are recorded in annotation metadata. |
 
-**CI Example:**
+**CI example** (after the tested image is pushed under an immutable tag):
 
 ```bash
-# Build image, get tag, release with pinned tag
-IMAGE_TAG=$(git rev-parse --short HEAD)
-docker build -t my-registry/my-app:$IMAGE_TAG .
-docker push my-registry/my-app:$IMAGE_TAG
-
-forest release create --env dev --set kjuulh/service.tag=$IMAGE_TAG
+forest release prepare --set kjuulh/service.tag="$IMAGE_TAG"
+forest release annotate --source-type ci --detect
 ```
+
+Do not also pass an environment to the release action: that can race the trigger.
 
 ---
 
@@ -508,7 +555,7 @@ Configuring where the browser opens (web flow):
 Listen for and manage notifications.
 
 ```bash
-forest notifications subscribe [OPTIONS]
+forest notifications listen [--organisation <ORG>] [--project <PROJECT>]
 ```
 
 ---
@@ -584,6 +631,80 @@ with `FOREST_GLOBAL_NO_FETCH=1`, so a forest shim reports "not cached yet" (exit
 queued and retried from a `precmd` hook (zsh) / `PROMPT_COMMAND` (bash) /
 `fish_prompt` event (fish). Cached tools and non-forest commands take the ordinary
 path — one exec, `eval` the output.
+
+---
+
+## `forest self`
+
+```bash
+forest self check [--prerelease]        # exit 1 when a newer release exists
+forest self update [--prerelease]       # latest stable, or highest including prereleases
+forest self update <version>            # exactly that release, older ones included
+```
+
+Since v0.3.17 (check: `forest self update --help` lists `--prerelease`):
+
+- Without a version, `update` never replaces a newer binary with an older
+  release. `--prerelease` applies to one run; `FOREST_PRERELEASE=1` applies it
+  to `update`, `check` and the update notice while it is set. Nothing is saved.
+- A version must be SemVer (`v` optional); it is also the way back to stable.
+- The archive's `.sha256` record must name and match it, and the new binary's
+  `forest --version` must equal the requested version, before it replaces the
+  running one.
+- `forest --version` prints `(commit <sha>)` for release builds and
+  `(local build)` from source.
+
+Cutting a forest prerelease is described in `RELEASING.md` at the repo root.
+
+## `forest global add --prerelease`
+
+Follow one tool's prereleases instead of its stable releases.
+
+```bash
+forest global add understory/fungus --prerelease   # highest SemVer, prerelease or stable
+forest global update                               # keeps following prereleases for it
+forest global add understory/fungus                # back to the latest stable release
+forest global run understory/fungus@1.3.0-rc.1 -- --version   # one build, once
+```
+
+Behaviour:
+
+- Without `--prerelease`, `add` and `update` never select a prerelease. A tool
+  with no stable release yet is refused with the newest prerelease named, rather
+  than installed, and `update` never moves an entry onto a prerelease.
+- With it, `add` installs the highest version by SemVer precedence:
+  `1.3.0-alpha.10` beats `1.3.0-alpha.2`, `1.3.0` beats `1.3.0-rc.2`, and build
+  metadata (`1.3.0+build.5`) is not a prerelease. The choice is stored as
+  `prerelease: true` on that entry in `~/.config/forest/forest.cue`, so `forest
+  global update` and the daily background update follow it. `forest global list`
+  shows such a tool as `[prerelease]`.
+- Running `add` again without the flag returns the tool to stable and clears the
+  opt-in; if the tool has no stable release, the opt-in is left as it was.
+  Hand-set `env` overrides on the entry are kept either way; `--as` must be
+  passed again.
+- The opt-in is per tool. Org catalogue subscriptions stay on stable releases,
+  and a per-tool entry shadows the catalogue entry as it always has.
+- `FOREST_PRERELEASE=1` in the environment follows prereleases for every tool
+  that is not pinned, catalogue tools included, for as long as it is set:
+  `add` without the flag, `update` and the background update, and
+  `run`/`which`/`warm` resolution. It is not written to `forest.cue`. Unset it
+  (or set `0`) and the next `update` returns per-tool entries to stable;
+  catalogue tools resolve to stable straight away. Catalogue pins, bans and
+  `@<version>` pins still win. A tool with only prereleases is not in the org
+  catalogue, so it still has to be added per tool. Put it in `~/.zshenv` (or
+  your shell's equivalent), not only `~/.zshrc`, so shims run from scripts and
+  the background update see it too.
+- `@<version>` is an exact pin, prerelease or not, and `update` holds it. It
+  cannot be combined with `--prerelease`, nor can a whole-org `add <org>`.
+- `forest global run`/`which` with `<org>/<name>@<version>` runs that build
+  without changing the installed selection.
+- Overwrite of a currently published version, prerelease included, is refused.
+  Ship a new build as a new prerelease number (`1.3.0-rc.2`). Admin unpublish
+  permits reuse of the number, so exact pins control selection, not lifetime
+  content identity. The lockfile keeps the digest first fetched and refuses
+  replacement bytes on a later fetch. A warm cached binary can continue running
+  without an online revocation check.
+  Since v0.3.17 it also covers forest itself; see [`forest self`](#forest-self).
 
 ---
 

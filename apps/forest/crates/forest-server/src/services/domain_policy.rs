@@ -1,9 +1,3 @@
-//! Pure-core validation for org-allowed email domains (DATA-252).
-//!
-//! No I/O, no DB, no clock. Used both at write-time (admin adds a domain
-//! to an org's allowlist) and at decision-time (joining a user — re-checked
-//! so an expanded denylist retroactively blocks lingering rows).
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AllowedDomainError {
     #[error("domain cannot be empty")]
@@ -14,11 +8,6 @@ pub enum AllowedDomainError {
     TooLong,
 }
 
-/// Trim, lowercase, strip a leading '@', validate hostname syntax. Returns
-/// the canonical form to store. No free-mail filtering — DNS verification
-/// is the security boundary: even if an admin types `gmail.com`, the row
-/// grants nothing until a TXT record they can never publish proves they
-/// own the domain.
 pub fn normalize_domain(raw: &str) -> Result<String, AllowedDomainError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -41,10 +30,6 @@ pub fn normalize_domain(raw: &str) -> Result<String, AllowedDomainError> {
     Ok(lower)
 }
 
-/// Extract the lowercased domain part of an email. Returns None on any
-/// malformed input. Intentionally permissive (no full RFC 5321 grammar —
-/// the caller is operating on emails already accepted by the rest of the
-/// system).
 pub fn extract_domain(email: &str) -> Option<String> {
     let (_, domain) = email.trim().rsplit_once('@')?;
     if domain.is_empty() {
@@ -53,9 +38,6 @@ pub fn extract_domain(email: &str) -> Option<String> {
     Some(domain.to_ascii_lowercase())
 }
 
-/// Hostname syntax: 1+ labels separated by '.', each 1–63 chars of
-/// [a-z0-9-], not starting/ending with '-'. Requires at least one dot
-/// (no bare TLDs).
 fn is_valid_hostname(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -81,16 +63,10 @@ fn is_valid_hostname(s: &str) -> bool {
     true
 }
 
-/// Policy values written to organisation_allowed_domains.policy.
-///
-/// Kept as a free string in SQL (consistent with how org member `role` is
-/// modeled) but constrained via this enum at all service boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllowedDomainPolicy {
     AutoInviteAnyVerified,
     ManualOnly,
-    /// v1.1 only — silent JIT for OAuth-verified emails at DNS-verified
-    /// domains. v1 service code rejects this with `PolicyNotYetSupported`.
     AutoJoinOauth,
 }
 
@@ -136,10 +112,6 @@ mod tests {
 
     #[test]
     fn normalize_accepts_free_mail_domains() {
-        // No client-side denylist: DNS verification is the security
-        // boundary, not domain identity. An admin who types `gmail.com`
-        // gets an entry that grants nothing until a TXT proof they can
-        // never publish appears.
         assert_eq!(normalize_domain("gmail.com").unwrap(), "gmail.com");
         assert_eq!(normalize_domain("outlook.com").unwrap(), "outlook.com");
     }
@@ -191,9 +163,6 @@ mod tests {
 
     #[test]
     fn extract_domain_uses_rightmost_at() {
-        // Permissive: rightmost @ wins. Inputs with multiple '@' are
-        // pre-screened by add_user_email upstream; we still need a defined
-        // behavior here.
         assert_eq!(
             extract_domain("weird@local@example.com"),
             Some("example.com".into())

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run the full E2E test suite in Docker.
-# Usage: ./tests/e2e/run-e2e.sh
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -25,10 +22,8 @@ cd tests/e2e
 docker compose down -v 2>/dev/null || true
 docker compose build
 
-# Start infra + server in background
 docker compose up -d postgres nats minio minio-init forest-server
 
-# Wait for server to be healthy
 echo "Waiting for forest-server to be healthy..."
 for i in $(seq 1 60); do
     if docker compose exec -T forest-server curl -sf http://localhost:4042/v2/ > /dev/null 2>&1; then
@@ -45,7 +40,6 @@ for i in $(seq 1 60); do
     sleep 1
 done
 
-# Run the e2e test container
 echo ""
 echo "=== Running E2E tests ==="
 docker compose run --rm e2e

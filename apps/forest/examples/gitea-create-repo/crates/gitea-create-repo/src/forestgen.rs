@@ -1,4 +1,3 @@
-// Hand-mirrored from forest.component.cue; replaced by codegen output once wired.
 #![allow(clippy::upper_case_acronyms)]
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -38,7 +37,6 @@ pub struct GiteaCreateRepoOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Create a repository on a Gitea instance via the REST API.
     fn gitea_create_repo(
         &self,
         spec: &Spec,

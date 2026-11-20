@@ -1,9 +1,3 @@
-//! Acceptance tests for the registration email-domain regex (018).
-//!
-//! Runs against `restricted_fixture()` which boots a second forest-server
-//! instance with `FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX=@understory\.io$`
-//! and `FOREST_REQUIRE_EMAIL_VERIFICATION=true`.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -28,10 +22,6 @@ fn unique_evil_email() -> String {
     format!("attacker-{}@evil.com", uuid::Uuid::now_v7())
 }
 
-/// Register, mark email verified directly in the DB (simulating
-/// what forage's verify-email flow does), then log in. Returns the
-/// access token and user_id. Used by tests that need a logged-in user
-/// when `require_email_verification = true`.
 async fn register_verified_login(fixture: &Fixture, email: &str) -> (String, String) {
     let username = unique_username();
     let mut users = fixture.users();
@@ -80,8 +70,6 @@ async fn register_with_allowed_domain_succeeds() {
         .expect("register with allowed domain")
         .into_inner();
 
-    // With FOREST_REQUIRE_EMAIL_VERIFICATION=true, register creates the
-    // user but withholds tokens until the email is verified.
     assert!(resp.tokens.is_none());
     assert!(resp.email_verification_required);
     assert!(resp.user.is_some());
@@ -103,7 +91,6 @@ async fn register_with_disallowed_domain_is_permission_denied() {
 
     assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err:?}");
 
-    // Error message must not leak the configured regex pattern.
     let msg = err.message();
     assert!(
         !msg.contains("understory"),
@@ -133,8 +120,6 @@ async fn add_email_with_disallowed_domain_is_blocked() {
     let (token, user_id) = register_verified_login(&fixture, &unique_understory_email()).await;
     let mut users = fixture.users();
 
-    // The side-channel must close: a logged-in user cannot add a
-    // disallowed-domain email.
     let err = users
         .add_email(authed_request(
             &token,

@@ -1,0 +1,8 @@
+use crate::components::{PillNav, SideNav};
+use crate::org_settings::{OrgSection, nav_items};
+component SettingsSidebar(org: &str, section: OrgSection = OrgSection::General) {
+<SideNav items={nav_items(org, *section).as_slice()} label="Organisation settings sections" />
+}
+component SettingsPills(org: &str, section: OrgSection = OrgSection::General) {
+<PillNav items={nav_items(org, *section).as_slice()} label="Organisation settings sections" />
+}

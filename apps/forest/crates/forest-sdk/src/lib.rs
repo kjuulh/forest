@@ -12,10 +12,8 @@ pub mod error {
     }
 }
 
-/// Protocol version supported by this SDK.
 pub const PROTOCOL_VERSION: &str = "1.1";
 
-/// Execution context provided by the Forest runtime when invoking a component.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct CallContext {
     #[serde(default)]
@@ -32,10 +30,6 @@ pub struct CallContext {
     pub dry_run: bool,
 }
 
-/// Dispatch interface for a component, generic over the spec type `S`.
-///
-/// All handler methods are async to support real I/O (HTTP calls, kubectl, etc.)
-/// inside component implementations.
 pub trait ComponentService<S>: Send + Sync {
     fn call(
         &self,
@@ -47,31 +41,21 @@ pub trait ComponentService<S>: Send + Sync {
 
     fn methods(&self) -> Vec<MethodDescriptor>;
 
-    /// Template rendering configuration. Override to customize how
-    /// Forest renders the component's template files (skip, rename, extra vars).
     fn template_config(&self) -> TemplateConfig {
         TemplateConfig::default()
     }
 
-    /// Names of methods that Forest should invoke in *passthrough* mode —
-    /// live child stdio and no execution timeout — for long-running toolchain
-    /// work like `cargo build`. Default: none. DATA-312.
+    /// Listed methods run with live child stdio and no execution timeout.
     fn streaming_methods(&self) -> Vec<String> {
         Vec::new()
     }
 
-    /// External binaries this component shells out to at runtime (e.g. a build
-    /// component needs `cargo`). Forest verifies each is on PATH before
-    /// dispatching and fails up front with an actionable diagnostic. Default:
-    /// none. DATA-312.
+    /// Forest checks each is on PATH before dispatching and fails up front otherwise.
     fn requires(&self) -> Vec<RequiredTool> {
         Vec::new()
     }
 }
 
-/// A binary a component requires on PATH at runtime, surfaced via
-/// `_meta/describe` so Forest can verify it before dispatching. Mirrors the
-/// CUE `#ForestRequiredTool`. DATA-312.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RequiredTool {
     pub name: String,
@@ -90,33 +74,22 @@ pub enum MethodKind {
     Hook { topic: String },
 }
 
-/// Template rendering configuration returned by `_meta/template_config`.
-/// Controls how Forest renders the component's template files.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TemplateConfig {
-    /// File patterns to skip (glob syntax, e.g., "*.bak", "README.md")
     #[serde(default)]
     pub skip: Vec<String>,
-    /// File renames: source name → target name (supports {{name}} substitution)
     #[serde(default)]
     pub rename: std::collections::HashMap<String, String>,
-    /// Extra template variables injected alongside the config
     #[serde(default)]
     pub vars: std::collections::HashMap<String, serde_json::Value>,
 }
 
-/// Response for `_meta/describe`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComponentDescriptor {
     pub protocol_version: String,
     pub methods: Vec<MethodInfo>,
-    /// Optional tool facet — set when the component declares itself
-    /// installable via `forest global …` (TASKS/018-global-tools.md §1a.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolFacet>,
-    /// External binaries this component requires on PATH (DATA-312). Empty for
-    /// components that declare none; deserialises as empty from older
-    /// descriptors that predate the field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<RequiredTool>,
 }
@@ -129,13 +102,10 @@ pub struct MethodInfo {
     pub topic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Invoke this method in passthrough mode (live stdio, no timeout).
-    /// DATA-312. Defaults false for backward compatibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub streaming: bool,
 }
 
-/// Tool facet returned by `_meta/describe` for components that double as CLI tools.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolFacet {
     pub name: String,
@@ -149,17 +119,6 @@ fn default_true() -> bool {
     true
 }
 
-/// Run a single invocation against a component service, then exit.
-///
-/// Reads the method from CLI args and the payload from either a CLI
-/// argument or stdin:
-///
-/// ```text
-/// # Payload via stdin:
-/// echo '{"spec": {...}, "input": {...}}' | ./component <method>
-/// ```
-///
-/// Handles `_meta/describe` automatically (no payload required).
 pub fn run_once<S: serde::de::DeserializeOwned, CS: ComponentService<S>>(service: &CS) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(run_once_async(service));
@@ -178,7 +137,6 @@ async fn run_once_async<S: serde::de::DeserializeOwned, CS: ComponentService<S>>
 
     let method = &args[1];
 
-    // Handle meta-methods that don't require a payload
     if method == "_meta/describe" {
         let descriptor = build_descriptor(service);
         match serde_json::to_string_pretty(&descriptor) {
@@ -284,7 +242,6 @@ fn build_descriptor<S, CS: ComponentService<S>>(service: &CS) -> ComponentDescri
 struct Payload {
     spec: serde_json::Value,
     input: Option<serde_json::Value>,
-    /// Execution context (optional for backward compatibility).
     #[serde(default)]
     context: Option<CallContext>,
 }

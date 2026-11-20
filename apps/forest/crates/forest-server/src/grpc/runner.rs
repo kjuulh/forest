@@ -5,6 +5,7 @@ use forest_models::ReleaseStatus;
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tonic::Response;
 use uuid::Uuid;
 
@@ -26,6 +27,7 @@ use crate::{
 pub struct RunnerServer {
     pub state: State,
     pub runner_manager: RunnerManager,
+    pub shutdown: CancellationToken,
 }
 
 #[async_trait::async_trait]
@@ -39,7 +41,6 @@ impl RunnerService for RunnerServer {
     ) -> Result<Response<Self::RegisterRunnerStream>, tonic::Status> {
         let mut inbound = request.into_inner();
 
-        // Wait for the first message to be RunnerRegister
         let first_msg = inbound
             .message()
             .await
@@ -71,7 +72,6 @@ impl RunnerService for RunnerServer {
             })
             .collect();
 
-        // Channel for the scheduler to send work assignments to this runner
         let (work_tx, mut work_rx) = mpsc::channel::<WorkAssignment>(16);
 
         self.runner_manager
@@ -83,10 +83,8 @@ impl RunnerService for RunnerServer {
             )
             .await;
 
-        // Outbound channel to the runner
         let (out_tx, out_rx) = mpsc::channel(16);
 
-        // Send RegisterAck
         let ack = ServerMessage {
             message: Some(server_message::Message::RegisterAck(RegisterAck {
                 runner_id: runner_id.clone(),
@@ -96,17 +94,21 @@ impl RunnerService for RunnerServer {
         };
         let _ = out_tx.send(Ok(ack)).await;
 
-        // Spawn the bidirectional stream handler
         let runner_manager = self.runner_manager.clone();
         let runner_id_clone = runner_id.clone();
         let state_clone = self.state.clone();
+        let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(15));
+            let mut server_shutting_down = false;
 
             loop {
                 tokio::select! {
-                    // Work assignment from scheduler → forward to runner
+                    _ = shutdown.cancelled() => {
+                        server_shutting_down = true;
+                        break;
+                    }
                     work = work_rx.recv() => {
                         match work {
                             Some(assignment) => {
@@ -114,18 +116,15 @@ impl RunnerService for RunnerServer {
                                     message: Some(server_message::Message::WorkAssignment(assignment)),
                                 };
                                 if out_tx.send(Ok(msg)).await.is_err() {
-                                    // Runner disconnected
                                     break;
                                 }
                             }
                             None => {
-                                // Work channel closed (shouldn't happen normally)
                                 break;
                             }
                         }
                     }
 
-                    // Inbound messages from runner (heartbeat, work ack)
                     msg = inbound.message() => {
                         match msg {
                             Ok(Some(runner_msg)) => {
@@ -135,7 +134,6 @@ impl RunnerService for RunnerServer {
                                             &runner_id_clone,
                                             hb.active_releases,
                                         ).await;
-                                        // Update heartbeat timestamp for all active releases on this runner
                                         if let Err(e) = state_clone.release_event_store()
                                             .heartbeat_runner_releases(&runner_id_clone)
                                             .await
@@ -147,7 +145,6 @@ impl RunnerService for RunnerServer {
                                         }
                                     }
                                     Some(runner_message::Message::WorkAck(ack)) => {
-                                        // Transition ASSIGNED -> RUNNING when runner acks
                                         if ack.accepted {
                                             let event_store = state_clone.release_event_store();
                                             let token_registry = state_clone.release_token_registry();
@@ -174,25 +171,30 @@ impl RunnerService for RunnerServer {
                                 }
                             }
                             Ok(None) | Err(_) => {
-                                // Stream closed or error
                                 break;
                             }
                         }
                     }
 
-                    // Periodic server heartbeat (keepalive)
                     _ = heartbeat_interval.tick() => {
-                        // No-op for now; the heartbeat from the runner side
-                        // keeps the connection alive
                     }
                 }
             }
 
-            // Unregister runner on disconnect
             runner_manager.unregister_runner(&runner_id_clone).await;
+
+            if server_shutting_down {
+                tracing::info!(
+                    runner_id = %runner_id_clone,
+                    "closing runner stream for server shutdown; its releases stay assigned: \
+                     the runner reconnects to another replica once its current release ends, \
+                     and the reaper times out what it cannot finish"
+                );
+                return;
+            }
+
             tracing::info!(runner_id = %runner_id_clone, "runner stream closed");
 
-            // Recovery: fail any in-flight releases for this runner
             let token_registry = state_clone.release_token_registry();
             let event_store = state_clone.release_event_store();
 
@@ -268,7 +270,7 @@ impl RunnerService for RunnerServer {
                     file_content: content,
                 };
                 if tx.send(Ok(file)).await.is_err() {
-                    break; // Client disconnected
+                    break;
                 }
             }
         });
@@ -344,7 +346,6 @@ impl RunnerService for RunnerServer {
         .await
         .map_err(|e| tonic::Status::internal(format!("failed to get annotation: {e}")))?;
 
-        // Extract fields from JSONB columns
         fn json_str(val: &serde_json::Value, key: &str) -> String {
             val.get(key)
                 .and_then(serde_json::Value::as_str)
@@ -419,7 +420,6 @@ impl RunnerService for RunnerServer {
             .await
             .map_err(|e| tonic::Status::internal(format!("stream error: {e}")))?
         {
-            // Validate token on first message
             if validated_scope.is_none() {
                 let scope = token_registry
                     .validate_token(&msg.release_token)
@@ -444,7 +444,6 @@ impl RunnerService for RunnerServer {
                 timestamp: msg.timestamp as u128,
             });
 
-            // Flush when buffer is large enough
             if buffer.len() >= 100 {
                 logs_registry
                     .insert_log_block(
@@ -463,7 +462,6 @@ impl RunnerService for RunnerServer {
             }
         }
 
-        // Flush remaining
         if !buffer.is_empty()
             && let Some(scope) = &validated_scope
         {
@@ -531,7 +529,6 @@ impl RunnerService for RunnerServer {
             }
         }
 
-        // Finalize: emit event + create notification
         release_finalizer::finalize_release(
             &self.state.release_event_store(),
             &self.state.release_registry(),
@@ -548,12 +545,10 @@ impl RunnerService for RunnerServer {
         .await
         .map_err(|e| tonic::Status::internal(format!("failed to finalize release: {e}")))?;
 
-        // Revoke the token
         if let Err(e) = token_registry.revoke_token(&req.release_token).await {
             tracing::warn!("failed to revoke release token: {e:#}");
         }
 
-        // Decrement runner's active releases
         self.runner_manager
             .release_completed(&scope.runner_id)
             .await;

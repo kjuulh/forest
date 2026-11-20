@@ -7,13 +7,8 @@ use tokio_util::sync::CancellationToken;
 use crate::state::AppState;
 use crate::templates::TemplateEngine;
 
-/// What the HTTP listener serves. Chosen once at startup from
-/// `FORAGE_MAINTENANCE_MODE`.
 pub enum ServeMode {
-    /// The normal application router.
     Application(Box<AppState>),
-    /// Every route answers 503 with the maintenance page; health probes stay
-    /// up so the orchestrator does not restart a replica that is healthy.
     Maintenance(Box<TemplateEngine>),
 }
 

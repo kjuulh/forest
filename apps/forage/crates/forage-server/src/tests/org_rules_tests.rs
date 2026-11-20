@@ -1,5 +1,3 @@
-//! Route tests for organisation-wide rule sets.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::platform::{
@@ -109,10 +107,6 @@ async fn org_rules_create_rejects_invalid_json() {
     assert!(html.contains("Invalid policies JSON"));
 }
 
-// ─── The supersede-pending policy type (DATA-823) ───────────────────
-
-/// Org rules are the other place a policy gets created, and it had the same
-/// blind spot as the project form: three types in the dropdown, not four.
 #[tokio::test]
 async fn the_org_rules_form_offers_supersede_pending() {
     let (state, sessions) = test_state();
@@ -148,8 +142,6 @@ async fn the_org_rules_form_offers_supersede_pending() {
     );
 }
 
-/// An existing org-level supersede rule renders as itself. Before this, forage
-/// could not read the config at all and fell back to an empty soak time.
 #[tokio::test]
 async fn an_org_level_supersede_rule_renders_as_itself() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {

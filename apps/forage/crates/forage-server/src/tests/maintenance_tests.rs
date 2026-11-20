@@ -62,8 +62,6 @@ async fn maintenance_mode_keeps_liveness_probe_available() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-/// The flag off must leave the application exactly as it was: the mode the
-/// listener is built from serves the real router, not the maintenance page.
 #[tokio::test]
 async fn application_mode_serves_the_application_not_the_maintenance_page() {
     let (state, _) = test_state();

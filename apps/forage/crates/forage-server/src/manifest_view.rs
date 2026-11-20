@@ -1,31 +1,17 @@
-//! Parsed view of a component manifest, structured for UI rendering.
-//!
-//! We intentionally don't reuse forest's `forest-manifest` crate here — the UI
-//! only needs to surface fields, not validate them. A permissive serde-driven
-//! reader keeps forage independent of the upstream validator's strictness.
-//!
-//! Source of truth for the schema: TASKS/018-global-tools.md §1a.2 (kind,
-//! tool, methods, platforms, external block).
-
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Everything the detail page wants to render from a manifest JSON blob.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ManifestView {
-    /// "binary" | "external" | "files" — taxonomy from §1a.2.
     #[serde(default)]
     pub kind: String,
 
-    /// Per-platform binary info, keyed by `<os>_<arch>` (e.g. "linux_amd64").
     #[serde(default)]
     pub platforms: BTreeMap<String, PlatformInfo>,
 
-    /// Methods this component exposes (HYBRID + COMPONENT shapes).
     #[serde(default)]
     pub methods: Vec<String>,
 
-    /// External-tool fields. `None` for binary kinds.
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
@@ -35,22 +21,16 @@ pub struct ManifestView {
     #[serde(default)]
     pub archive_sha256: Option<String>,
 
-    /// `include` block (TASKS/023): artifacts shipped beside the binary.
-    /// Today this is `env` — default environment variables applied when the
-    /// tool runs (the developer's own shell values always win).
     #[serde(default)]
     pub include: IncludeView,
 }
 
-/// The `include` block, structured for UI rendering.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct IncludeView {
-    /// Default environment variables (name → value).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
 }
 
-/// Per-platform metadata extracted from the manifest's `platforms` map.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PlatformInfo {
     #[serde(default)]
@@ -60,16 +40,10 @@ pub struct PlatformInfo {
 }
 
 impl ManifestView {
-    /// Parse a manifest JSON string. Returns `None` if the input isn't valid
-    /// JSON or doesn't deserialize — the detail page falls back to the raw-
-    /// JSON viewer in that case.
     pub fn parse(json: &str) -> Option<Self> {
         serde_json::from_str(json).ok()
     }
 
-    /// Render a sha256 in a compact human form: `5df1c9…ec945` (first 6 +
-    /// last 5 of the hex digest). Manifest displays use the full digest
-    /// elsewhere (clipboard copy), this is for inline chips.
     pub fn short_sha(sha: &str) -> String {
         let trimmed = sha.strip_prefix("sha256:").unwrap_or(sha);
         if trimmed.len() <= 12 {
@@ -78,9 +52,6 @@ impl ManifestView {
         format!("{}…{}", &trimmed[..6], &trimmed[trimmed.len() - 5..])
     }
 
-    /// Format a byte count in a human-readable unit. Matches the convention
-    /// used elsewhere in forage (KB/MB/GB binary-ish, two-decimal precision
-    /// until we hit MB+).
     pub fn human_size(bytes: u64) -> String {
         const KB: u64 = 1024;
         const MB: u64 = KB * 1024;
@@ -117,8 +88,6 @@ mod tests {
         assert_eq!(m.platforms.get("linux_amd64").unwrap().size, 438888);
         assert!(m.url.is_none());
         assert!(m.archive.is_none());
-        // Methods absent → empty vec (forward-compat: this is a tool_binary
-        // with no methods, which is exactly the shape spec).
         assert!(m.methods.is_empty());
     }
 
@@ -184,7 +153,6 @@ mod tests {
 
     #[test]
     fn short_sha_truncates_long_hex() {
-        // 64-char hex digest → 6-prefix + ellipsis + 5-suffix.
         let full = "5df1c90d18b8cba88100df635f1914f900ebdf17be6652a6ae17a5833ceec945";
         assert_eq!(ManifestView::short_sha(full), "5df1c9…ec945");
     }
@@ -197,8 +165,6 @@ mod tests {
 
     #[test]
     fn short_sha_leaves_short_input_intact() {
-        // Short input doesn't get an ellipsis added — useful for tests + edge
-        // cases like empty/truncated manifests.
         assert_eq!(ManifestView::short_sha("abc"), "abc");
         assert_eq!(ManifestView::short_sha("123456789012"), "123456789012");
     }

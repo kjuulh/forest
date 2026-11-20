@@ -1,10 +1,3 @@
-//! Route tests for the public OAuth endpoints (M2):
-//! /oauth/authorize (consent) and /oauth/token (code exchange).
-//!
-//! The forest-server OAuth client is mocked in-memory; these cover the Forage
-//! HTTP surface — consent rendering, open-redirect defence, CSRF, the consent
-//! decision redirect, and the token-endpoint JSON contract.
-
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -50,8 +43,6 @@ fn query_param(url: &str, key: &str) -> Option<String> {
         (k == key).then(|| v.to_string())
     })
 }
-
-// ─── Authorize (GET) ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn authorize_renders_consent_screen() {
@@ -99,8 +90,6 @@ async fn authorize_unknown_client_renders_error_not_redirect() {
         )
         .await
         .unwrap();
-    // Open-redirect defence: an unknown client is an on-site error, never a
-    // redirect.
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     assert!(resp.headers().get("location").is_none());
 }
@@ -166,7 +155,6 @@ async fn authorize_bad_scope_redirects_to_client_with_error() {
         )
         .await
         .unwrap();
-    // redirect_uri is valid, so a bad scope goes back to the client.
     assert!(resp.status().is_redirection());
     let loc = location(&resp);
     assert!(loc.starts_with(REDIRECT));
@@ -181,7 +169,6 @@ async fn authorize_auto_approves_when_prior_consent_covers_scopes() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Requested scope is covered by the prior consent → skip the screen.
     let uri = format!(
         "/oauth/authorize?client_id={CID}&redirect_uri={}&response_type=code&scope=profile&state=s1",
         urlencoding::encode(REDIRECT)
@@ -200,7 +187,6 @@ async fn authorize_auto_approves_when_prior_consent_covers_scopes() {
 #[tokio::test]
 async fn authorize_prompts_when_prior_consent_is_insufficient() {
     let oauth = seeded();
-    // Prior consent only covers `profile`; request asks for `email` too.
     oauth.seed_consent(CID, vec!["profile".into()]);
     let (state, sessions) = test_state_with_oauth_apps(oauth);
     let cookie = create_test_session(&sessions).await;
@@ -211,15 +197,12 @@ async fn authorize_prompts_when_prior_consent_is_insufficient() {
         urlencoding::encode(REDIRECT)
     );
     let resp = app.oneshot(get(&uri, &cookie)).await.unwrap();
-    // New scope not yet consented → show the screen (200), not a redirect.
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(body_text(resp).await.contains("Authorize Seeded App"));
 }
 
 #[tokio::test]
 async fn prompt_none_unauthenticated_errors_login_required() {
-    // No session cookie. With prompt=none we must not bounce to login — return
-    // login_required to the client (OIDC §3.1.2.6).
     let (state, _sessions) = test_state_with_oauth_apps(seeded());
     let app = build_router(state);
 
@@ -265,7 +248,6 @@ async fn prompt_none_without_consent_errors_consent_required() {
         urlencoding::encode(REDIRECT)
     );
     let resp = app.oneshot(get(&uri, &cookie)).await.unwrap();
-    // No UI shown — error returned to the client per OIDC.
     assert!(resp.status().is_redirection());
     let loc = location(&resp);
     assert_eq!(query_param(&loc, "error").as_deref(), Some("consent_required"));
@@ -285,12 +267,9 @@ async fn prompt_consent_forces_screen_despite_prior_consent() {
         urlencoding::encode(REDIRECT)
     );
     let resp = app.oneshot(get(&uri, &cookie)).await.unwrap();
-    // Forced re-consent: the screen is rendered even though prior consent exists.
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(body_text(resp).await.contains("Authorize Seeded App"));
 }
-
-// ─── Consent decision (POST) ─────────────────────────────────────────
 
 fn consent_body(action: &str) -> String {
     let binding = crate::routes::oauth::consent_binding("test-csrf", CID, REDIRECT, "profile");
@@ -357,9 +336,6 @@ async fn consent_with_tampered_scope_is_rejected() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // The user was shown (and the binding covers) only `profile`, but the
-    // submitted scope is widened to `profile email`. The binding no longer
-    // matches → reject (review finding #2).
     let binding = crate::routes::oauth::consent_binding("test-csrf", CID, REDIRECT, "profile");
     let body = format!(
         "_csrf=test-csrf&action=approve&client_id={CID}&redirect_uri={}&scope=profile+email&consent_binding={binding}",
@@ -386,15 +362,12 @@ async fn consent_bad_csrf_rejected() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── Token endpoint ──────────────────────────────────────────────────
-
 #[tokio::test]
 async fn token_exchange_returns_bearer_json() {
     let (state, sessions) = test_state_with_oauth_apps(seeded());
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Approve to obtain a real code from the mock.
     let resp = app
         .clone()
         .oneshot(post("/oauth/authorize", &cookie, consent_body("approve")))
@@ -480,7 +453,6 @@ async fn token_accepts_http_basic_client_auth() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Obtain a code via consent.
     let resp = app
         .clone()
         .oneshot(post("/oauth/authorize", &cookie, consent_body("approve")))
@@ -488,7 +460,6 @@ async fn token_accepts_http_basic_client_auth() {
         .unwrap();
     let code = query_param(&location(&resp), "code").expect("code");
 
-    // Credentials via HTTP Basic; body carries no client_id/secret.
     use base64::Engine;
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("{CID}:a-secret"));
     let body = format!(
@@ -520,7 +491,6 @@ async fn token_includes_id_token_for_openid_scope() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Consent with openid scope → code.
     let binding = crate::routes::oauth::consent_binding("test-csrf", CID, REDIRECT, "openid profile");
     let body = format!(
         "_csrf=test-csrf&action=approve&client_id={CID}&redirect_uri={}&scope=openid+profile&consent_binding={binding}",
@@ -582,8 +552,6 @@ async fn token_unsupported_grant_type_is_400() {
     let (state, _sessions) = test_state_with_oauth_apps(seeded());
     let app = build_router(state);
 
-    // `password` rather than `client_credentials`: the latter used to be
-    // the example of an unsupported grant here, and became supported.
     let resp = app
         .oneshot(
             Request::builder()
@@ -624,8 +592,6 @@ async fn token_client_credentials_returns_a_bearer_token() {
     assert_eq!(json["token_type"], "bearer");
     assert!(json["access_token"].as_str().is_some_and(|t| !t.is_empty()));
     assert_eq!(json["scope"], "profile");
-    // A machine token carries no user, so there is nothing to refresh
-    // and no subject to describe.
     assert!(json.get("refresh_token").is_none());
     assert!(json.get("id_token").is_none());
 }
@@ -716,7 +682,6 @@ async fn authorized_apps_revoke_redirects_and_requires_csrf() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Bad CSRF → 403.
     let resp = app
         .clone()
         .oneshot(
@@ -732,7 +697,6 @@ async fn authorized_apps_revoke_redirects_and_requires_csrf() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
-    // Valid CSRF → redirect back to the list.
     let resp = app
         .oneshot(
             Request::builder()
@@ -775,4 +739,206 @@ async fn token_invalid_code_is_invalid_grant() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
     assert_eq!(json["error"], "invalid_grant");
+}
+
+const PUBLIC_CID: &str = "forest_oa_datactl";
+const LOOPBACK: &str = "http://127.0.0.1/callback";
+const LOOPBACK_ON_PORT: &str = "http://127.0.0.1:53817/callback";
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
+fn s256(verifier: &str) -> String {
+    use base64::Engine;
+    use sha2::Digest;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(sha2::Sha256::digest(verifier.as_bytes()))
+}
+
+fn seeded_public() -> Arc<MockOAuthAppsClient> {
+    let oauth = Arc::new(MockOAuthAppsClient::new());
+    oauth.seed_public_app(
+        PUBLIC_CID,
+        vec![LOOPBACK.into()],
+        vec!["datagateway:apply".into(), "datagateway:read".into()],
+    );
+    oauth.seed_app(CID, vec![REDIRECT.into()], vec!["profile".into()]);
+    oauth
+}
+
+fn public_authorize_uri(challenge: &str, method: &str) -> String {
+    format!(
+        "/oauth/authorize?client_id={PUBLIC_CID}&redirect_uri={}&response_type=code&scope=datagateway%3Aapply&state=xyz&code_challenge={challenge}&code_challenge_method={method}",
+        urlencoding::encode(LOOPBACK_ON_PORT)
+    )
+}
+
+fn token_request(body: String) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/oauth/token")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_public_client_without_s256_pkce_is_sent_back_with_invalid_request() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    for (challenge, method) in [("", ""), (VERIFIER, "plain"), (VERIFIER, "")] {
+        let resp = app
+            .clone()
+            .oneshot(get(&public_authorize_uri(challenge, method), &cookie))
+            .await
+            .unwrap();
+        assert!(resp.status().is_redirection(), "{method}");
+        let loc = location(&resp);
+        assert!(loc.starts_with(LOOPBACK_ON_PORT), "{loc}");
+        assert_eq!(
+            query_param(&loc, "error").as_deref(),
+            Some("invalid_request")
+        );
+        let description = query_param(&loc, "error_description").expect("described");
+        assert!(urlencoding::decode(&description).unwrap().contains("S256"));
+        assert_eq!(query_param(&loc, "state").as_deref(), Some("xyz"));
+    }
+}
+
+#[tokio::test]
+async fn a_public_client_with_s256_on_a_loopback_port_gets_the_consent_screen() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(get(&public_authorize_uri(&s256(VERIFIER), "S256"), &cookie))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(body_text(resp).await.contains("Authorize Seeded App"));
+}
+
+#[tokio::test]
+async fn a_loopback_redirect_on_another_path_is_still_refused() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let uri = format!(
+        "/oauth/authorize?client_id={PUBLIC_CID}&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256",
+        urlencoding::encode("http://127.0.0.1:53817/elsewhere"),
+        s256(VERIFIER)
+    );
+    let resp = app.oneshot(get(&uri, &cookie)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert!(resp.headers().get("location").is_none());
+}
+
+async fn public_code(app: &axum::Router, cookie: &str) -> String {
+    let binding = crate::routes::oauth::consent_binding(
+        "test-csrf",
+        PUBLIC_CID,
+        LOOPBACK_ON_PORT,
+        "datagateway:apply",
+    );
+    let body = format!(
+        "_csrf=test-csrf&action=approve&client_id={PUBLIC_CID}&redirect_uri={}&scope=datagateway%3Aapply&state=xyz&code_challenge={}&code_challenge_method=S256&consent_binding={binding}",
+        urlencoding::encode(LOOPBACK_ON_PORT),
+        s256(VERIFIER)
+    );
+    let resp = app
+        .clone()
+        .oneshot(post("/oauth/authorize", cookie, body))
+        .await
+        .unwrap();
+    assert!(resp.status().is_redirection());
+    let loc = location(&resp);
+    assert!(loc.starts_with(LOOPBACK_ON_PORT), "{loc}");
+    query_param(&loc, "code").expect("code")
+}
+
+#[tokio::test]
+async fn a_public_client_exchanges_with_only_its_client_id_and_the_verifier() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+    let redirect = urlencoding::encode(LOOPBACK_ON_PORT);
+
+    let code = public_code(&app, &cookie).await;
+    let resp = app
+        .clone()
+        .oneshot(token_request(format!(
+            "grant_type=authorization_code&client_id={PUBLIC_CID}&code={code}&redirect_uri={redirect}&code_verifier=wrong"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(json["error"], "invalid_grant");
+
+    let code = public_code(&app, &cookie).await;
+    let resp = app
+        .clone()
+        .oneshot(token_request(format!(
+            "grant_type=authorization_code&client_id={PUBLIC_CID}&code={code}&redirect_uri={redirect}&code_verifier={VERIFIER}"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert!(
+        json["access_token"]
+            .as_str()
+            .unwrap()
+            .starts_with("forest_oat_")
+    );
+    assert_eq!(json["refresh_token"], "forest_ort_mocktoken");
+
+    let resp = app
+        .oneshot(token_request(format!(
+            "grant_type=refresh_token&client_id={PUBLIC_CID}&refresh_token=forest_ort_mocktoken"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_confidential_client_without_its_secret_is_invalid_client() {
+    let (state, _sessions) = test_state_with_oauth_apps(seeded_public());
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(token_request(format!(
+            "grant_type=refresh_token&client_id={CID}&refresh_token=forest_ort_mocktoken"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(json["error"], "invalid_client");
+}
+
+#[tokio::test]
+async fn discovery_advertises_public_clients_and_s256() {
+    let (state, _sessions) = test_state_with_oauth_apps(seeded());
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/openid-configuration")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    let auth_methods = doc["token_endpoint_auth_methods_supported"]
+        .as_array()
+        .unwrap();
+    assert!(auth_methods.iter().any(|m| m == "none"));
+    let pkce = doc["code_challenge_methods_supported"].as_array().unwrap();
+    assert!(pkce.iter().any(|m| m == "S256"));
 }
