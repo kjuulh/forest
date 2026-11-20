@@ -50,7 +50,7 @@ FROM chef AS builder
 
 COPY --from=planner /mnt/src/recipe.json recipe.json
 
-RUN --mount=type=ssh cargo chef cook --release -p forage-server --recipe-path recipe.json
+RUN --mount=type=ssh RUSTC_WRAPPER= SCCACHE_MEMCACHED_ENDPOINT= cargo chef cook --release -p forage-server --recipe-path recipe.json
 
 COPY . .
 
