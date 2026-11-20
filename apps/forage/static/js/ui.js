@@ -18,8 +18,15 @@
     document.getElementById("client-load-time").hidden = false;
   }
 
+  function closeNavMenus() {
+    document.querySelectorAll("nav details[open]").forEach(function (el) {
+      el.open = false;
+    });
+  }
+
   localiseTimes();
   document.addEventListener("sedx:load", localiseTimes);
+  document.addEventListener("sedx:load", closeNavMenus);
   if (document.readyState === "complete") showLoadTime();
   else window.addEventListener("load", function () { setTimeout(showLoadTime, 0); });
 

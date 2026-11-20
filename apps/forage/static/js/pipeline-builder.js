@@ -1425,3 +1425,11 @@ function bezier(from, to, ox, oy) {
 }
 
 customElements.define("pipeline-builder", PipelineBuilder);
+
+document.addEventListener("sedx:load", () => {
+  document.querySelectorAll("pipeline-builder").forEach((builder) => {
+    if (!(builder instanceof PipelineBuilder) || builder.childElementCount > 0) return;
+    builder.disconnectedCallback();
+    builder.connectedCallback();
+  });
+});

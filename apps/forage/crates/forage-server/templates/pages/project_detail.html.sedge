@@ -66,7 +66,7 @@ props crate::views::projects::ProjectDetailPage { chrome, org, project, csrf_tok
               <a href="{project_href(org, project)}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
             </div>
             <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} />
-            <release-timeline org={org} project={project} csrf={csrf_token} username={username} role={role} limit="3"></release-timeline>
+            <release-timeline id="rt-{org}-{project}-recent" sedx-preserve org={org} project={project} csrf={csrf_token} username={username} role={role} limit="3"></release-timeline>
           </div>
         }}
         {if let Some(readme) = readme {

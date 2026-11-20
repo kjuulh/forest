@@ -33,7 +33,7 @@
         }
     }
 
-    const destTypes = readDestinationTypes();
+    let destTypes = [];
 
     function setSection(container, visible) {
         container.classList.toggle('hidden', !visible);
@@ -315,157 +315,174 @@
         if (reveal) revealValue(reveal);
     });
 
-    document.querySelectorAll('.dest-type-select').forEach(function(select) {
-        select.addEventListener('change', function() { updateTypeFields(select.dataset.index); });
-        updateTypeFields(select.dataset.index);
-    });
+    let controller = null;
 
-    document.querySelectorAll('form[id^="create-dest-form-"]').forEach(function(form) {
-        form.addEventListener('submit', function() {
-            form.querySelectorAll('input[name="sensitive_keys"]').forEach(function(el) { el.remove(); });
+    function init() {
+        const root = document.querySelector('main');
+        if (root && root.dataset.destinationsReady) return;
+        if (controller) controller.abort();
+        controller = null;
+        if (!root) return;
+        root.dataset.destinationsReady = '1';
+        controller = new AbortController();
+        const signal = controller.signal;
+        destTypes = readDestinationTypes();
 
-            form.querySelectorAll('.metadata-row').forEach(function(row) {
-                const box = row.querySelector('.meta-sensitive');
-                const keyInput = row.querySelector('input[name="metadata_keys"]');
-                if (!box || !box.checked || !keyInput || keyInput.disabled || !keyInput.value.trim()) return;
+        document.querySelectorAll('.dest-type-select').forEach(function(select) {
+            select.addEventListener('change', function() { updateTypeFields(select.dataset.index); }, { signal: signal });
+            updateTypeFields(select.dataset.index);
+        });
 
-                const hidden = document.createElement('input');
-                hidden.type = 'hidden';
-                hidden.name = 'sensitive_keys';
-                hidden.value = keyInput.value.trim();
-                form.appendChild(hidden);
+        document.querySelectorAll('form[id^="create-dest-form-"]').forEach(function(form) {
+            form.addEventListener('submit', function() {
+                form.querySelectorAll('input[name="sensitive_keys"]').forEach(function(el) { el.remove(); });
+
+                form.querySelectorAll('.metadata-row').forEach(function(row) {
+                    const box = row.querySelector('.meta-sensitive');
+                    const keyInput = row.querySelector('input[name="metadata_keys"]');
+                    if (!box || !box.checked || !keyInput || keyInput.disabled || !keyInput.value.trim()) return;
+
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'sensitive_keys';
+                    hidden.value = keyInput.value.trim();
+                    form.appendChild(hidden);
+                });
+            }, { signal: signal });
+        });
+
+        const metadataForm = document.getElementById('metadata-form');
+        const addRowBtn = document.getElementById('add-row-btn');
+        if (metadataForm && addRowBtn) {
+            addRowBtn.addEventListener('click', function() {
+                const container = document.getElementById('metadata-rows');
+                const row = document.createElement('div');
+                row.className = 'px-5 py-3 flex items-center gap-3 metadata-row';
+                row.innerHTML = rowHtml(DETAIL_ROW_INPUT, 'Mark as a credential: the value is hidden after saving. This cannot be undone from the UI.');
+                container.appendChild(row);
+                row.querySelector('input').focus();
+            }, { signal: signal });
+        }
+
+        if (metadataForm) {
+            metadataForm.addEventListener('submit', function() {
+                const form = metadataForm;
+                form.querySelectorAll('input[name="sensitive_keys"], input[name="set_sensitive_keys"]')
+                    .forEach(function(el) { el.remove(); });
+
+                const promoted = [];
+                form.querySelectorAll('.metadata-row').forEach(function(row) {
+                    const box = row.querySelector('.meta-sensitive');
+                    const keyInput = row.querySelector('input[name="metadata_keys"]');
+                    if (!box || !box.checked || !keyInput || !keyInput.value.trim()) return;
+                    promoted.push(keyInput.value.trim());
+                });
+                if (promoted.length === 0) return;
+
+                let declared = [];
+                try { declared = JSON.parse(form.dataset.declaredSensitive || '[]'); } catch (e) { declared = []; }
+
+                const marker = document.createElement('input');
+                marker.type = 'hidden';
+                marker.name = 'set_sensitive_keys';
+                marker.value = '1';
+                form.appendChild(marker);
+
+                Array.from(new Set(declared.concat(promoted))).forEach(function(key) {
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'sensitive_keys';
+                    hidden.value = key;
+                    form.appendChild(hidden);
+                });
+            }, { signal: signal });
+        }
+
+        const list = document.getElementById('env-list');
+        if (!list || !list.querySelector('.env-card[draggable="true"]')) return;
+
+        let dragged = null;
+        let originalIndex = -1;
+
+        function indexOf(card) {
+            return Array.from(list.querySelectorAll('.env-card')).indexOf(card);
+        }
+
+        function postOrder(orgName, csrf, envId, sortOrder) {
+            const body = new URLSearchParams();
+            body.set('_csrf', csrf);
+            body.set('sort_order', String(sortOrder));
+            return fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(envId) + '/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+                credentials: 'same-origin',
             });
-        });
-    });
+        }
 
-    const metadataForm = document.getElementById('metadata-form');
-    const addRowBtn = document.getElementById('add-row-btn');
-    if (metadataForm && addRowBtn) {
-        addRowBtn.addEventListener('click', function() {
-            const container = document.getElementById('metadata-rows');
-            const row = document.createElement('div');
-            row.className = 'px-5 py-3 flex items-center gap-3 metadata-row';
-            row.innerHTML = rowHtml(DETAIL_ROW_INPUT, 'Mark as a credential: the value is hidden after saving. This cannot be undone from the UI.');
-            container.appendChild(row);
-            row.querySelector('input').focus();
-        });
-    }
+        async function commitReorder(card) {
+            const newIndex = indexOf(card);
+            if (newIndex < 0 || newIndex === originalIndex) return;
 
-    if (metadataForm) {
-        metadataForm.addEventListener('submit', function() {
-            const form = metadataForm;
-            form.querySelectorAll('input[name="sensitive_keys"], input[name="set_sensitive_keys"]')
-                .forEach(function(el) { el.remove(); });
+            const cards = Array.from(list.querySelectorAll('.env-card'));
+            const csrfInput = document.querySelector('input[name="_csrf"]');
+            const csrf = csrfInput ? csrfInput.value : '';
+            const orgName = list.dataset.org;
 
-            const promoted = [];
-            form.querySelectorAll('.metadata-row').forEach(function(row) {
-                const box = row.querySelector('.meta-sensitive');
-                const keyInput = row.querySelector('input[name="metadata_keys"]');
-                if (!box || !box.checked || !keyInput || !keyInput.value.trim()) return;
-                promoted.push(keyInput.value.trim());
-            });
-            if (promoted.length === 0) return;
-
-            let declared = [];
-            try { declared = JSON.parse(form.dataset.declaredSensitive || '[]'); } catch (e) { declared = []; }
-
-            const marker = document.createElement('input');
-            marker.type = 'hidden';
-            marker.name = 'set_sensitive_keys';
-            marker.value = '1';
-            form.appendChild(marker);
-
-            Array.from(new Set(declared.concat(promoted))).forEach(function(key) {
-                const hidden = document.createElement('input');
-                hidden.type = 'hidden';
-                hidden.name = 'sensitive_keys';
-                hidden.value = key;
-                form.appendChild(hidden);
-            });
-        });
-    }
-
-    const list = document.getElementById('env-list');
-    if (!list || !list.querySelector('.env-card[draggable="true"]')) return;
-
-    let dragged = null;
-    let originalIndex = -1;
-
-    function indexOf(card) {
-        return Array.from(list.querySelectorAll('.env-card')).indexOf(card);
-    }
-
-    function postOrder(orgName, csrf, envId, sortOrder) {
-        const body = new URLSearchParams();
-        body.set('_csrf', csrf);
-        body.set('sort_order', String(sortOrder));
-        return fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(envId) + '/order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
-            credentials: 'same-origin',
-        });
-    }
-
-    async function commitReorder(card) {
-        const newIndex = indexOf(card);
-        if (newIndex < 0 || newIndex === originalIndex) return;
-
-        const cards = Array.from(list.querySelectorAll('.env-card'));
-        const csrfInput = document.querySelector('input[name="_csrf"]');
-        const csrf = csrfInput ? csrfInput.value : '';
-        const orgName = list.dataset.org;
-
-        try {
-            for (let i = 0; i < cards.length; i++) {
-                const resp = await postOrder(orgName, csrf, cards[i].dataset.envId, i * 10);
-                if (!resp.ok && resp.status !== 0) {
-                    console.error('env reorder failed for', cards[i].dataset.envId, 'status', resp.status);
-                    break;
+            try {
+                for (let i = 0; i < cards.length; i++) {
+                    const resp = await postOrder(orgName, csrf, cards[i].dataset.envId, i * 10);
+                    if (!resp.ok && resp.status !== 0) {
+                        console.error('env reorder failed for', cards[i].dataset.envId, 'status', resp.status);
+                        break;
+                    }
                 }
+            } catch (err) {
+                console.error('env reorder error:', err);
             }
-        } catch (err) {
-            console.error('env reorder error:', err);
+            window.location.reload();
         }
-        window.location.reload();
+
+        list.addEventListener('dragover', function(e) {
+            if (!dragged) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            const target = e.target.closest('.env-card');
+            if (!target || target === dragged) return;
+
+            const rect = target.getBoundingClientRect();
+            const insertBefore = (e.clientY - rect.top) < rect.height / 2;
+            if (insertBefore) {
+                list.insertBefore(dragged, target);
+            } else {
+                list.insertBefore(dragged, target.nextElementSibling);
+            }
+        }, { signal: signal });
+
+        list.addEventListener('drop', function(e) {
+            if (dragged) e.preventDefault();
+        }, { signal: signal });
+
+        list.querySelectorAll('.env-card').forEach(function(card) {
+            card.addEventListener('dragstart', function(e) {
+                dragged = card;
+                originalIndex = indexOf(card);
+                card.classList.add('opacity-50');
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', card.dataset.envId); } catch (_) {}
+            }, { signal: signal });
+
+            card.addEventListener('dragend', function() {
+                card.classList.remove('opacity-50');
+                const moved = dragged;
+                dragged = null;
+                if (!moved) return;
+                commitReorder(moved);
+            }, { signal: signal });
+        });
     }
 
-    list.addEventListener('dragover', function(e) {
-        if (!dragged) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-
-        const target = e.target.closest('.env-card');
-        if (!target || target === dragged) return;
-
-        const rect = target.getBoundingClientRect();
-        const insertBefore = (e.clientY - rect.top) < rect.height / 2;
-        if (insertBefore) {
-            list.insertBefore(dragged, target);
-        } else {
-            list.insertBefore(dragged, target.nextElementSibling);
-        }
-    });
-
-    list.addEventListener('drop', function(e) {
-        if (dragged) e.preventDefault();
-    });
-
-    list.querySelectorAll('.env-card').forEach(function(card) {
-        card.addEventListener('dragstart', function(e) {
-            dragged = card;
-            originalIndex = indexOf(card);
-            card.classList.add('opacity-50');
-            e.dataTransfer.effectAllowed = 'move';
-            try { e.dataTransfer.setData('text/plain', card.dataset.envId); } catch (_) {}
-        });
-
-        card.addEventListener('dragend', function() {
-            card.classList.remove('opacity-50');
-            const moved = dragged;
-            dragged = null;
-            if (!moved) return;
-            commitReorder(moved);
-        });
-    });
+    init();
+    document.addEventListener('sedx:load', init);
 })();

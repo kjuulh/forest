@@ -3,7 +3,7 @@ use crate::components::{Icon, Tabs, CsrfField};
 use crate::format::timeago;
 component Shell(chrome: &Chrome, head: Option<Html>, scripts: Option<Html>, children: Html) {
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" sedx-layout>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,6 +11,7 @@ component Shell(chrome: &Chrome, head: Option<Html>, scripts: Option<Html>, chil
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
   <meta name="description" content={chrome.description}>
   <link rel="stylesheet" href="/static/css/style.css?v={chrome.assets.css_hash}">
+  <script src="/static/sedx.js?v={chrome.assets.sedx_js_hash}" defer></script>
   <script src="/static/js/ui.js?v={chrome.assets.ui_js_hash}" defer></script>
   {if let Some(head) = head { {head} }}
 </head>
@@ -106,7 +107,7 @@ component ViewerNav(viewer: &Viewer) {
           <a href="/settings/tokens" class="block px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Tokens</a>
           <a href="/settings/authorized-apps" class="block px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Authorized apps</a>
           <div class="border-t border-gray-100 my-1"></div>
-          <form method="POST" action="/logout">
+          <form method="POST" action="/logout" sedx-ignore>
             <CsrfField token={viewer.csrf_token} name="_csrf" />
             <button type="submit" class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Sign out</button>
           </form>
@@ -124,7 +125,7 @@ component ViewerNav(viewer: &Viewer) {
       </div>
     }}
     <a href="/settings/account" class="block text-sm text-gray-700 hover:text-gray-900 py-1">{viewer.username}</a>
-    <form method="POST" action="/logout">
+    <form method="POST" action="/logout" sedx-ignore>
       <CsrfField token={viewer.csrf_token} name="_csrf" />
       <button type="submit" class="text-sm text-gray-500 hover:text-gray-900 py-1">Sign out</button>
     </form>

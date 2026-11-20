@@ -5,7 +5,7 @@ edition = "2024"
 description = "Forage's shared UI: typed sedge components, the page shell and the formatting they use"
 
 [dependencies]
-sedge-rt.workspace = true
+sedge-rt = { workspace = true, features = ["sedx"] }
 chrono.workspace = true
 urlencoding = "2.1.3"
 

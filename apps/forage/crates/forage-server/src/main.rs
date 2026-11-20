@@ -98,9 +98,21 @@ async fn fallback_404(State(state): State<AppState>) -> Response {
     (StatusCode::NOT_FOUND, Html(html)).into_response()
 }
 
+async fn sedx_js() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        ],
+        sedx::JS,
+    )
+        .into_response()
+}
+
 pub fn build_router(state: AppState) -> Router {
     Router::new()
-        .merge(routes::router())
+        .merge(routes::router().layer(axum::middleware::from_fn(sedx::middleware)))
+        .route("/static/sedx.js", axum::routing::get(sedx_js))
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
         .route_layer(axum::middleware::from_fn(http_metrics::layer))

@@ -45,8 +45,9 @@ tracing-opentelemetry = "0.32"
 async-nats = "0.40"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
-sedge-rt = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "952c2e9c2c9aa94a687cdc538213f02908db55e7" }
-sedge-gen = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "952c2e9c2c9aa94a687cdc538213f02908db55e7" }
+sedge-rt = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d" }
+sedge-gen = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d" }
+sedx = { git = "https://git.kjuulh.io/kjuulh/sedge.git", rev = "d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [profile.dev]

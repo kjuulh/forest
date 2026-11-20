@@ -247,14 +247,14 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
     {if *has_release_intents {
       <div class="mb-8 scroll-mt-4" id="logs">
         <SectionHeading>Logs</SectionHeading>
-        <release-logs url={logs_href(org, project, &release.slug)}></release-logs>
+        <release-logs id="rl-{org}-{project}-{release.slug}" url={logs_href(org, project, &release.slug)}></release-logs>
       </div>
     }}
 
     {if let Some(spec) = spec {
       <div class="mb-8">
         <SectionHeading>Spec</SectionHeading>
-        <spec-viewer content={spec} filename="forest.cue"></spec-viewer>
+        <spec-viewer id="spec-{org}-{project}-{release.slug}" content={spec} filename="forest.cue"></spec-viewer>
       </div>
     }}
 

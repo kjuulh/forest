@@ -1055,6 +1055,7 @@ dependencies = [
  "rsa",
  "sedge-gen",
  "sedge-rt",
+ "sedx",
  "serde",
  "serde_json",
  "sha2",
@@ -3026,7 +3027,7 @@ dependencies = [
 [[package]]
 name = "sedge-gen"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d#d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d"
 dependencies = [
  "sedge-syntax",
  "serde_json",
@@ -3035,7 +3036,7 @@ dependencies = [
 [[package]]
 name = "sedge-rt"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d#d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d"
 dependencies = [
  "serde",
  "serde_json",
@@ -3044,9 +3045,18 @@ dependencies = [
 [[package]]
 name = "sedge-syntax"
 version = "0.0.0"
-source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=952c2e9c2c9aa94a687cdc538213f02908db55e7#952c2e9c2c9aa94a687cdc538213f02908db55e7"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d#d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d"
 dependencies = [
  "miette",
+]
+
+[[package]]
+name = "sedx"
+version = "0.0.0"
+source = "git+https://git.kjuulh.io/kjuulh/sedge.git?rev=d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d#d498cdcd3ff3ecdebfa26c0b598dae1d94c1ad2d"
+dependencies = [
+ "axum",
+ "sedge-rt",
 ]
 
 [[package]]

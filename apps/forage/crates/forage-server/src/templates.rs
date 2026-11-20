@@ -2,9 +2,13 @@ use std::path::Path;
 
 use sha2::Digest;
 
+fn bytes_hash(bytes: &[u8]) -> String {
+    format!("{:x}", sha2::Sha256::digest(bytes))[..12].to_string()
+}
+
 fn content_hash(path: &Path) -> String {
     match std::fs::read(path) {
-        Ok(bytes) => format!("{:x}", sha2::Sha256::digest(&bytes))[..12].to_string(),
+        Ok(bytes) => bytes_hash(&bytes),
         Err(_) => "dev".to_string(),
     }
 }
@@ -45,6 +49,7 @@ impl TemplateEngine {
             components_js_hash: content_hash(Path::new(
                 "static/js/components/forage-components.js",
             )),
+            sedx_js_hash: bytes_hash(sedx::JS.as_bytes()),
         };
         Ok(engine)
     }

@@ -33,7 +33,7 @@ fn main_element(html: &str) -> String {
 async fn project_releases_mounts_the_timeline_and_primes_its_data() {
     let (status, html) = project_releases(MockPlatformClient::new()).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(html.contains(r#"<release-timeline org="testorg" project="my-api" csrf="test-csrf" username="testuser" role=""#), "{html}");
+    assert!(html.contains(r#"<release-timeline id="rt-testorg-my-api" sedx-preserve org="testorg" project="my-api" csrf="test-csrf" username="testuser" role=""#), "{html}");
     assert!(html.contains(r#"data-timeline-url="/api/orgs/testorg/projects/my-api/timeline""#), "{html}");
     assert!(html.contains("/static/js/components/forage-components.js?v="), "{html}");
     assert!(html.contains(r#"<a href="/orgs/testorg/projects/my-api/releases" aria-current="page""#), "the Releases tab is current");

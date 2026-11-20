@@ -49,7 +49,7 @@ Install
 <a href="/orgs/testorg/projects/my-api/releases" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
 </div>
 <script src="/static/js/timeline-prefetch.js?v=HASH" data-timeline-url="/api/orgs/testorg/projects/my-api/timeline"></script>
-<release-timeline org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner" limit="3"></release-timeline>
+<release-timeline id="rt-testorg-my-api-recent" sedx-preserve org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner" limit="3"></release-timeline>
 </div>
 <div class="prose max-w-none"><h1>Hello</h1>
 

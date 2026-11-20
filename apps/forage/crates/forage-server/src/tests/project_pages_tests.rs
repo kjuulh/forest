@@ -349,7 +349,7 @@ async fn project_detail_shows_timeline_readme_about_and_install_commands() {
     )
     .await;
     assert!(html.contains("<title>my-api - testorg - Forest</title>"));
-    assert!(html.contains(r#"<release-timeline org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner" limit="3"></release-timeline>"#), "{html}");
+    assert!(html.contains(r#"<release-timeline id="rt-testorg-my-api-recent" sedx-preserve org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner" limit="3"></release-timeline>"#), "{html}");
     assert!(html.contains(r#"data-timeline-url="/api/orgs/testorg/projects/my-api/timeline""#));
     assert!(html.contains("/static/js/components/forage-components.js?v="));
     assert!(

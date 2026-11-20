@@ -8,6 +8,6 @@ expression: main_snapshot(&html)
 <h1 class="text-2xl font-bold">Continuous deployment</h1>
 </div>
 <script src="/static/js/timeline-prefetch.js?v=HASH" data-timeline-url="/api/orgs/testorg/timeline"></script>
-<release-timeline org="testorg"></release-timeline>
+<release-timeline id="rt-testorg" sedx-preserve org="testorg"></release-timeline>
 </section>
 </main>

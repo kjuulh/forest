@@ -1,11 +1,15 @@
 (function () {
-  var container = document.getElementById("notifications-list");
-  if (!container) return;
-
   var userToggled = new Set();
-  container.addEventListener("toggle", function (e) {
+  var timer = null;
+
+  function container() {
+    return document.getElementById("notifications-list");
+  }
+
+  document.addEventListener("toggle", function (e) {
     var details = e.target;
-    if (details.tagName !== "DETAILS") return;
+    if (!details || details.tagName !== "DETAILS") return;
+    if (!details.closest("#notifications-list")) return;
     var slug = details.dataset.slug;
     if (!slug) return;
     if (details.open) {
@@ -15,21 +19,42 @@
     }
   }, true);
 
-  function findDetails(slug) {
-    var all = container.querySelectorAll("details[data-slug]");
+  function findDetails(list, slug) {
+    var all = list.querySelectorAll("details[data-slug]");
     for (var i = 0; i < all.length; i++) {
       if (all[i].dataset.slug === slug) return all[i];
     }
     return null;
   }
 
+  function stop() {
+    if (timer) clearInterval(timer);
+    timer = null;
+  }
+
+  function start() {
+    if (timer || document.hidden || !container()) return;
+    timer = setInterval(refresh, 10000);
+  }
+
   async function refresh() {
+    if (!container()) {
+      stop();
+      userToggled.clear();
+      return;
+    }
     try {
       var res = await fetch("/notifications?_partial=1", { credentials: "same-origin" });
       if (!res.ok) return;
-      container.innerHTML = await res.text();
+      var html = await res.text();
+      var list = container();
+      if (!list) {
+        stop();
+        return;
+      }
+      list.innerHTML = html;
       userToggled.forEach(function (slug) {
-        var el = findDetails(slug);
+        var el = findDetails(list, slug);
         if (el) {
           el.open = true;
         } else {
@@ -39,15 +64,23 @@
     } catch (e) {}
   }
 
-  var timer = setInterval(refresh, 10000);
-
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
-      clearInterval(timer);
-      timer = null;
-    } else {
+      stop();
+    } else if (container()) {
       refresh();
-      timer = setInterval(refresh, 10000);
+      start();
     }
   });
+
+  document.addEventListener("sedx:load", function () {
+    if (container()) {
+      start();
+    } else {
+      stop();
+      userToggled.clear();
+    }
+  });
+
+  start();
 })();

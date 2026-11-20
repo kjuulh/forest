@@ -262,11 +262,11 @@ Longer body">feat: ledger…</h1>
 </div>
 <div class="mb-8 scroll-mt-4" id="logs">
 <h2 class="text-sm font-semibold text-gray-900 mb-3">Logs</h2>
-<release-logs url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs"></release-logs>
+<release-logs id="rl-testorg-my-api-my-api-rel" url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs"></release-logs>
 </div>
 <div class="mb-8">
 <h2 class="text-sm font-semibold text-gray-900 mb-3">Spec</h2>
-<spec-viewer content="project: &quot;billing&quot; &lt;&amp;&gt;" filename="forest.cue"></spec-viewer>
+<spec-viewer id="spec-testorg-my-api-my-api-rel" content="project: &quot;billing&quot; &lt;&amp;&gt;" filename="forest.cue"></spec-viewer>
 </div>
 <div class="mb-8">
 <h2 class="text-sm font-semibold text-gray-900 mb-3">Details</h2>

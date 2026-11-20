@@ -14,7 +14,7 @@ props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_tok
       </div>
     </div>
     <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} />
-    <release-timeline org={org} project={project} csrf={csrf_token} username={username} role={role}></release-timeline>
+    <release-timeline id="rt-{org}-{project}" sedx-preserve org={org} project={project} csrf={csrf_token} username={username} role={role}></release-timeline>
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>

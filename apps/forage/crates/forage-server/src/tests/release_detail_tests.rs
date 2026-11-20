@@ -399,8 +399,8 @@ async fn stages_and_destinations_show_their_status_and_environment() {
     assert!(html.contains(r#"<span class="text-xs text-blue-600">Queued #2</span>"#));
     assert!(html.contains(r#"<span class="text-xs text-green-600">Deployed</span>"#));
     assert!(html.contains(r#"id="dest-prod-eu""#) && html.contains(r#"id="stage-deploy-staging""#));
-    assert!(html.contains(r#"<release-logs url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs"></release-logs>"#));
-    assert!(html.contains(r#"<spec-viewer content="project: &quot;billing&quot; &lt;&amp;&gt;" filename="forest.cue">"#), "{html}");
+    assert!(html.contains(r#"<release-logs id="rl-testorg-my-api-my-api-rel" url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs"></release-logs>"#));
+    assert!(html.contains(r#"<spec-viewer id="spec-testorg-my-api-my-api-rel" content="project: &quot;billing&quot; &lt;&amp;&gt;" filename="forest.cue">"#), "{html}");
 }
 
 #[tokio::test]

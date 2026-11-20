@@ -16,6 +16,7 @@ pub struct Assets {
     pub css_hash: String,
     pub ui_js_hash: String,
     pub components_js_hash: String,
+    pub sedx_js_hash: String,
 }
 
 impl Default for Assets {
@@ -24,6 +25,7 @@ impl Default for Assets {
             css_hash: "dev".into(),
             ui_js_hash: "dev".into(),
             components_js_hash: "dev".into(),
+            sedx_js_hash: "dev".into(),
         }
     }
 }

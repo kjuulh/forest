@@ -331,7 +331,7 @@ async fn the_org_releases_page_primes_the_timeline_and_loads_the_island() {
         "the releases page no longer primes the timeline: {html}"
     );
     assert!(
-        html.contains(r#"<release-timeline org="testorg"></release-timeline>"#),
+        html.contains(r#"<release-timeline id="rt-testorg" sedx-preserve org="testorg"></release-timeline>"#),
         "{html}"
     );
     assert!(

@@ -225,6 +225,8 @@ function paint(link, label, positions) {
   if (at < label.length) link.appendChild(document.createTextNode(label.slice(at)));
 }
 
+const bindings = new WeakMap();
+
 function enhance(details) {
   const list = details.querySelector("[data-fuzzy-list]");
   if (!list || list.dataset.fuzzyReady) return;
@@ -233,6 +235,10 @@ function enhance(details) {
   if (links.length < toInt(details.dataset.fuzzyMin, DEFAULT_MIN_ITEMS)) return;
 
   list.dataset.fuzzyReady = "1";
+  bindings.get(details)?.abort();
+  const controller = new AbortController();
+  bindings.set(details, controller);
+  const { signal } = controller;
   const limit = toInt(details.dataset.fuzzyLimit, DEFAULT_LIMIT);
   const labels = links.map((a) => a.textContent.trim());
   const id = `fuzzy-${++uid}`;
@@ -366,17 +372,17 @@ function enhance(details) {
       default:
         break;
     }
-  });
+  }, { signal });
 
   details.addEventListener("toggle", () => {
     if (details.open) opened();
-  });
+  }, { signal });
 
   summary?.addEventListener("click", () => {
     requestAnimationFrame(() => {
       if (details.open) opened();
     });
-  });
+  }, { signal });
 
   apply();
 }
@@ -387,4 +393,5 @@ export function initFuzzySwitchers(root = document) {
 
 if (typeof document !== "undefined") {
   initFuzzySwitchers();
+  document.addEventListener("sedx:load", () => initFuzzySwitchers());
 }

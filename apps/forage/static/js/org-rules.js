@@ -1,6 +1,18 @@
 (function() {
-    const projects = JSON.parse(document.getElementById('org-rule-projects-data').textContent || '[]');
-    const ruleSets = JSON.parse(document.getElementById('org-rule-sets-data').textContent || '[]');
+    let projects = [];
+    let ruleSets = [];
+    let controller = null;
+    let signal = null;
+
+    function readJson(id) {
+        const el = document.getElementById(id);
+        if (!el) return [];
+        try {
+            return JSON.parse(el.textContent || '[]') || [];
+        } catch (e) {
+            return [];
+        }
+    }
 
     function splitCsvLines(value) {
         return (value || '')
@@ -136,7 +148,7 @@
                 el.querySelectorAll('input').forEach(input => input.disabled = !active);
             }
         }
-        type.addEventListener('change', toggle);
+        type.addEventListener('change', toggle, { signal });
         toggle();
     }
 
@@ -183,15 +195,15 @@
                 const selected = patternTypes.find(item => item.value === select.value);
                 input.placeholder = selected ? selected.placeholder : '';
                 refreshOptions();
-            });
+            }, { signal });
             row.querySelector('button').addEventListener('click', () => {
                 row.remove();
                 refreshOptions();
-            });
+            }, { signal });
             rows.appendChild(row);
             refreshOptions();
         }
-        addBtn.addEventListener('click', addPatternRow);
+        addBtn.addEventListener('click', addPatternRow, { signal });
         addPatternRow();
     }
 
@@ -301,36 +313,53 @@
                 event.preventDefault();
                 alert(err.message);
             }
-        });
+        }, { signal });
     }
 
-    document.querySelectorAll('[data-rule-preview]').forEach(target => {
-        const name = target.getAttribute('data-rule-preview');
-        const rule = ruleSets.find(item => item.name === name);
-        renderPreview(target, matchesSelector((rule && rule.selector) || {}));
-    });
+    function init() {
+        const root = document.getElementById('org-rule-projects-data');
+        if (root && root.dataset.orgRulesReady) return;
+        if (controller) controller.abort();
+        controller = null;
+        signal = null;
+        if (!root) return;
+        root.dataset.orgRulesReady = '1';
+        controller = new AbortController();
+        signal = controller.signal;
+        projects = readJson('org-rule-projects-data');
+        ruleSets = readJson('org-rule-sets-data');
 
-    const form = document.getElementById('org-rule-form');
-    const livePreview = document.getElementById('new-rule-preview');
-    if (form && livePreview) {
-        function updateLivePreview() {
-            const metadata = parseMetadataMatch(form.elements.metadata_match.value);
-            if (metadata.error) {
-                renderPreview(livePreview, { error: metadata.error, matches: [] });
-                return;
+        document.querySelectorAll('[data-rule-preview]').forEach(target => {
+            const name = target.getAttribute('data-rule-preview');
+            const rule = ruleSets.find(item => item.name === name);
+            renderPreview(target, matchesSelector((rule && rule.selector) || {}));
+        });
+
+        const form = document.getElementById('org-rule-form');
+        const livePreview = document.getElementById('new-rule-preview');
+        if (form && livePreview) {
+            function updateLivePreview() {
+                const metadata = parseMetadataMatch(form.elements.metadata_match.value);
+                if (metadata.error) {
+                    renderPreview(livePreview, { error: metadata.error, matches: [] });
+                    return;
+                }
+                renderPreview(livePreview, matchesSelector({
+                    include_projects: splitCsvLines(form.elements.include_projects.value),
+                    exclude_projects: splitCsvLines(form.elements.exclude_projects.value),
+                    name_regex: form.elements.name_regex.value.trim() || null,
+                    metadata_match: metadata.pairs,
+                    tags: splitCsvLines(form.elements.tags.value),
+                }));
             }
-            renderPreview(livePreview, matchesSelector({
-                include_projects: splitCsvLines(form.elements.include_projects.value),
-                exclude_projects: splitCsvLines(form.elements.exclude_projects.value),
-                name_regex: form.elements.name_regex.value.trim() || null,
-                metadata_match: metadata.pairs,
-                tags: splitCsvLines(form.elements.tags.value),
-            }));
+            ['include_projects', 'exclude_projects', 'name_regex', 'metadata_match', 'tags'].forEach(name => {
+                form.elements[name].addEventListener('input', updateLivePreview, { signal });
+            });
+            wireRuleBuilders(form);
+            updateLivePreview();
         }
-        ['include_projects', 'exclude_projects', 'name_regex', 'metadata_match', 'tags'].forEach(name => {
-            form.elements[name].addEventListener('input', updateLivePreview);
-        });
-        wireRuleBuilders(form);
-        updateLivePreview();
     }
+
+    init();
+    document.addEventListener('sedx:load', init);
 })();
