@@ -382,6 +382,101 @@ async fn a_pending_approval_offers_approve_bypass_and_reject_for_its_environment
     assert!(html.contains(">Approval</span>") && html.contains(">Soak Time</span>"));
 }
 
+fn with_plan(
+    mut behavior: MockPlatformBehavior,
+    plan: PipelineRunStageState,
+) -> MockPlatformBehavior {
+    if let Some(Ok(intents)) = behavior.get_release_intent_states_result.as_mut() {
+        let stages = &mut intents[0].stages;
+        let i = stages
+            .iter()
+            .position(|s| s.stage_id == "plan-prod")
+            .unwrap();
+        stages[i] = plan;
+    }
+    behavior
+}
+
+const WAITING: &str =
+    "waiting for release brave-otter to apply its plan for prod-eu before planning";
+
+#[tokio::test]
+async fn a_plan_held_by_another_release_says_who_it_waits_for_not_that_it_failed() {
+    let plan = PipelineRunStageState {
+        depends_on: vec!["soak".into()],
+        error_message: Some(WAITING.into()),
+        ..stage("plan-prod", "plan", "RUNNING", Some("prod"))
+    };
+    let mut behavior = with_plan(behaviour(), plan);
+    if let Some(Ok(states)) = behavior.get_destination_states_result.as_mut() {
+        let queued = states
+            .destinations
+            .iter_mut()
+            .find(|d| d.destination_name == "prod-eu")
+            .unwrap();
+        queued.error_message = Some(WAITING.into());
+    }
+    let html = page(behavior).await;
+    assert!(html.contains("Waiting to plan"), "{html}");
+    assert_eq!(
+        html.matches(&format!(
+            r#"class="text-xs text-gray-600 break-words">{WAITING}</p>"#
+        ))
+        .count(),
+        2,
+        "the stage and its queued destination both say why: {html}"
+    );
+    assert!(!html.contains("text-red-600 break-words"), "{html}");
+    assert!(!html.contains("text-red-700 bg-red-50"), "{html}");
+}
+
+#[tokio::test]
+async fn a_stale_plan_offers_reject_but_not_approve() {
+    let reason = "stale: release brave-otter planned prod-eu after this plan; reject it and release again to plan afresh";
+    let plan = PipelineRunStageState {
+        depends_on: vec!["soak".into()],
+        approval_status: Some("AWAITING_APPROVAL".into()),
+        error_message: Some(reason.into()),
+        ..stage("plan-prod", "plan", "RUNNING", Some("prod"))
+    };
+    let html = page(with_plan(behaviour(), plan)).await;
+    assert!(html.contains("Plan stale"), "{html}");
+    assert!(html.contains(&format!(
+        r#"<p data-plan-hold class="text-xs text-gray-600 break-words">{reason}</p>"#
+    )));
+    assert!(
+        form(
+            &html,
+            "/api/orgs/testorg/projects/my-api/plan-stages/plan-prod/approve"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        form(
+            &html,
+            "/api/orgs/testorg/projects/my-api/plan-stages/plan-prod/reject"
+        )
+        .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_superseded_plan_names_the_release_that_superseded_it() {
+    let reason = "superseded by release brave-otter, which planned prod-eu after it (supersede-pending policy 'collapse')";
+    let plan = PipelineRunStageState {
+        depends_on: vec!["soak".into()],
+        error_message: Some(reason.into()),
+        ..stage("plan-prod", "plan", "PENDING", Some("prod"))
+    };
+    let html = page(with_plan(behaviour(), plan)).await;
+    assert!(html.contains("Plan superseded"), "{html}");
+    assert!(
+        html.contains(r#"<p data-plan-hold class="text-xs text-gray-600 break-words">superseded by release brave-otter, which planned prod-eu after it"#),
+        "{html}"
+    );
+}
+
 #[tokio::test]
 async fn stages_and_destinations_show_their_status_and_environment() {
     let html = page(behaviour()).await;

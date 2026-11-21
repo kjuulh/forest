@@ -462,6 +462,88 @@ fn approval_request_names_who_can_approve_and_reaches_direct_messages() {
     assert!(!ThreadPost::new("changes".into(), String::new()).for_direct_message());
 }
 
+fn plan_with_reason(status: &str, reason: &str) -> PipelineRunStageState {
+    PipelineRunStageState {
+        error_message: Some(reason.into()),
+        ..stage("plan-prod", "plan", "prod", status, &["dev"])
+    }
+}
+
+#[test]
+fn a_held_plan_says_which_release_it_waits_for() {
+    let case = Case::new(
+        event("release_started", "dev-k8s", "dev"),
+        vec![
+            stage("dev", "deploy", "dev", "SUCCEEDED", &[]),
+            plan_with_reason(
+                "RUNNING",
+                "waiting for release brave-otter to apply its plan for prod-eu before planning",
+            ),
+        ],
+    );
+    let text = case.parent().to_string();
+    assert!(
+        text.contains("|prod> is waiting for release brave-otter to apply its plan for prod-eu before planning"),
+        "{text}"
+    );
+    assert!(!text.contains("Planning"), "{text}");
+}
+
+#[test]
+fn a_stale_plan_says_to_re_run_and_asks_nobody_to_approve_it() {
+    let reason = "stale: release brave-otter planned prod-eu after this plan; reject it and release again to plan afresh";
+    let case = Case::new(
+        event("release_succeeded", "dev-k8s", "dev"),
+        vec![
+            stage("dev", "deploy", "dev", "SUCCEEDED", &[]),
+            plan_with_reason("AWAITING_APPROVAL", reason),
+        ],
+    );
+    let text = case.parent().to_string();
+    assert!(text.contains(&format!("|prod> is {reason}")), "{text}");
+    let posts = thread_posts(&case.view(), &ThreadDetail::default());
+    assert!(
+        posts
+            .iter()
+            .all(|p| p.key != "approval:plan-prod:requested"),
+        "{:?}",
+        posts.iter().map(|p| &p.key).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_superseded_plan_names_the_release_that_superseded_it() {
+    let case = Case::new(
+        event("release_succeeded", "dev-k8s", "dev"),
+        vec![
+            stage("dev", "deploy", "dev", "SUCCEEDED", &[]),
+            plan_with_reason(
+                "SUPERSEDED",
+                "superseded by release brave-otter, which planned prod-eu after it (supersede-pending policy 'collapse')",
+            ),
+        ],
+    )
+    .with("dev-k8s", dest("dev", "succeeded"));
+    let text = case.parent().to_string();
+    assert!(
+        text.contains("|prod> was superseded by release brave-otter, which planned prod-eu after it (supersede-pending policy 'collapse')"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_failed_plan_keeps_its_failure_label() {
+    let case = Case::new(
+        event("release_failed", "dev-k8s", "dev"),
+        vec![
+            stage("dev", "deploy", "dev", "SUCCEEDED", &[]),
+            plan_with_reason("FAILED", "terraform exploded"),
+        ],
+    );
+    let text = case.parent().to_string();
+    assert!(text.contains("|prod> failed"), "{text}");
+}
+
 #[test]
 fn a_single_change_posts_no_changes_reply() {
     let case = Case::new(event("release_started", "dev-k8s", "dev"), vec![]);

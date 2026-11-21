@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT work_dir, plan, lock_file\n                FROM terraform_plans\n                WHERE release_intent_id = $1 AND destination_id = $2\n                ORDER BY work_dir\n            ",
+  "query": "\n                SELECT work_dir, plan, lock_file, has_changes\n                FROM terraform_plans\n                WHERE release_intent_id = $1 AND destination_id = $2\n                ORDER BY work_dir\n            ",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "lock_file"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "has_changes",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "terraform_plans",
+            "name": "has_changes"
+          }
+        }
       }
     ],
     "parameters": {
@@ -46,8 +57,9 @@
     "nullable": [
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "0ab6a01cf5d1a8f152ab00b6af817dedd977bff31427494c063b0ea3a28b24f6"
+  "hash": "5d45780a9d73f5be7f73e77f06bac69d8a1d0efa7a00125dd8c79612691ef3dc"
 }

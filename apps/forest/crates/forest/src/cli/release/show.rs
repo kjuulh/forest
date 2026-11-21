@@ -195,7 +195,7 @@ impl ShowCommand {
         output.attach_state(&intent_state, &plan_outputs, stages_filter);
         output.attach_signals(&signals);
 
-        let awaiting: Vec<String> = match &watch {
+        let parked: Vec<String> = match &watch {
             Some(w) => w.progress.awaiting_approval(),
             None => intent_state
                 .stages
@@ -204,8 +204,18 @@ impl ShowCommand {
                 .map(|s| s.stage_id.clone())
                 .collect(),
         };
+        let awaiting: Vec<String> = parked
+            .iter()
+            .cloned()
+            .filter(|id| {
+                !intent_state
+                    .stages
+                    .iter()
+                    .any(|s| &s.stage_id == id && is_stale(s.error_message.as_deref()))
+            })
+            .collect();
         let in_progress = watch.as_ref().is_some_and(|w| {
-            w.end == WatchEnd::Snapshot && !w.progress.is_terminal() && awaiting.is_empty()
+            w.end == WatchEnd::Snapshot && !w.progress.is_terminal() && parked.is_empty()
         });
 
         if stages_filter.is_some() {
@@ -874,13 +884,20 @@ fn signal_icon(status: &str) -> &'static str {
     }
 }
 
+fn is_stale(error_message: Option<&str>) -> bool {
+    error_message.is_some_and(|m| m.starts_with("stale: "))
+}
+
 fn render_stage(out: &mut String, s: &StageView) {
     use std::fmt::Write;
     let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
+    let stale = awaiting && is_stale(s.error_message.as_deref());
     let _ = writeln!(
         out,
         "  {icon} {sid}: {st}({started}) [{status}{approval}]",
-        icon = if awaiting {
+        icon = if stale {
+            "⇥"
+        } else if awaiting {
             "⏸"
         } else {
             stage_icon(&s.status)
@@ -889,13 +906,23 @@ fn render_stage(out: &mut String, s: &StageView) {
         st = s.stage_type,
         started = s.started_at.as_deref().unwrap_or(""),
         status = s.status,
-        approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
+        approval = if stale {
+            ", STALE"
+        } else if awaiting {
+            ", AWAITING_APPROVAL"
+        } else {
+            ""
+        },
     );
     if let Some(err) = &s.error_message {
-        let label = if s.status == "PENDING" {
-            "blocked"
-        } else {
-            "error"
+        if stale {
+            let _ = writeln!(out, "    {err}");
+            return;
+        }
+        let label = match s.status.as_str() {
+            "PENDING" => "blocked",
+            "ACTIVE" => "waiting",
+            _ => "error",
         };
         let _ = writeln!(out, "    {label}: {err}");
     }
@@ -1049,6 +1076,44 @@ mod tests {
     fn unknown_wire_statuses_read_as_unspecified_rather_than_healthy() {
         assert_eq!(signal_status_name(0), "UNSPECIFIED");
         assert_eq!(signal_status_name(999), "UNSPECIFIED");
+    }
+
+    #[test]
+    fn a_held_plan_stage_says_which_release_it_waits_for() {
+        let mut out = String::new();
+        render_stage(
+            &mut out,
+            &StageView {
+                error_message: Some(
+                    "waiting for release brave-otter to apply its plan for prod-eu before planning"
+                        .into(),
+                ),
+                ..plan_stage(None)
+            },
+        );
+        assert_eq!(
+            out,
+            "  ▶ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE]\n    waiting: waiting for release \
+             brave-otter to apply its plan for prod-eu before planning\n"
+        );
+    }
+
+    #[test]
+    fn a_stale_plan_stage_says_so_instead_of_offering_approval() {
+        let mut out = String::new();
+        let reason = "stale: release calm-heron planned prod-eu after this plan; \
+                      reject it and release again to plan afresh";
+        render_stage(
+            &mut out,
+            &StageView {
+                error_message: Some(reason.into()),
+                ..plan_stage(Some("AWAITING_APPROVAL"))
+            },
+        );
+        assert_eq!(
+            out,
+            format!("  ⇥ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE, STALE]\n    {reason}\n")
+        );
     }
 
     #[test]

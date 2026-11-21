@@ -96,12 +96,14 @@ impl ReleasesCommand {
                     }
 
                     if let Some(err) = &stage.error_message {
-                        let label = if status == PipelineRunStageStatus::Pending {
-                            "blocked"
-                        } else {
-                            "error"
-                        };
-                        println!("      {label}: {err}");
+                        match status {
+                            PipelineRunStageStatus::Pending => println!("      blocked: {err}"),
+                            PipelineRunStageStatus::Active if err.starts_with("stale: ") => {
+                                println!("      {err}")
+                            }
+                            PipelineRunStageStatus::Active => println!("      waiting: {err}"),
+                            _ => println!("      error: {err}"),
+                        }
                     }
 
                     for step in &intent.steps {
