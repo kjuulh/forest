@@ -38,6 +38,10 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/releases/{slug}",
             get(artifact_detail),
         )
+        .route(
+            "/orgs/{org}/projects/{project}/releases/{slug}/graph",
+            get(release_graph_fragment),
+        )
         .route("/orgs/{org}/releases", get(releases_page))
         .route("/orgs/{org}/destinations", get(destinations_page))
         .route(
@@ -942,6 +946,7 @@ async fn project_releases(
         username: session.user.username.clone(),
         role: current_role,
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::project_releases::render(&page);
 
@@ -952,6 +957,72 @@ async fn deployments_to_releases_redirect(
     Path((org, project)): Path<(String, String)>,
 ) -> Response {
     Redirect::to(&format!("/orgs/{org}/projects/{project}/releases")).into_response()
+}
+
+async fn release_graph_fragment(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, project, slug)): Path<(String, String, String)>,
+) -> Result<Response, Response> {
+    require_org_membership(&state, &session.user.orgs, &org)?;
+    if !validate_slug(&project) {
+        return Err(error_page(&state, StatusCode::BAD_REQUEST, "Invalid request", "Invalid project name."));
+    }
+    let (artifacts, intents) = tokio::join!(
+        state.platform_client.list_artifacts(&session.access_token, &org, &project),
+        state.platform_client.get_release_intent_states(&session.access_token, &org, Some(&project), true),
+    );
+    let artifact = artifacts
+        .map_err(|error| internal_error(&state, "failed to fetch artifacts", &error))?
+        .into_iter().find(|artifact| artifact.slug == slug)
+        .ok_or_else(|| error_page(
+            &state, StatusCode::NOT_FOUND, "Not found", "This release could not be found.",
+        ))?;
+    let intents = intents.map_err(|error| internal_error(&state, "failed to fetch release intents", &error))?;
+    let intent = intents.iter()
+        .filter(|intent| intent.artifact_id == artifact.artifact_id && intent.project == project)
+        .max_by_key(|intent| &intent.created_at);
+    let mut policies = Vec::new();
+    if let Some(intent) = intent {
+        let environments: std::collections::BTreeSet<_> = intent.stages.iter()
+            .filter_map(|stage| stage.environment.as_deref()).collect();
+        for environment in environments {
+            if let Ok(evaluations) = state.platform_client.evaluate_policies(
+                &session.access_token, &org, &project, environment, Some(&intent.release_intent_id),
+            ).await {
+                policies.extend(evaluations.into_iter().map(|evaluation| crate::views::release::PolicyCheck {
+                    name: evaluation.policy_name,
+                    policy_type: evaluation.policy_type,
+                    passed: evaluation.passed,
+                    reason: evaluation.reason,
+                    target_environment: environment.to_owned(),
+                    approval: evaluation.approval_state,
+                }));
+            }
+        }
+    }
+    policies.sort_by(|a, b| a.policy_type.cmp(&b.policy_type).then(a.name.cmp(&b.name))
+        .then(a.target_environment.cmp(&b.target_environment)));
+    let metadata = artifact.context.description.as_deref()
+        .filter(|description| description.starts_with("Branch:"))
+        .map(parse_description_metadata).unwrap_or_default();
+    let page = crate::views::release::GraphFragmentPage {
+        graph: crate::views::release_graph::ReleaseGraph::build(
+            intent, &policies, &artifact.destinations, std::iter::empty(),
+        ),
+        release: crate::views::release::details(&artifact, &metadata),
+        workspace_id: format!("release-graph-{}", forage_core::integrations::slack_release::anchor_id(
+            &format!("{project}-{}", artifact.artifact_id),
+        )),
+        detail_url: crate::views::release::release_href(&org, &project, &artifact.slug),
+        logs_url: crate::views::release::logs_href(&org, &project, &artifact.slug),
+        plan_output_url: format!(
+            "/api/orgs/{}/projects/{}/plan-stages/",
+            forage_ui::format::urlencode(&org), forage_ui::format::urlencode(&project),
+        ),
+        release_intent_id: intent.map(|intent| intent.release_intent_id.clone()).unwrap_or_default(),
+    };
+    Ok(Html(crate::views::fragments::release_graph::render(&page)).into_response())
 }
 
 async fn artifact_detail(
@@ -1176,6 +1247,15 @@ async fn artifact_detail(
         .filter(|d| d.starts_with("Branch:"))
         .map(parse_description_metadata)
         .unwrap_or_default();
+    let graph = crate::views::release_graph::ReleaseGraph::build(
+        release_intents
+            .iter()
+            .filter(|ri| ri.artifact_id == artifact.artifact_id)
+            .max_by_key(|ri| &ri.created_at),
+        &policies,
+        &artifact.destinations,
+        stages.iter().filter_map(|stage| stage.plan_output.as_deref().map(|output| (stage.id.as_str(), output))),
+    );
 
     let page = crate::views::release::ReleasePage {
         chrome: crate::views::chrome::signed_in(
@@ -1221,6 +1301,8 @@ async fn artifact_detail(
             .any(|ri| ri.artifact_id == artifact.artifact_id),
         spec: Some(artifact_spec).filter(|s| !s.is_empty()),
         health,
+        graph,
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::artifact_detail::render(&page);
 
@@ -1777,6 +1859,8 @@ fn topo_sort_run_stages(
 pub struct ApiTimelineResponse {
     pub timeline: Vec<ApiTimelineItem>,
     pub lanes: Vec<ApiLane>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_html: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1823,6 +1907,8 @@ pub struct ApiRelease {
 pub struct ApiDestinationState {
     pub name: String,
     pub environment: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_id: Option<String>,
     pub status: Option<String>,
     pub error_message: Option<String>,
     pub queued_at: Option<String>,
@@ -1842,6 +1928,7 @@ pub struct ApiEnvGroup {
 pub struct ApiPipelineStage {
     pub id: String,
     pub stage_type: String,
+    pub depends_on: Vec<String>,
     pub environment: Option<String>,
     pub duration_seconds: Option<i64>,
     pub status: String,
@@ -1864,6 +1951,31 @@ pub struct ApiLane {
     pub description: Option<String>,
 }
 
+#[derive(Default, Deserialize)]
+struct TimelineQuery {
+    #[serde(default)]
+    include_graph: bool,
+}
+
+fn timeline_environment_graph(
+    org: &str,
+    project: Option<&str>,
+    items: &[ArtifactWithProject],
+    environments: &[forage_core::platform::Environment],
+    destinations: &forage_core::platform::DeploymentStates,
+    intents: &[forage_core::platform::ReleaseIntentState],
+) -> String {
+    let page = crate::views::release::EnvironmentGraphFragmentPage {
+        graph: crate::views::release_graph::ReleaseGraph::environments(
+            org, environments, destinations,
+            items.iter().map(|item| (item.project_name.as_str(), &item.artifact)),
+            intents,
+        ),
+        context: project.map(|project| format!("{org} / {project}")).unwrap_or_else(|| org.into()),
+    };
+    crate::views::fragments::environment_graph::render(&page)
+}
+
 fn build_timeline_json(
     items: Vec<ArtifactWithProject>,
     environments: &[forage_core::platform::Environment],
@@ -1871,6 +1983,7 @@ fn build_timeline_json(
     release_intents: &[forage_core::platform::ReleaseIntentState],
     pipelines_by_project: &PipelinesByProject,
     approval_envs: &[String],
+    graph_html: Option<String>,
 ) -> ApiTimelineResponse {
     let mut states_by_artifact: std::collections::HashMap<
         &str,
@@ -1904,6 +2017,26 @@ fn build_timeline_json(
                 .extend(ri.steps.iter());
         }
     }
+    let stage_by_release: std::collections::HashMap<&str, &str> = release_intents
+        .iter()
+        .flat_map(|intent| intent.stages.iter())
+        .flat_map(|stage| {
+            stage
+                .release_ids
+                .iter()
+                .map(move |release| (release.as_str(), stage.stage_id.as_str()))
+        })
+        .chain(
+            release_intents
+                .iter()
+                .flat_map(|intent| intent.steps.iter())
+                .filter_map(|step| {
+                    step.stage_id
+                        .as_deref()
+                        .map(|stage| (step.release_id.as_str(), stage))
+                }),
+        )
+        .collect();
 
     struct RawRelease {
         release: ApiRelease,
@@ -1958,6 +2091,11 @@ fn build_timeline_json(
                 ApiDestinationState {
                     name: ds.destination_name.clone(),
                     environment: ds.environment.clone(),
+                    stage_id: ds
+                        .release_id
+                        .as_deref()
+                        .and_then(|release| stage_by_release.get(release))
+                        .map(|stage| (*stage).to_owned()),
                     status: ds.status.clone(),
                     error_message: ds.error_message.clone(),
                     queued_at: ds.queued_at.clone(),
@@ -2075,6 +2213,7 @@ fn build_timeline_json(
                     stages.push(ApiPipelineStage {
                         id: rs.stage_id.clone(),
                         stage_type: rs.stage_type.clone(),
+                        depends_on: rs.depends_on.clone(),
                         environment: rs.environment.clone(),
                         duration_seconds: rs.duration_seconds,
                         status: display_status,
@@ -2231,13 +2370,14 @@ fn build_timeline_json(
         });
     }
 
-    ApiTimelineResponse { timeline, lanes }
+    ApiTimelineResponse { timeline, lanes, graph_html }
 }
 
 async fn timeline_api(
     State(state): State<AppState>,
     session: Session,
     Path((org, project)): Path<(String, String)>,
+    Query(query): Query<TimelineQuery>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
     require_org_membership(&state, orgs, &org)?;
@@ -2312,6 +2452,9 @@ async fn timeline_api(
         })
         .collect();
 
+    let graph_html = query.include_graph.then(|| timeline_environment_graph(
+        &org, Some(&project), &items, &environments, &dest_states, &release_intents,
+    ));
     let data = build_timeline_json(
         items,
         &environments,
@@ -2319,6 +2462,7 @@ async fn timeline_api(
         &release_intents,
         &pipelines_map,
         &approval_envs,
+        graph_html,
     );
 
     Ok(Json(data).into_response())
@@ -2328,6 +2472,7 @@ async fn org_timeline_api(
     State(state): State<AppState>,
     session: Session,
     Path(org): Path<String>,
+    Query(query): Query<TimelineQuery>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
     require_org_membership(&state, orgs, &org)?;
@@ -2373,6 +2518,9 @@ async fn org_timeline_api(
     }
 
     let items = fetch_org_artifacts(&state, &session.access_token, &org, &projects).await;
+    let graph_html = query.include_graph.then(|| timeline_environment_graph(
+        &org, None, &items, &environments, &dest_states, &release_intents,
+    ));
     let data = build_timeline_json(
         items,
         &environments,
@@ -2380,6 +2528,7 @@ async fn org_timeline_api(
         &release_intents,
         &pipelines_by_project,
         &[],
+        graph_html,
     );
 
     Ok(Json(data).into_response())
@@ -2433,6 +2582,7 @@ async fn releases_page(
         ),
         org: org.clone(),
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::releases::render(&page);
 

@@ -117,6 +117,15 @@ pub(crate) struct MockPlatformBehavior {
     pub get_visibility_result: Option<Result<forage_core::platform::Visibility, PlatformError>>,
     pub set_visibility_result: Option<Result<(), PlatformError>>,
     pub visibility_calls: Option<Arc<Mutex<Vec<String>>>>,
+    pub graph_rpc_calls: Option<Arc<Mutex<Vec<String>>>>,
+}
+
+impl MockPlatformBehavior {
+    fn record_graph_rpc(&self, call: impl Into<String>) {
+        if let Some(calls) = &self.graph_rpc_calls {
+            calls.lock().unwrap().push(call.into());
+        }
+    }
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -504,6 +513,7 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
     ) -> Result<Vec<String>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("list_projects");
         b.list_projects_result
             .clone()
             .unwrap_or(Ok(vec!["my-api".into()]))
@@ -532,6 +542,7 @@ impl ForestPlatform for MockPlatformClient {
         project: &str,
     ) -> Result<Vec<Artifact>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("list_artifacts");
         if let Some(by_project) = b.list_artifacts_by_project.as_ref() {
             return Ok(by_project.get(project).cloned().unwrap_or_default());
         }
@@ -624,6 +635,7 @@ impl ForestPlatform for MockPlatformClient {
         slug: &str,
     ) -> Result<Artifact, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_artifact_by_slug");
         b.get_artifact_by_slug_result
             .clone()
             .unwrap_or(Ok(Artifact {
@@ -648,6 +660,7 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
     ) -> Result<Vec<Environment>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("list_environments");
         b.list_environments_result.clone().unwrap_or(Ok(vec![]))
     }
 
@@ -749,6 +762,7 @@ impl ForestPlatform for MockPlatformClient {
         _project: Option<&str>,
     ) -> Result<forage_core::platform::DeploymentStates, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_destination_states");
         b.get_destination_states_result.clone().unwrap_or(Ok(
             forage_core::platform::DeploymentStates {
                 destinations: vec![],
@@ -764,6 +778,7 @@ impl ForestPlatform for MockPlatformClient {
         _include_completed: bool,
     ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_release_intent_states");
         b.get_release_intent_states_result
             .clone()
             .unwrap_or(Ok(vec![]))
@@ -775,6 +790,7 @@ impl ForestPlatform for MockPlatformClient {
         _release_intent_id: &str,
     ) -> Result<forage_core::platform::ReleaseHealth, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_release_health");
         Ok(b.get_release_health_result.clone().unwrap_or_default())
     }
 
@@ -943,6 +959,7 @@ impl ForestPlatform for MockPlatformClient {
         _project: &str,
     ) -> Result<Vec<Policy>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("list_policies");
         b.list_policies_result.clone().unwrap_or(Ok(vec![]))
     }
 
@@ -1015,6 +1032,7 @@ impl ForestPlatform for MockPlatformClient {
         _project: &str,
     ) -> Result<Vec<ReleasePipeline>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("list_release_pipelines");
         b.list_release_pipelines_result
             .clone()
             .unwrap_or(Ok(vec![]))
@@ -1081,6 +1099,7 @@ impl ForestPlatform for MockPlatformClient {
         _artifact_id: &str,
     ) -> Result<String, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_artifact_spec");
         b.get_artifact_spec_result
             .clone()
             .unwrap_or(Ok(String::new()))
@@ -1134,6 +1153,7 @@ impl ForestPlatform for MockPlatformClient {
         _release_intent_id: Option<&str>,
     ) -> Result<Vec<forage_core::platform::PolicyEvaluation>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc(format!("evaluate_policies:{}:{}:{}", _project, _target_environment, _release_intent_id.unwrap_or("")));
         b.evaluate_policies_result.clone().unwrap_or(Ok(vec![]))
     }
 
@@ -1213,6 +1233,7 @@ impl ForestPlatform for MockPlatformClient {
         _stage_id: &str,
     ) -> Result<forage_core::platform::PlanOutput, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        b.record_graph_rpc("get_plan_output");
         b.get_plan_output_result.clone().unwrap_or_else(|| {
             Ok(forage_core::platform::PlanOutput {
                 plan_output: String::new(),

@@ -1,6 +1,6 @@
 use forage_ui::components::TimelinePrefetch;
 use forage_ui::layouts::Shell;
-props crate::views::catalogue::OrgReleasesPage { chrome, org, prefetch_js };
+props crate::views::catalogue::OrgReleasesPage { chrome, org, prefetch_js, graph_js };
 
 <Shell chrome={chrome}>
   <section class="app-container py-12">
@@ -12,5 +12,6 @@ props crate::views::catalogue::OrgReleasesPage { chrome, org, prefetch_js };
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+    <script src={graph_js}></script>
   </:scripts>
 </Shell>

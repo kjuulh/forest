@@ -28,6 +28,23 @@ pub struct ReleasePage {
     pub has_release_intents: bool,
     pub spec: Option<String>,
     pub health: Option<forage_core::platform::ReleaseHealth>,
+    pub graph: super::release_graph::ReleaseGraph,
+    pub graph_js: String,
+}
+
+pub struct GraphFragmentPage {
+    pub graph: super::release_graph::ReleaseGraph,
+    pub release: ReleaseDetails,
+    pub workspace_id: String,
+    pub detail_url: String,
+    pub logs_url: String,
+    pub plan_output_url: String,
+    pub release_intent_id: String,
+}
+
+pub struct EnvironmentGraphFragmentPage {
+    pub graph: super::release_graph::ReleaseGraph,
+    pub context: String,
 }
 
 // Class names stay whole literals: Tailwind scans this directory for them.
