@@ -425,7 +425,15 @@ async fn two_stale_destinations_in_one_attempt_still_replan_once() -> anyhow::Re
 }
 
 impl Scene {
-    async fn retire_if_overtaken(&self, release_id: Uuid) -> bool {
+    async fn retire_if_overtaken(&self, release_id: Uuid) -> newest_wins::Overtaken {
+        self.retire_if_overtaken_on(release_id, None).await
+    }
+
+    async fn retire_if_overtaken_on(
+        &self,
+        release_id: Uuid,
+        same_branch: Option<&str>,
+    ) -> newest_wins::Overtaken {
         let state = self
             .f
             .state
@@ -438,6 +446,7 @@ impl Scene {
             &self.f.state.nats,
             &state,
             "grund-pakkelyst-dev",
+            same_branch,
         )
         .await
         .expect("newest-wins check")
@@ -473,7 +482,10 @@ async fn an_older_deploy_freed_from_a_backlog_never_lands_over_a_newer_one() -> 
     let (newer, _) = s.planned_and_deploying("deployed-first", "SUCCEEDED").await;
     let newer_slug = s.slug(newer).await;
 
-    assert!(s.retire_if_overtaken(older_deploy).await);
+    assert_eq!(
+        s.retire_if_overtaken(older_deploy).await,
+        newest_wins::Overtaken::Superseded
+    );
     assert_eq!(s.release_status(older_deploy).await, "SUPERSEDED");
 
     s.evaluate(older).await;
@@ -489,18 +501,57 @@ async fn an_older_deploy_freed_from_a_backlog_never_lands_over_a_newer_one() -> 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_older_deploy_yields_to_a_newer_one_still_queued() -> anyhow::Result<()> {
+async fn an_older_deploy_waits_for_a_newer_one_and_still_lands_if_it_fails() -> anyhow::Result<()> {
     let s = Scene::new().await?;
     let (_, older_deploy) = s.planned_and_deploying("older-queued", "QUEUED").await;
-    let (_, newer_deploy) = s.planned_and_deploying("newer-queued", "QUEUED").await;
+    let (newer, newer_deploy) = s.planned_and_deploying("newer-queued", "QUEUED").await;
+    let newer_slug = s.slug(newer).await;
 
-    assert!(
-        !s.retire_if_overtaken(newer_deploy).await,
-        "the newest deploys"
+    assert_eq!(
+        s.retire_if_overtaken(newer_deploy).await,
+        newest_wins::Overtaken::No,
+        "the newest deploys first"
     );
-    assert!(
+    assert_eq!(
         s.retire_if_overtaken(older_deploy).await,
-        "the older yields to it"
+        newest_wins::Overtaken::WaitsFor(newer_slug),
+        "the older waits rather than being retired on a deploy that may fail"
+    );
+    assert_eq!(s.release_status(older_deploy).await, "QUEUED");
+
+    sqlx::query("UPDATE release_states SET status = 'FAILED' WHERE release_id = $1")
+        .bind(newer_deploy)
+        .execute(&s.f.db)
+        .await?;
+    assert_eq!(
+        s.retire_if_overtaken(older_deploy).await,
+        newest_wins::Overtaken::No,
+        "with the newer deploy failed, the older one still lands"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn under_same_branch_only_a_newer_release_from_another_branch_never_overtakes()
+-> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (_, older_deploy) = s.planned_and_deploying("main-older", "QUEUED").await;
+    let (_, _) = s.planned_and_deploying("hotfix-newer", "SUCCEEDED").await;
+    sqlx::query(
+        "UPDATE annotations SET ref = jsonb_build_object('commit_branch', 'hotfix/pager')
+         WHERE slug LIKE 'hotfix-newer-%'",
+    )
+    .execute(&s.f.db)
+    .await?;
+
+    assert_eq!(
+        s.retire_if_overtaken_on(older_deploy, Some("main")).await,
+        newest_wins::Overtaken::No
+    );
+    assert_eq!(
+        s.retire_if_overtaken(older_deploy).await,
+        newest_wins::Overtaken::Superseded,
+        "without the branch guard every newer release counts"
     );
     Ok(())
 }
@@ -513,7 +564,10 @@ async fn a_newer_deploy_is_never_held_back_by_an_older_one_or_a_failed_newer_one
     let (_, current) = s.planned_and_deploying("current", "QUEUED").await;
     let (_, _) = s.planned_and_deploying("newer-failed", "FAILED").await;
 
-    assert!(!s.retire_if_overtaken(current).await);
+    assert_eq!(
+        s.retire_if_overtaken(current).await,
+        newest_wins::Overtaken::No
+    );
     assert_eq!(s.release_status(current).await, "QUEUED");
     Ok(())
 }
