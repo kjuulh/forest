@@ -320,3 +320,105 @@ async fn a_deploy_that_failed_for_another_reason_still_fails() -> anyhow::Result
     assert_eq!(s.stage(intent, "deploy-dev").await["status"], "FAILED");
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replanning_release_and_an_older_queued_plan_never_wait_on_each_other()
+-> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let c = s.intent("older-queued-c").await;
+    let (a, _) = s.planned_and_deploying("newer-stale-a", "FAILED").await;
+    let c_plan = s.release(c, "plan-dev", "plan", "QUEUED").await;
+    sqlx::query("UPDATE release_intents SET created = now() - interval '1 hour' WHERE id = $1")
+        .bind(c)
+        .execute(&s.f.db)
+        .await?;
+    sqlx::query("UPDATE release_intents SET stage_states = $2 WHERE id = $1")
+        .bind(c)
+        .bind(serde_json::json!({
+            "plan-dev": { "status": "ACTIVE", "release_ids": [c_plan.to_string()] },
+            "deploy-dev": { "status": "PENDING" },
+        }))
+        .execute(&s.f.db)
+        .await?;
+
+    s.evaluate(a).await;
+    let deploy = s.stage(a, "deploy-dev").await;
+    assert_eq!(
+        deploy["status"], "PENDING",
+        "A replans (no newer release): {deploy}"
+    );
+    let a_new_plan: Uuid = sqlx::query_scalar(
+        "SELECT release_id FROM release_states WHERE release_intent_id = $1 AND mode = 'plan' AND status = 'QUEUED'",
+    )
+    .bind(a)
+    .fetch_one(&s.f.db)
+    .await?;
+
+    let c_waits = s.plan_waits(c_plan).await;
+    let a_waits = s.plan_waits(a_new_plan).await;
+    assert!(
+        !(c_waits && a_waits),
+        "DEADLOCK: C's plan waits on A's previous sealed plan, A's new plan waits on C planning ahead"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_release_that_failed_does_not_supersede() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (a, _) = s.planned_and_deploying("stale-a", "FAILED").await;
+    let (b, b_deploy) = s.planned_and_deploying("failed-b", "FAILED").await;
+    sqlx::query("UPDATE release_states SET error_message = 'provider reported failure: boom' WHERE release_id = $1")
+        .bind(b_deploy).execute(&s.f.db).await?;
+    sqlx::query("UPDATE release_intents SET status = 'FAILED' WHERE id = $1")
+        .bind(b)
+        .execute(&s.f.db)
+        .await?;
+    s.evaluate(a).await;
+    let deploy = s.stage(a, "deploy-dev").await;
+    assert_ne!(
+        deploy["status"], "SUPERSEDED",
+        "superseded by a FAILED release: {deploy}"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_stale_destinations_in_one_attempt_still_replan_once() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let intent = s.intent("two-destinations").await;
+    let plan = s.release(intent, "plan-dev", "plan", "SUCCEEDED").await;
+    let first = s.release(intent, "deploy-dev", "deploy", "FAILED").await;
+    let second = s.release(intent, "deploy-dev", "deploy", "FAILED").await;
+    sqlx::query(
+        "UPDATE release_states SET queued_at = (SELECT queued_at FROM release_states WHERE release_id = $1)
+         WHERE release_id = $2",
+    )
+    .bind(first)
+    .bind(second)
+    .execute(&s.f.db)
+    .await?;
+    sqlx::query("UPDATE release_intents SET stage_states = $2 WHERE id = $1")
+        .bind(intent)
+        .bind(serde_json::json!({
+            "plan-dev": {
+                "status": "SUCCEEDED", "approval_status": "APPROVED",
+                "release_ids": [plan.to_string()]
+            },
+            "deploy-dev": {
+                "status": "ACTIVE",
+                "release_ids": [first.to_string(), second.to_string()]
+            },
+        }))
+        .execute(&s.f.db)
+        .await?;
+
+    s.evaluate(intent).await;
+
+    let deploy = s.stage(intent, "deploy-dev").await;
+    assert_eq!(
+        deploy["status"], "PENDING",
+        "one attempt, so it replans: {deploy}"
+    );
+    Ok(())
+}

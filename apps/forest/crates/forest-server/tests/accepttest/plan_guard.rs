@@ -955,3 +955,26 @@ async fn plan_waits_for_outstanding_plan() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_terraform_no_op_plan_with_sealed_output_does_not_hold() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let a = s.intent(stage_states(approved(), "PENDING")).await;
+    let a_plan = s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_no_op_plan(a).await;
+    sqlx::query("UPDATE release_states SET plan_output = 'No changes.' WHERE release_id = $1")
+        .bind(a_plan)
+        .execute(&s.f.db)
+        .await?;
+
+    let b = s.intent(stage_states(planning(), "PENDING")).await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(
+        !s.waits(b_plan).await,
+        "a sealed 'No changes' terraform plan must not hold (#371)"
+    );
+    s.cleanup().await;
+    Ok(())
+}

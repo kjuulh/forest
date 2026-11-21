@@ -73,6 +73,13 @@ fn is_terminal_release(status: &str) -> bool {
 
 /// A generic destination saves a plan when its provider seals one; until it
 /// does, only plans still in flight hold.
+/// Terraform also seals its plan text into release_states, but its saved plan
+/// file (with has_changes) is what holds; only a generic destination's sealed
+/// plan is itself the saved plan.
+pub fn holds_with_sealed_plan(type_organisation: &str, type_name: &str) -> bool {
+    type_organisation == "forest" && type_name == "generic"
+}
+
 pub fn saves_plans(type_organisation: &str, type_name: &str) -> bool {
     type_organisation == "forest" && matches!(type_name, "terraform" | "generic")
 }
@@ -94,9 +101,14 @@ fn is_approved(config: &StageConfig, state: &StageState) -> bool {
 
 impl PlanHolder {
     fn stage_releases<'a>(&'a self, stage_id: &'a str) -> impl Iterator<Item = &'a HolderRelease> {
-        self.releases
-            .iter()
-            .filter(move |r| r.stage_id.as_deref() == Some(stage_id))
+        let current = self
+            .stage_states
+            .get(stage_id)
+            .and_then(|state| state.release_ids.as_ref());
+        self.releases.iter().filter(move |r| {
+            r.stage_id.as_deref() == Some(stage_id)
+                && current.is_none_or(|ids| ids.contains(&r.release_id.to_string()))
+        })
     }
 
     fn live_plan_stages(&self) -> Vec<(&str, &str, &StageState, &StageConfig)> {
@@ -281,6 +293,7 @@ pub async fn load_candidates(
     db: &PgPool,
     own: &WaitingPlan,
     destination_id: Uuid,
+    sealed_plans_hold: bool,
 ) -> anyhow::Result<Vec<PlanHolder>> {
     let intents = sqlx::query!(
         r#"SELECT ri.id, ri.project_id, ri.status, ri.stages, ri.stage_states,
@@ -295,7 +308,7 @@ pub async fn load_candidates(
                       SELECT 1 FROM release_states sealed
                       WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
                         AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
-                        AND sealed.plan_output IS NOT NULL
+                        AND sealed.plan_output IS NOT NULL AND $5::bool
                         AND sealed.queued_at >= now() - make_interval(days => $4)
                   ) as "has_saved_plan!",
                   EXISTS (
@@ -308,7 +321,7 @@ pub async fn load_candidates(
                       SELECT 1 FROM release_states sealed
                       WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
                         AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
-                        AND sealed.plan_output IS NOT NULL
+                        AND sealed.plan_output IS NOT NULL AND $5::bool
                         AND sealed.queued_at >= now() - make_interval(days => $4)
                   ) as "saved_plan_changes!"
            FROM release_intents ri
@@ -327,7 +340,7 @@ pub async fn load_candidates(
                      SELECT 1 FROM release_states sealed
                      WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
                        AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
-                       AND sealed.plan_output IS NOT NULL
+                       AND sealed.plan_output IS NOT NULL AND $5::bool
                        AND sealed.queued_at >= now() - make_interval(days => $4)
                  )
                  OR EXISTS (
@@ -341,6 +354,7 @@ pub async fn load_candidates(
         own.intent_id,
         destination_id,
         PLAN_RETENTION_DAYS,
+        sealed_plans_hold,
     )
     .fetch_all(db)
     .await
@@ -509,7 +523,13 @@ async fn guarded(
         release_id: release.release_id,
         queued_at: release.queued_at,
     };
-    let candidates = load_candidates(db, &plan, release.destination_id).await?;
+    let candidates = load_candidates(
+        db,
+        &plan,
+        release.destination_id,
+        holds_with_sealed_plan(&dest.type_organisation, &dest.type_name),
+    )
+    .await?;
     Ok(Some((
         Destination {
             name: dest.name,

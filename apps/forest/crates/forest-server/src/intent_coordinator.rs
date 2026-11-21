@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::State;
+use crate::services::policy::PolicyRegistryState;
 use crate::services::release_event_store::{
     check_approval_policies, check_branch_policies, check_soak_time_policies,
 };
@@ -142,7 +143,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         .unwrap_or_else(|| init_stage_states(&stages));
 
     let release_rows = sqlx::query!(
-        "SELECT release_id, stage_id, status, error_message, destination_id
+        "SELECT release_id, stage_id, status, error_message, destination_id, queued_at
          FROM release_states
          WHERE release_intent_id = $1",
         intent_id,
@@ -151,13 +152,17 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .await?;
 
     let mut releases_by_stage: HashMap<String, Vec<ReleaseRow>> = HashMap::new();
-    let mut stale_attempts: HashMap<String, usize> = HashMap::new();
+    let mut stale_attempts: HashMap<String, HashSet<chrono::DateTime<chrono::Utc>>> =
+        HashMap::new();
     for row in &release_rows {
         let Some(ref stage_id) = row.stage_id else {
             continue;
         };
         if row.status == "FAILED" && stale_plan::is_stale(row.error_message.as_deref()) {
-            *stale_attempts.entry(stage_id.clone()).or_default() += 1;
+            stale_attempts
+                .entry(stage_id.clone())
+                .or_default()
+                .insert(row.queued_at);
         }
         let current_attempt = stage_states
             .get(stage_id)
@@ -230,18 +235,38 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         stale.iter().map(|r| r.destination_id).collect();
                     let destinations =
                         stale_plan::destination_names(&mut tx, &destination_ids).await?;
-                    let newer = stale_plan::newer_release(
-                        &mut tx,
-                        intent_id,
-                        intent.project_id,
-                        &destination_ids,
-                    )
-                    .await?;
+                    let same_branch = match &stage_def.config {
+                        StageConfig::Deploy { environment } => state
+                            .policy_registry()
+                            .supersede_pending_for_environment(&intent.project_id, environment)
+                            .await?
+                            .is_some_and(|(_, config)| config.same_branch_only),
+                        _ => false,
+                    };
+                    let branch = if same_branch {
+                        stale_plan::intent_branch(&mut tx, intent_id).await?
+                    } else {
+                        None
+                    };
+                    let newer = if same_branch && branch.is_none() {
+                        None
+                    } else {
+                        stale_plan::newer_release(
+                            &mut tx,
+                            intent_id,
+                            intent.project_id,
+                            &destination_ids,
+                            branch.as_deref(),
+                        )
+                        .await?
+                    };
+                    let scope = stale_plan::replan_scope(&stages, stage_id);
                     let followup = stale_plan::decide(
                         &destinations,
                         newer.as_deref(),
-                        stale_attempts.get(stage_id).copied().unwrap_or(0),
-                        stale_plan::plan_stages_for(&stages, stage_id),
+                        stale_attempts.get(stage_id).map_or(0, HashSet::len),
+                        scope.clone(),
+                        stale_plan::plan_shared_in_flight(&stages, &stage_states, stage_id, &scope),
                     );
                     tracing::info!(%intent_id, stage_id, ?followup, "coordinator: deploy stage hit a stale plan");
                     match followup {
