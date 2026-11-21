@@ -152,6 +152,8 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .await?;
 
     let mut releases_by_stage: HashMap<String, Vec<ReleaseRow>> = HashMap::new();
+    // A deploy stage activation inserts all its releases in one transaction, so
+    // they share queued_at; distinct values count attempts, not destinations.
     let mut stale_attempts: HashMap<String, HashSet<chrono::DateTime<chrono::Utc>>> =
         HashMap::new();
     for row in &release_rows {
@@ -236,11 +238,17 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     let destinations =
                         stale_plan::destination_names(&mut tx, &destination_ids).await?;
                     let same_branch = match &stage_def.config {
-                        StageConfig::Deploy { environment } => state
+                        StageConfig::Deploy { environment } => match state
                             .policy_registry()
                             .supersede_pending_for_environment(&intent.project_id, environment)
-                            .await?
-                            .is_some_and(|(_, config)| config.same_branch_only),
+                            .await
+                        {
+                            Ok(policy) => policy.is_some_and(|(_, config)| config.same_branch_only),
+                            Err(e) => {
+                                tracing::warn!(%intent_id, stage_id, "supersede_pending lookup failed; only a same-branch release may supersede: {e:#}");
+                                true
+                            }
+                        },
                         _ => false,
                     };
                     let branch = if same_branch {
@@ -291,6 +299,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                             changed = true;
                             continue;
                         }
+                        stale_plan::Followup::Wait => continue,
                         stale_plan::Followup::Fail => {}
                     }
                 }

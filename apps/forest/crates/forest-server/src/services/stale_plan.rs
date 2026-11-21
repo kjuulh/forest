@@ -17,6 +17,7 @@ pub enum Followup {
         plan_stages: Vec<String>,
         note: String,
     },
+    Wait,
     Fail,
 }
 
@@ -36,8 +37,11 @@ pub fn decide(
             reason: superseded_reason(slug, destinations),
         };
     }
-    if stale_attempts > MAX_REPLANS || replan_scope.is_empty() || plan_shared_in_flight {
+    if stale_attempts > MAX_REPLANS || replan_scope.is_empty() {
         return Followup::Fail;
+    }
+    if plan_shared_in_flight {
+        return Followup::Wait;
     }
     Followup::Replan {
         plan_stages: replan_scope,
@@ -101,6 +105,12 @@ pub fn replan_scope(stages: &PipelineStages, deploy_stage: &str) -> Vec<String> 
     let plans = plan_stages_for(stages, deploy_stage);
     let mut scope: Vec<String> = ancestors(stages, deploy_stage)
         .into_iter()
+        .filter(|id| {
+            !matches!(
+                stages.get(*id).map(|s| &s.config),
+                Some(StageConfig::Deploy { .. })
+            )
+        })
         .filter(|id| {
             plans.iter().any(|plan| plan == id) || {
                 let above = ancestors(stages, id);
@@ -325,11 +335,25 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_still_being_deployed_by_a_sibling_is_not_replanned() {
+    fn a_replan_waits_while_a_sibling_still_deploys_the_same_plan() {
         assert_eq!(
             decide("d", None, 1, vec!["plan-dev".into()], true),
-            Followup::Fail
+            Followup::Wait
         );
+    }
+
+    #[test]
+    fn a_stale_prod_deploy_never_resets_a_dev_deploy_that_succeeded() {
+        let stages: PipelineStages = serde_json::from_value(serde_json::json!({
+            "plan-dev": { "type": "plan", "environment": "dev", "auto_approve": true },
+            "plan-prod": { "type": "plan", "environment": "prod", "auto_approve": true },
+            "deploy-dev": {
+                "type": "deploy", "environment": "dev", "depends_on": ["plan-dev", "plan-prod"]
+            },
+            "deploy-prod": { "type": "deploy", "environment": "prod", "depends_on": ["deploy-dev"] }
+        }))
+        .unwrap();
+        assert_eq!(replan_scope(&stages, "deploy-prod"), vec!["plan-prod"]);
     }
 
     #[test]
