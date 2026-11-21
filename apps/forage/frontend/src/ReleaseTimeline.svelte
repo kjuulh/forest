@@ -13,6 +13,7 @@
   import { laneGeometry } from "./lib/lane-geometry.js";
   import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, planHold, planHoldChip, queuedDestinationNote, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
   import ReleaseFlow from "./ReleaseFlow.svelte";
+  import ReleaseNodeWorkspaces from "./ReleaseNodeWorkspaces.svelte";
 
   export let org = "";
   export let project = "";
@@ -247,6 +248,7 @@
       const newR = newItem.release;
       if (oldR.dest_envs === newR.dest_envs &&
           oldR.has_pipeline === newR.has_pipeline &&
+          oldR.graph_html === newR.graph_html &&
           pipelineStagesEqual(oldR.pipeline_stages, newR.pipeline_stages) &&
           destinationsEqual(oldR.destinations, newR.destinations)) {
         return existing;
@@ -627,9 +629,13 @@
     return formatElapsed(Math.floor((now - start) / 1000));
   }
 
+  function releaseKey(release) {
+    return `${release.project_name || project}:${release.artifact_id || release.slug}`;
+  }
+
   function itemKey(item) {
-    if (item.kind === "release" && item.release) return `r:${item.release.slug}`;
-    if (item.kind === "hidden") return `h:${item.count}:${(item.releases || [])[0]?.slug || ""}`;
+    if (item.kind === "release" && item.release) return `r:${releaseKey(item.release)}`;
+    if (item.kind === "hidden") return `h:${item.count}:${item.releases?.[0] ? releaseKey(item.releases[0]) : ""}`;
     return `u:${Math.random()}`;
   }
 
@@ -767,6 +773,7 @@
     <p>Ship one with <code>forest release create</code>.</p>
   </div>
 {:else}
+  <ReleaseNodeWorkspaces {timeline} {project} />
   <ReleaseFlow {timeline} {org} {project} />
   <div
     class="rt"
@@ -803,7 +810,7 @@
                     style="top: {run.top}px; height: {run.height}px;"
                   ></div>
                 {/each}
-                {#each g.dots as row (row.slug)}
+                {#each g.dots as row (releaseKey(row.release))}
                   {@const size = dotSize(row.kind, off.width)}
                   <span
                     class="lane-dot"

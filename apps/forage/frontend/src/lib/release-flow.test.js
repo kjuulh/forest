@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { releaseFlows } from "./release-flow.js";
+import { latestReleases, releaseFlows } from "./release-flow.js";
 
 const stage = (id, stage_type, environment, depends_on = [], status = "PENDING") =>
   ({ id, stage_type, environment, depends_on, status });
@@ -33,6 +33,45 @@ function expectReadableLayout(flow) {
     }
   }
 }
+
+describe("latest releases shared by overview workspaces and flows", () => {
+  it("selects hidden releases per project without conflating identical release slugs", () => {
+    const older = release({ slug: "same", created_at: "2026-11-20T12:00:00Z", graph_html: "<section>older</section>" });
+    const latest = release({ slug: "same", graph_html: "<section>latest</section>" });
+    const worker = release({ slug: "same", project_name: "worker" });
+    const selected = latestReleases([
+      item(older),
+      item(worker),
+      { kind: "hidden", releases: [latest] },
+    ]);
+
+    expect(selected).toEqual([latest, worker]);
+    expect(selected[0]).toBe(latest);
+    expect(selected[1]).toBe(worker);
+  });
+
+  it("does not substitute an older workspace when the latest release has no server fragment", () => {
+    const latest = release({ graph_html: undefined });
+    const selected = latestReleases([
+      item(release({ created_at: "2026-11-20T12:00:00Z", graph_html: "<section>older</section>" })),
+      item(latest),
+    ]);
+
+    expect(selected).toEqual([latest]);
+    expect(selected[0].graph_html).toBeUndefined();
+  });
+
+  it("uses the current project for unnamed releases and ignores malformed timeline entries", () => {
+    const first = release({ project_name: "", created_at: null });
+    expect(latestReleases([
+      null,
+      { kind: "hidden" },
+      item(first),
+      item(release({ project_name: "", created_at: null })),
+    ], { project: "api" })).toEqual([first]);
+    expect(latestReleases(null)).toEqual([]);
+  });
+});
 
 describe("latest release flow per project", () => {
   it("draws explicit branch and join dependencies without inventing a sequential pipeline", () => {

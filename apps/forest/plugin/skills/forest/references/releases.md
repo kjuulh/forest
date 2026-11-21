@@ -78,25 +78,22 @@ How to read `release show`:
 
 `forest project releases` renders a plan stage as `deploy(<env>)`; trust `release show` for stage types. Neither command shows the image or SHA running in the service.
 
-In the fork's Forage UI after v0.3.18, open an individual release and scroll to
-**Release pipeline** for its server-rendered dependency diagram. Nodes separate
-stages, per-stage destination runs, plan approval and current policy evaluations.
-The compact **Queue** below the release header shows current and immediately
-ready work, not completed or future pending stages. Select an item to open that
-node in the full workspace.
-Project and organisation release overviews show a compact latest-release flow
-per project. Stage dependencies and destination execution provenance come from
-the existing timeline response; plan completion is not labelled deployed.
-**Full release graph** opens the individual release workspace.
+In the fork's Forage UI after v0.3.18, **Release pipeline** sits below the release
+header. Project and organisation release overviews use the same full node viewer
+for the latest release per project. Existing flow charts and timelines remain.
+Nodes separate stages, per-stage destination runs, plan approvals and policies.
+Completed, active and future work stays in the graph; the camera focuses active
+work rather than filtering other nodes away.
 Cards expose environment, destination progress, duration, plan previews and
-waiting/failure context. The full-width node workspace automatically focuses
-current work; **Fit** shows the whole DAG, **Active** returns to current work,
-and fullscreen expands it. Drag to pan, scroll to zoom, or use F/A from the
-canvas. Select a node for the inspector's working Plan/Logs tabs and authenticated
-approval controls; these reuse the existing forms and CSRF fields.
-It refreshes every five seconds while unfinished, visible and on screen,
-preserving a manually explored view. It does not replace the overview or prove
-which image is serving.
+waiting/failure context. **Fit** shows the whole DAG, **Active** returns to current
+work, and fullscreen expands the editor. Drag to pan, scroll to zoom, or use F/A
+from the canvas. Select a node for the inspector's Plan/Logs tabs.
+Detail approval controls reuse existing forms and CSRF fields; overview controls
+link to the release's real approval section. Details refresh every five seconds
+while unfinished, visible and on screen. Overviews use canonical timeline updates.
+Live updates preserve pinned inspection and manual camera exploration.
+The retained compact flow uses execution provenance: plan completion is not
+labelled deployed. None of these views proves which image is serving.
 
 ## Proving a deployment
 

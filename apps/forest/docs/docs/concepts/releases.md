@@ -85,9 +85,10 @@ The wait stream includes:
 
 ### Release pipeline diagram
 
-In the fork's Forage UI after v0.3.18, an individual release's **Release
-pipeline** diagram sits below the existing stages, destinations, logs and
-details. It is not part of the release overview.
+In the fork's Forage UI after v0.3.18, the **Release pipeline** node workspace
+sits below the release header. Project and organisation overviews show the same
+full viewer for the latest release per project. Existing flow charts, timelines,
+stages, destinations, logs and details remain available.
 
 The server lays out dependency columns, with separate nodes for each stage's
 destination runs, plan approvals and current policy evaluations. Plan and
@@ -95,14 +96,10 @@ deploy executions remain separate; a newer release's destination status does
 not rewrite an older execution. Text labels distinguish running, next, queued,
 waiting, blocked, failed and terminal states.
 
-Current work also appears in a compact **Queue** below the release header.
-It excludes completed work and future pending stages. Select a queued item to
-open and focus that exact node in the full workspace.
-
-The releases overview shows the latest release's stage-to-destination flow for
-each project, using the timeline's existing live updates. Completed plan runs
-are labelled **Plan complete**, not deployed. **Full release graph** opens the
-individual release's workspace.
+Completed, active and future nodes all remain in the graph. The compact viewport
+automatically focuses current work; it does not filter other nodes away.
+**Fullscreen** opens the larger editor without changing the graph.
+The retained overview flow labels completed plans **Plan complete**, not deployed.
 
 The full-width workspace opens around the current execution automatically.
 **Fit** frames the whole graph; **Active** returns to the running or waiting
@@ -111,12 +108,13 @@ Cards include destination progress, duration, environment, plan previews and
 waiting/failure context. Select a node to pin its inspector.
 
 The inspector's **Plan** and **Logs** tabs show the fetched output in place.
-Approval controls submit the existing authenticated forms with their CSRF
-fields; **View stage** focuses the original stage section. Keyboard users can
-tab through nodes, use Enter to select, and press F or A for Fit or Active.
-The graph refreshes every five seconds while unfinished, visible and on screen,
-without reloading the page or resetting a manually explored view.
-Running emphasis respects reduced motion.
+On details, approval controls submit the existing authenticated forms with their
+CSRF fields; **View stage** focuses the original section. Overview controls link
+to the release's approval section. Keyboard users can tab through nodes, press
+Enter to select, and use F/A for Fit/Active.
+Details refresh every five seconds while unfinished, visible and on screen;
+overviews use their existing canonical live updates. Both preserve a manually
+explored view and pinned inspector. Running emphasis respects reduced motion.
 
 Configured destinations without a run are shown as waiting, not deployed.
 Unknown or missing execution data is labelled rather than inferred as success.

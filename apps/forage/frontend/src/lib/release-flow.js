@@ -215,7 +215,7 @@ function projectFlow(release, org, project) {
   };
 }
 
-export function releaseFlows(timeline = [], { org = "", project = "" } = {}) {
+export function latestReleases(timeline = [], { project = "" } = {}) {
   const latest = new Map();
   for (const release of releasesIn(Array.isArray(timeline) ? timeline : [])) {
     if (!release) continue;
@@ -227,5 +227,9 @@ export function releaseFlows(timeline = [], { org = "", project = "" } = {}) {
       latest.set(key, release);
     }
   }
-  return [...latest.values()].map(release => projectFlow(release, org, project));
+  return [...latest.values()];
+}
+
+export function releaseFlows(timeline = [], { org = "", project = "" } = {}) {
+  return latestReleases(timeline, { project }).map(release => projectFlow(release, org, project));
 }
