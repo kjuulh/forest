@@ -12,6 +12,7 @@
   } from "./lib/lane-states.js";
   import { laneGeometry } from "./lib/lane-geometry.js";
   import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, planHold, planHoldChip, queuedDestinationNote, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
+  import ReleaseFlow from "./ReleaseFlow.svelte";
 
   export let org = "";
   export let project = "";
@@ -234,13 +235,13 @@
     const existingBySlug = new Map();
     for (const item of timeline) {
       if (item.kind === "release" && item.release) {
-        existingBySlug.set(item.release.slug, item);
+        existingBySlug.set(`${item.release.project_name}:${item.release.slug}`, item);
       }
     }
 
     const merged = newTimeline.map(newItem => {
       if (newItem.kind !== "release" || !newItem.release) return newItem;
-      const existing = existingBySlug.get(newItem.release.slug);
+      const existing = existingBySlug.get(`${newItem.release.project_name}:${newItem.release.slug}`);
       if (!existing) return newItem;
       const oldR = existing.release;
       const newR = newItem.release;
@@ -260,7 +261,14 @@
   function pipelineStagesEqual(a, b) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (a[i].status !== b[i].status || a[i].started_at !== b[i].started_at || a[i].completed_at !== b[i].completed_at) return false;
+      if (a[i].id !== b[i].id || a[i].stage_type !== b[i].stage_type ||
+          a[i].environment !== b[i].environment || a[i].status !== b[i].status ||
+          a[i].approval_status !== b[i].approval_status || a[i].blocked_by !== b[i].blocked_by ||
+          a[i].started_at !== b[i].started_at || a[i].completed_at !== b[i].completed_at) return false;
+      const aDeps = a[i].depends_on;
+      const bDeps = b[i].depends_on;
+      if ((aDeps?.length || 0) !== (bDeps?.length || 0) ||
+          aDeps?.some((dependency, index) => dependency !== bDeps[index])) return false;
     }
     return true;
   }
@@ -268,99 +276,27 @@
   function destinationsEqual(a, b) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (a[i].status !== b[i].status || a[i].completed_at !== b[i].completed_at) return false;
+      if (a[i].name !== b[i].name || a[i].environment !== b[i].environment ||
+          a[i].status !== b[i].status || a[i].completed_at !== b[i].completed_at) return false;
     }
     return true;
   }
 
+  // Events may omit release identity; canonical snapshots keep release history isolated.
   function handleEvent(type, data) {
     if (type === "destination" && data.action === "status_changed") {
-      handleDestinationUpdate(data);
+      scheduleRefetch();
     } else if (type === "release") {
       if (data.action === "created") {
         scheduleRefetch();
       } else if (data.action === "status_changed" || data.action === "updated") {
-        handleReleaseUpdate(data);
+        scheduleRefetch();
       }
     } else if (type === "artifact" && (data.action === "created" || data.action === "updated")) {
       scheduleRefetch();
     } else if (type === "pipeline") {
-      handlePipelineUpdate(data);
-    }
-  }
-
-  function handleDestinationUpdate(data) {
-    const status = data.metadata?.status;
-    const destName = data.metadata?.destination_name || data.resource_id;
-    const env = data.metadata?.environment;
-    if (!status || !destName) return;
-
-    let changed = false;
-    timeline = timeline.map(item => {
-      if (item.kind !== "release" || !item.release) return item;
-      const r = item.release;
-
-      const destIdx = r.destinations.findIndex(d => d.name === destName);
-      if (destIdx === -1) return item;
-
-      changed = true;
-      const newDests = r.destinations.map(d =>
-        d.name === destName ? { ...d, status, ...(["SUCCEEDED","FAILED","TIMED_OUT","CANCELLED"].includes(status) ? { completed_at: new Date().toISOString() } : {}) } : d
-      );
-      const newEnvStatuses = newDests.map(d => `${d.environment}:${d.status || "PENDING"}`).join(",");
-
-      const newStages = env ? r.pipeline_stages.map(s =>
-        s.stage_type === "deploy" && s.environment === env ? { ...s, status: status === "ASSIGNED" ? "RUNNING" : status } : s
-      ) : r.pipeline_stages;
-
-      return {
-        ...item,
-        release: { ...r, destinations: newDests, dest_envs: newEnvStatuses, pipeline_stages: newStages }
-      };
-    });
-    if (changed) scheduleComputeLaneBars();
-  }
-
-  function handleReleaseUpdate(data) {
-    const status = data.metadata?.status;
-    const env = data.metadata?.environment;
-    if (status && env) {
-      handleDestinationUpdate(data);
-    } else {
       scheduleRefetch();
     }
-  }
-
-  function handlePipelineUpdate(data) {
-    const stageStatus = data.metadata?.status;
-    const stageEnv = data.metadata?.environment;
-    const stageType = data.metadata?.stage_type;
-    if (!stageStatus) {
-      if (data.action === "created" || data.action === "updated") scheduleRefetch();
-      return;
-    }
-
-    let changed = false;
-    timeline = timeline.map(item => {
-      if (item.kind !== "release" || !item.release) return item;
-      const r = item.release;
-      let stageChanged = false;
-      const newStages = r.pipeline_stages.map(s => {
-        if (stageEnv && s.stage_type === "deploy" && s.environment === stageEnv) {
-          stageChanged = true;
-          return { ...s, status: stageStatus, ...(s.started_at ? {} : { started_at: new Date().toISOString() }) };
-        }
-        if (stageType === "wait" && s.stage_type === "wait") {
-          stageChanged = true;
-          return { ...s, status: stageStatus };
-        }
-        return s;
-      });
-      if (!stageChanged) return item;
-      changed = true;
-      return { ...item, release: { ...r, pipeline_stages: newStages } };
-    });
-    if (changed) scheduleComputeLaneBars();
   }
 
   function scheduleComputeLaneBars() {
@@ -831,6 +767,7 @@
     <p>Ship one with <code>forest release create</code>.</p>
   </div>
 {:else}
+  <ReleaseFlow {timeline} {org} {project} />
   <div
     class="rt"
     style="grid-template-columns: {gutterWidth}px minmax(0, 1fr);"

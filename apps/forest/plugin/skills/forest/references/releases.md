@@ -84,6 +84,10 @@ stages, per-stage destination runs, plan approval and current policy evaluations
 The compact **Queue** below the release header shows current and immediately
 ready work, not completed or future pending stages. Select an item to open that
 node in the full workspace.
+Project and organisation release overviews show a compact latest-release flow
+per project. Stage dependencies and destination execution provenance come from
+the existing timeline response; plan completion is not labelled deployed.
+**Full release graph** opens the individual release workspace.
 Cards expose environment, destination progress, duration, plan previews and
 waiting/failure context. The full-width node workspace automatically focuses
 current work; **Fit** shows the whole DAG, **Active** returns to current work,

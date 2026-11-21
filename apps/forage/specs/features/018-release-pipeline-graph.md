@@ -1,6 +1,6 @@
 # Spec 018: Release Pipeline Graph
 
-Status: detail workspace and queue verified locally; compact overview is in the companion review. Fork deployment pending.
+Status: implemented and verified locally; stacked fork reviews and deployment pending.
 
 ## Problem
 
@@ -21,10 +21,9 @@ release; the overview adds a compact stage-to-destination flow.
   approval and immediately ready work. Completed work and future pending
   descendants do not occupy it. Selecting a queued item opens that exact node
   in the full workspace.
-- In the companion overview review, project and organisation overviews retain
-  their timelines and add compact flows for the latest release per project.
-  They use the same fetched timeline data and live refresh, not additional
-  endpoints or polling loops.
+- Project and organisation overviews retain their timelines and add compact
+  flows for the latest release per project. They use the same fetched timeline
+  data and live refresh, not additional endpoints or polling loops.
 - Timeline JSON adds stage `depends_on` IDs and optional destination `stage_id`
   provenance. Older clients ignore these additive fields. No RPC or database
   schema changes are required. The overview attaches plan results to their
@@ -152,9 +151,9 @@ release data and the strict CSP promoted from report-only to enforcing:
 - running animation was present normally and absent under reduced motion.
 - the compact above-fold queue refreshed while the full editor was below the
   viewport, and its controls pinned/focused the exact selected node;
-- the companion compact overview rendered both project and organisation data,
-  followed canonical SSE refresh without reloading, and linked into the full
-  release workspace. New overview markup contains no inline styles or scripts.
+- the compact overview rendered both project and organisation data, followed
+  canonical SSE refresh without reloading, and linked into the full release
+  workspace. New overview markup contains no inline styles or scripts.
 
 Screenshots: workspace `notes/node-workspace-light-desktop.png`,
 `notes/node-workspace-dark-desktop.png` and `notes/node-workspace-dark-mobile.png`.

@@ -99,6 +99,11 @@ Current work also appears in a compact **Queue** below the release header.
 It excludes completed work and future pending stages. Select a queued item to
 open and focus that exact node in the full workspace.
 
+The releases overview shows the latest release's stage-to-destination flow for
+each project, using the timeline's existing live updates. Completed plan runs
+are labelled **Plan complete**, not deployed. **Full release graph** opens the
+individual release's workspace.
+
 The full-width workspace opens around the current execution automatically.
 **Fit** frames the whole graph; **Active** returns to the running or waiting
 neighborhood. Drag or middle-drag to pan, scroll to zoom, or expand to fullscreen.
