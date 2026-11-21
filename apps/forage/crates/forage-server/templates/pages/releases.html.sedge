@@ -7,8 +7,8 @@ props crate::views::catalogue::OrgReleasesPage { chrome, org, prefetch_js, graph
     <div class="flex items-center justify-between mb-8">
       <h1 class="text-2xl font-bold">Continuous deployment</h1>
     </div>
-    <TimelinePrefetch org={org} project={None} src={prefetch_js} />
-    <release-timeline id="rt-{org}" sedx-preserve org={org}></release-timeline>
+    <TimelinePrefetch org={org} project={None} src={prefetch_js} include_graph={true} />
+    <release-timeline id="rt-{org}" sedx-preserve org={org} graph="true"></release-timeline>
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>

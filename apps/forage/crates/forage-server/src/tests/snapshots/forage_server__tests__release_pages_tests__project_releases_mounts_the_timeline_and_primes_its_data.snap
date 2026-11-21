@@ -21,7 +21,7 @@ Policies
 </a>
 </div>
 </div>
-<script src="/static/js/timeline-prefetch.js?v=HASH" data-timeline-url="/api/orgs/testorg/projects/my-api/timeline"></script>
-<release-timeline id="rt-testorg-my-api" sedx-preserve org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner"></release-timeline>
+<script src="/static/js/timeline-prefetch.js?v=HASH" data-timeline-url="/api/orgs/testorg/projects/my-api/timeline" data-include-graph="true"></script>
+<release-timeline id="rt-testorg-my-api" sedx-preserve org="testorg" project="my-api" csrf="test-csrf" username="testuser" role="owner" graph="true"></release-timeline>
 </section>
 </main>

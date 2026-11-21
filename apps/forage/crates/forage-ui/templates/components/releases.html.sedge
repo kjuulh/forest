@@ -1,4 +1,4 @@
-component TimelinePrefetch(org: &str, project: Option<&str>, src: &str) {
+component TimelinePrefetch(org: &str, project: Option<&str>, src: &str, include_graph: bool = false) {
 {let url = match project { Some(p) => format!("/api/orgs/{org}/projects/{p}/timeline"), None => format!("/api/orgs/{org}/timeline") };}
-<script src={src} data-timeline-url={url}></script>
+<script src={src} data-timeline-url={url} data-include-graph={if *include_graph { Some("true") } else { None }}></script>
 }

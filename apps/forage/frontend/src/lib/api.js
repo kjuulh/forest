@@ -1,5 +1,5 @@
-export async function fetchTimeline(org, project) {
-  const url = timelineUrl(org, project);
+export async function fetchTimeline(org, project, options = {}) {
+  const url = timelineUrl(org, project, options);
 
   const primed = globalThis.__forestTimeline?.[url];
   if (primed) {
@@ -10,15 +10,17 @@ export async function fetchTimeline(org, project) {
 
   const res = await fetch(url, {
     credentials: "same-origin",
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   if (!res.ok) throw new Error(`Timeline fetch failed: ${res.status}`);
   return res.json();
 }
 
-export function timelineUrl(org, project) {
-  return project
+export function timelineUrl(org, project, { includeGraph = false } = {}) {
+  const url = project
     ? `/api/orgs/${org}/projects/${project}/timeline`
     : `/api/orgs/${org}/timeline`;
+  return includeGraph ? `${url}?include_graph=true` : url;
 }
 
 export function connectSSE(org, project, onEvent) {
