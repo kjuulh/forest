@@ -49,10 +49,17 @@ For `forest/terraform@1` destinations, what you approve is what gets applied. Th
 
 So that one release's apply doesn't make another's saved plan stale, a plan stage for a `forest/terraform@1` destination waits while another release of the same project holds that destination:
 
-- its plan for the destination finished, the saved plan is under 7 days old, and its deploy stage has not finished yet (still pending behind other stages, queued or running); or
+- its plan for the destination was approved (or auto-approved), changes something, is under 7 days old, and its deploy stage has not finished yet (still pending behind other stages, queued or running); or
 - its plan for the destination was queued earlier and is still queued or running.
 
-The waiting plan step stays `QUEUED` and its log shows `forest: waiting for release <slug> to apply its plan for <destination> before planning`. It plans against fresh state once that deploy finishes, or once the other plan is rejected, cancelled (for example because an upstream deploy failed), superseded, discarded, or older than 7 days. A plan still awaiting approval holds later plans for the same destination until someone approves or rejects it. Deploy stages, releases without a plan stage, and destination types that save no plan never wait for this. (Server behaviour after v0.3.18.)
+While it waits, the plan step stays `QUEUED` and says why: `forest release show` and `forest project releases` print `waiting: waiting for release <slug> to apply its plan for <destination> before planning` under the plan stage, Forage shows the same on the release, and the step's log has the line once. While an earlier plan for the destination is still queued or running, it says `waiting for release <slug> to finish planning <destination> before planning` instead. It plans against fresh state once that deploy finishes, or once the other plan is rejected, cancelled (for example because an upstream deploy failed), superseded, discarded, or older than 7 days.
+
+A plan that changes nothing ("No changes.") never holds the destination, nor does a plan nobody has approved. Planning is read-only, so a forgotten approval must not stall every later release. Instead, when a newer plan for the destination starts, each older plan still awaiting approval is retired, so only the newest plan can be approved:
+
+- if a [`supersede_pending`](policies.md) policy covers the environment, the older plan stage is **superseded**, and so is its deploy. With `same_branch_only`, this applies only to an older release from the same branch;
+- otherwise the older plan is marked **stale**. It stays parked, `release show` shows `[ACTIVE, STALE]` with the release that replaced it, approving it is refused. Reject it, then release again for a fresh plan: releasing the same artifact while the stale release is still active returns that release instead of starting a new one.
+
+Either way its saved plan file is deleted. Deploy stages, releases without a plan stage, and destination types that save no plan never wait for this. (Server behaviour after v0.3.18.)
 
 A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's terraform destinations, and its output starts with a `DESTROY PLAN` banner. It can never be auto-approved. Resources with `prevent_destroy` make it fail, which is the intended outcome for anything holding data.
 

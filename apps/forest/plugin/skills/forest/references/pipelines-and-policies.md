@@ -91,7 +91,7 @@ forest project policy create -o <org> -p <project> --name soak \
 | `branch_restriction` | `-e` and `-d` releases refused with `blocked by policy`; pipeline plan/deploy stages fail for that env; queued work rechecks its annotation branch at dispatch and fails if policy changed to disallow it | only `-e` releases checked; `-d` releases and pipeline stages are not |
 | `soak_time` | only a successful **deploy** of the **same artifact** to the source env counts; never deployed there means not soaked; direct releases wait `QUEUED`, stages wait | the scheduler counts any artifact's success; pipelines count this artifact but include plan steps; no source success at all passes |
 | policy evaluation error | fails closed: release refused, trigger blocked, queued release held | treated as "no policies" |
-| `supersede_pending` | newer pending releases replace older ones for the target (`--same-branch-only` to narrow); after v0.3.18 plans only replace plans and deploys only deploys | same |
+| `supersede_pending` | newer pending releases replace older ones for the target (`--same-branch-only` to narrow); after v0.3.18 plans only replace plans and deploys only deploys, and a newer terraform plan supersedes an older plan still awaiting approval | same |
 | approval (server-side; the CLI can't create it) | pipelines only | same |
 
 Since v0.3.17, an applicable branch restriction also rejects absent, empty or whitespace-only branch metadata, even with a permissive pattern. This is a compatibility change from older servers that skipped restrictions when no branch was recorded. The server does not invent provenance from a checkout or default branch, or rewrite historical annotations; projects without an applicable restriction are unchanged.

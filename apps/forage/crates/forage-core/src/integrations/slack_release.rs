@@ -476,6 +476,21 @@ fn button(label: &str, url: &str, action_id: &str, primary: bool) -> Option<Valu
     Some(b)
 }
 
+fn plan_hold_reason(stage: &PipelineRunStageState, state: StageState) -> Option<&str> {
+    if stage.stage_type != "plan" {
+        return None;
+    }
+    let reason = stage.error_message.as_deref()?.trim();
+    let held = reason.starts_with("stale:")
+        || reason.starts_with("superseded")
+        || matches!(state, StageState::Running | StageState::Queued);
+    (held && !reason.is_empty() && state != StageState::Failed).then_some(reason)
+}
+
+fn plan_is_stale(stage: &PipelineRunStageState, state: StageState) -> bool {
+    plan_hold_reason(stage, state).is_some_and(|r| r.starts_with("stale:"))
+}
+
 fn stage_label(stage: &PipelineRunStageState, state: StageState, links: &Links) -> String {
     let env = name_link(
         &links.stage(&stage.stage_id),
@@ -490,11 +505,13 @@ fn stage_label(stage: &PipelineRunStageState, state: StageState, links: &Links) 
             StageState::RolledBack => format!("Deploy to {env} rolled back"),
             _ => format!("Deploy to {env}"),
         },
-        "plan" => match state {
-            StageState::Succeeded => format!("Plan for {env} approved"),
-            StageState::Running => format!("Planning {env}"),
-            StageState::AwaitingApproval => format!("Plan for {env} needs approval"),
-            StageState::Failed => format!("Plan for {env} failed"),
+        "plan" => match (plan_hold_reason(stage, state), state) {
+            (Some(reason), StageState::Skipped) => format!("Plan for {env} was {}", esc(reason)),
+            (Some(reason), _) => format!("Plan for {env} is {}", esc(reason)),
+            (None, StageState::Succeeded) => format!("Plan for {env} approved"),
+            (None, StageState::Running) => format!("Planning {env}"),
+            (None, StageState::AwaitingApproval) => format!("Plan for {env} needs approval"),
+            (None, StageState::Failed) => format!("Plan for {env} failed"),
             _ => format!("Plan {env}"),
         },
         "wait" => {
@@ -860,7 +877,7 @@ pub fn thread_posts(view: &ReleaseView, detail: &ThreadDetail) -> Vec<ThreadPost
             if let Some(plan) = detail.plans.get(&stage.stage_id) {
                 posts.push(plan_post(&stage.stage_id, &env, plan, &links));
             }
-            if state == StageState::AwaitingApproval {
+            if state == StageState::AwaitingApproval && !plan_is_stale(&stage, state) {
                 posts.push(
                     ThreadPost::new(
                         format!("approval:{}:requested", stage.stage_id),

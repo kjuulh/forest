@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO annotations\n                   (id, slug, artifact_id, metadata, source, context, project_id, ref)\n               SELECT ri.annotation_id, $2, ri.artifact, '{}', '{}', '{}', ri.project_id,\n                      jsonb_build_object('commit_branch', $3::text)\n               FROM release_intents ri WHERE ri.id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a0988bc5b37e1cf8091b5969b024a86a7b7b428c205447fe588254b07fe3df0"
+}

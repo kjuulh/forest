@@ -1367,7 +1367,13 @@ async fn plan_roots(
     dirs: &[std::path::PathBuf],
     destroy: bool,
 ) -> anyhow::Result<(Vec<(String, String)>, Vec<SavedPlan>)> {
-    let mut plan_args = vec!["plan", "-input=false", "-out", PLAN_FILE];
+    let mut plan_args = vec![
+        "plan",
+        "-input=false",
+        "-detailed-exitcode",
+        "-out",
+        PLAN_FILE,
+    ];
     if destroy {
         plan_args.push("-destroy");
     }
@@ -1379,9 +1385,14 @@ async fn plan_roots(
             .await
             .context("terraform init")?;
 
-        let output = run_command_capture(logger, destination, dir, env, &plan_args)
+        let (code, output) = run_command_status(logger, destination, dir, env, &plan_args)
             .await
             .context("terraform plan")?;
+        let has_changes = match code {
+            0 => false,
+            2 => true,
+            other => anyhow::bail!("terraform plan failed: {other}"),
+        };
 
         let plan = tokio::fs::read(dir.join(PLAN_FILE))
             .await
@@ -1394,6 +1405,7 @@ async fn plan_roots(
             work_dir: key,
             plan,
             lock_file,
+            has_changes,
         });
     }
 
@@ -2371,6 +2383,7 @@ output "o" {{
         assert!(outputs[0].1.contains("will be created"), "{}", outputs[0].1);
         assert_eq!(saved.len(), 1);
         assert!(!saved[0].plan.is_empty());
+        assert!(saved[0].has_changes, "creating a resource is a change");
 
         let (apply_root, apply_dirs) = lay_out(state.path(), "changed");
         apply_roots(&logger, &dest, &[], apply_root.path(), &apply_dirs, &saved)
@@ -2378,6 +2391,32 @@ output "o" {{
             .expect("apply the saved plan");
 
         assert_eq!(state_output(state.path()).as_deref(), Some("approved"));
+    }
+
+    #[tokio::test]
+    async fn a_plan_against_state_that_already_matches_is_saved_as_changing_nothing() {
+        let _exe = TERRAFORM_EXE_LOCK.lock().await;
+        require_terraform();
+        let logger = test_logger().await;
+        let dest = destination_with(&[]);
+        let state = tempfile::tempdir().unwrap();
+
+        let (first_root, first_dirs) = lay_out(state.path(), "same");
+        let (_, first) = plan_roots(&logger, &dest, &[], first_root.path(), &first_dirs, false)
+            .await
+            .expect("plan");
+        apply_roots(&logger, &dest, &[], first_root.path(), &first_dirs, &first)
+            .await
+            .expect("apply");
+
+        let (again_root, again_dirs) = lay_out(state.path(), "same");
+        let (outputs, again) =
+            plan_roots(&logger, &dest, &[], again_root.path(), &again_dirs, false)
+                .await
+                .expect("plan again");
+
+        assert!(outputs[0].1.contains("No changes"), "{}", outputs[0].1);
+        assert!(!again[0].has_changes);
     }
 
     #[tokio::test]

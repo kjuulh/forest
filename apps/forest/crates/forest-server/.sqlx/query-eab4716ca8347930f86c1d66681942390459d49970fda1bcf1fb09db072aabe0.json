@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_intents SET stage_states = jsonb_set(\n             jsonb_set(stage_states, '{plan-prod,stale_by}', to_jsonb($2::text)),\n             '{plan-prod,error_message}', to_jsonb($3::text))\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eab4716ca8347930f86c1d66681942390459d49970fda1bcf1fb09db072aabe0"
+}

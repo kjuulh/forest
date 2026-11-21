@@ -10,6 +10,7 @@ expression: masked
 <form></form>
 
 </div>
+
 <div class="px-4 pb-3"><p class="text-xs text-red-600 break-words ">short reason</p></div>
 <details data-plan-output class="px-4 pb-3" open>
 <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
@@ -26,6 +27,7 @@ expression: masked
 </div>
 
 
+
 </div>
 <div id="stage-plan-prod" class="scroll-mt-4 target:bg-yellow-50">
 <div class="px-4 py-3 flex items-center gap-3 text-sm">
@@ -35,6 +37,7 @@ expression: masked
 
 <span class="text-xs text-gray-400 tabular-nums"><time datetime="2026-03-07T12:00:00Z" class="">AGO</time></span>
 </div>
+
 
 
 </div>

@@ -11,7 +11,7 @@
     destinationsByEnv, releaseStoppedEnvs, releaseDestinationStates, timelineRollbacks,
   } from "./lib/lane-states.js";
   import { laneGeometry } from "./lib/lane-geometry.js";
-  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
+  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, planHold, planHoldChip, queuedDestinationNote, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
 
   export let org = "";
   export let project = "";
@@ -1026,7 +1026,9 @@
                         {/if}
                       </span>
                     {/if}
-                    {#if stage.stage_type === "plan" && isPlanAwaiting(stage) && release.release_intent_id && csrf}
+                    {#if stage.stage_type === "plan" && (planHold(stage)?.kind === "stale" || planHold(stage)?.kind === "waiting")}
+                      <span class="rt-chip rt-chip-attention" title={planHold(stage).reason}>{stage.environment} plan · {planHoldChip(planHold(stage))}</span>
+                    {:else if stage.stage_type === "plan" && isPlanAwaiting(stage) && release.release_intent_id && csrf}
                       <span class="rt-chip rt-chip-attention">{stage.environment} plan</span>
                       <button
                         class="rt-button rt-button-go"
@@ -1111,16 +1113,22 @@
                         {:else if stage.stage_type === "wait"}
                           <span class="rt-stage-label">{waitStageLabel(stage.status)} {stage.duration_seconds}s</span>
                         {:else if stage.stage_type === "plan"}
-                          <span class="rt-stage-label">{planStageLabel(stageStatus)}</span>
+                          {@const hold = planHold(stage)}
+                          <span class="rt-stage-label">{planStageLabel(stageStatus, hold)}</span>
                           <span class="rt-chip env-scope" style={envChipStyle(stage.environment || "")}>
                             {stage.environment}<span class="rt-chip-mark" data-status={stage.status} aria-hidden="true"></span>
                           </span>
+                          {#if hold}
+                            <span class="rt-chip" class:rt-chip-attention={hold.kind !== "superseded"} data-plan-hold={hold.kind} title={hold.reason}>{planHoldChip(hold)}</span>
+                          {/if}
                           {#if stageStatus === "AWAITING_APPROVAL" && release.release_intent_id && csrf}
-                            <button
-                              class="rt-button rt-button-go"
-                              disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
-                              on:click|stopPropagation={() => approvePlanStage(release, stage)}
-                            >Approve plan</button>
+                            {#if hold?.kind !== "stale"}
+                              <button
+                                class="rt-button rt-button-go"
+                                disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
+                                on:click|stopPropagation={() => approvePlanStage(release, stage)}
+                              >Approve plan</button>
+                            {/if}
                             <button
                               class="rt-button rt-button-warn"
                               disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
@@ -1164,7 +1172,10 @@
                                 {#if row?.queue_position}
                                   <span class="rt-mono rt-muted">#{row.queue_position}</span>
                                 {/if}
-                                {#if row?.error_message}
+                                {#if queuedDestinationNote(row)}
+                                  {@const note = queuedDestinationNote(row)}
+                                  <span class="rt-chip rt-chip-attention" data-dest-note title={note.reason}>{note.chip}</span>
+                                {:else if row?.error_message}
                                   <a
                                     class="rt-why"
                                     href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"

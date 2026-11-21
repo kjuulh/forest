@@ -91,12 +91,14 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
               <StageRow stage={stage}>
                 <:actions>
                   <div class="flex items-center gap-2 ml-auto">
-                    <form method="post" action={plan_stage_href(org, project, &stage.id, "approve")} class="inline">
-                      <CsrfField token={csrf_token} />
-                      <input type="hidden" name="release_intent_id" value={release_intent_id}>
-                      <input type="hidden" name="redirect_to" value={release_href(org, project, &release.slug)}>
-                      <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve plan</button>
-                    </form>
+                    {if stage.approvable() {
+                      <form method="post" action={plan_stage_href(org, project, &stage.id, "approve")} class="inline">
+                        <CsrfField token={csrf_token} />
+                        <input type="hidden" name="release_intent_id" value={release_intent_id}>
+                        <input type="hidden" name="redirect_to" value={release_href(org, project, &release.slug)}>
+                        <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve plan</button>
+                      </form>
+                    }}
                     <form method="post" action={plan_stage_href(org, project, &stage.id, "reject")} class="inline" data-confirm="Reject this plan?">
                       <CsrfField token={csrf_token} />
                       <input type="hidden" name="release_intent_id" value={release_intent_id}>
