@@ -597,7 +597,7 @@ async fn hostile_labels_and_failure_reasons_remain_text_and_graph_ids_remain_int
 }
 
 #[tokio::test]
-async fn the_workspace_inspects_nodes_without_moving_existing_content_or_duplicating_actions() {
+async fn the_above_fold_workspace_keeps_existing_content_and_reuses_existing_actions() {
     let mut fixture = behavior(
         vec![stage("deploy", "RUNNING", &[])],
         vec![step("deploy", "prod-eu", "RUNNING")],
@@ -621,8 +621,8 @@ async fn the_workspace_inspects_nodes_without_moving_existing_content_or_duplica
         assert!(
             html.find(marker)
                 .unwrap_or_else(|| panic!("missing {marker}"))
-                < graph_start,
-            "{marker} moved below graph"
+                > graph_start,
+            "{marker} must remain after the above-fold node viewer"
         );
     }
     assert!(diagram.contains("<svg"), "server-rendered SVG");
@@ -654,7 +654,7 @@ async fn the_workspace_inspects_nodes_without_moving_existing_content_or_duplica
         );
         let target = format!("id=\"{}\"", &node.href[1..]);
         assert!(
-            html[..graph_start].contains(&target),
+            html.contains(&target),
             "missing inspector action source {target}"
         );
         assert!(
@@ -784,18 +784,6 @@ async fn the_graph_adds_no_inline_code_or_styles_under_the_page_csp() {
 }
 
 #[tokio::test]
-async fn release_overviews_do_not_include_the_detail_graph() {
-    for uri in [
-        "/orgs/testorg/projects/my-api/releases",
-        "/orgs/testorg/releases",
-    ] {
-        let (html, _) = request(behavior(vec![stage("deploy", "RUNNING", &[])], vec![]), uri).await;
-        assert!(!html.contains("id=\"release-graph\""), "{uri}");
-        assert!(!html.contains("data-node-id="), "{uri}");
-    }
-}
-
-#[tokio::test]
 async fn a_failed_prerequisite_blocks_descendants_even_when_stages_arrive_out_of_order() {
     let (html, _) = request(
         behavior(
@@ -861,16 +849,8 @@ async fn a_passed_policy_does_not_make_deploy_next_before_plan_approval() {
     );
 }
 
-fn queue(html: &str) -> &str {
-    let start = html
-        .find("<section id=\"release-queue\"")
-        .expect("compact queue");
-    let rest = &html[start..];
-    &rest[..rest.find("</section>").expect("closed compact queue") + "</section>".len()]
-}
-
 #[tokio::test]
-async fn the_above_fold_queue_only_shows_current_work_and_not_completed_or_future_stages() {
+async fn the_compact_workspace_retains_completed_active_and_future_nodes() {
     let plan = PipelineRunStageState {
         stage_type: "plan".into(),
         approval_status: Some("AWAITING_APPROVAL".into()),
@@ -888,35 +868,18 @@ async fn the_above_fold_queue_only_shows_current_work_and_not_completed_or_futur
         PAGE,
     )
     .await;
-    let compact = queue(&html);
-    assert!(compact.contains("Plan approval"), "{compact}");
-    assert!(
-        !compact.contains("data-node-label=\"complete\""),
-        "{compact}"
-    );
-    assert!(!compact.contains("data-node-label=\"future\""), "{compact}");
-    assert!(html.find(compact).unwrap() < html.find("id=\"pipeline\"").unwrap());
-    assert!(
-        compact.contains("data-queue-node-key="),
-        "queue nodes open the full workspace"
-    );
-    assert!(
-        html.contains("id=\"release-graph\""),
-        "the full workspace remains below"
-    );
+    let diagram = graph(&html);
+    let rendered = nodes(diagram);
+    assert_eq!(stage_node(&rendered, "complete").state, "done");
+    assert_eq!(stage_node(&rendered, "future").state, "waiting");
+    assert!(rendered.iter().any(
+        |node| attr(node.markup, "data-node-label") == "Plan approval" && node.state == "waiting"
+    ));
+    assert!(html.find(diagram).unwrap() < html.find("id=\"pipeline\"").unwrap());
 }
 
 #[tokio::test]
-async fn queue_items_keep_destination_wait_reasons_and_terminal_releases_hide_the_queue() {
-    let mut execution = step("deploy", "prod-eu", "QUEUED");
-    execution.error_message = Some("waiting for release older to apply its plan".into());
-    let (html, _) = request(
-        behavior(vec![stage("deploy", "RUNNING", &[])], vec![execution]),
-        PAGE,
-    )
-    .await;
-    let compact = queue(&html);
-    assert!(compact.contains("prod-eu") && compact.contains("waiting for release older"));
+async fn terminal_releases_keep_the_full_graph_instead_of_disappearing_with_the_queue() {
     let (html, _) = request(
         behavior(
             vec![stage("deploy", "SUCCEEDED", &[])],
@@ -925,11 +888,14 @@ async fn queue_items_keep_destination_wait_reasons_and_terminal_releases_hide_th
         PAGE,
     )
     .await;
-    let compact = queue(&html);
-    let opening = &compact[..compact.find('>').unwrap()];
+    let diagram = graph(&html);
+    let rendered = nodes(diagram);
+    assert_eq!(attr(diagram, "data-live"), "false");
+    assert_eq!(stage_node(&rendered, "deploy").state, "done");
     assert!(
-        opening.contains("hidden"),
-        "terminal release does not occupy the above-fold queue"
+        rendered
+            .iter()
+            .any(|node| attr(node.markup, "data-node-label") == "prod-eu" && node.state == "done")
     );
 }
 
@@ -972,5 +938,213 @@ async fn timeline_stage_dependencies_preserve_branches_for_the_overview_flow() {
     assert_eq!(
         release["destinations"][0]["stage_id"], "first",
         "completed plan provenance must not turn into a deployed destination"
+    );
+}
+
+fn timeline_releases(body: &serde_json::Value) -> Vec<&serde_json::Value> {
+    body["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| {
+            if let Some(release) = item.get("release") {
+                vec![release]
+            } else {
+                item["releases"]
+                    .as_array()
+                    .map(|releases| releases.iter().collect())
+                    .unwrap_or_default()
+            }
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_overview_fragment_uses_the_same_full_node_projection_as_release_details() {
+    fn fixture() -> MockPlatformBehavior {
+        let plan = PipelineRunStageState {
+            stage_type: "plan".into(),
+            approval_status: Some("AWAITING_APPROVAL".into()),
+            ..stage("plan", "RUNNING", &["complete"])
+        };
+        let mut value = behavior(
+            vec![
+                stage("complete", "SUCCEEDED", &[]),
+                plan,
+                stage("future", "PENDING", &["plan"]),
+            ],
+            vec![],
+        );
+        value.list_artifacts_result = Some(Ok(vec![artifact()]));
+        value
+    }
+    let (detail, _) = request(fixture(), PAGE).await;
+    let (body, _) = request(fixture(), "/api/orgs/testorg/projects/my-api/timeline").await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let releases = timeline_releases(&body);
+    let fragment = releases[0]["graph_html"]
+        .as_str()
+        .expect("full overview graph");
+    let signature = |html: &str| {
+        let mut values: Vec<_> = nodes(html)
+            .iter()
+            .map(|node| {
+                (
+                    attr(node.markup, "data-node-label").to_owned(),
+                    node.state.to_owned(),
+                    attr(node.markup, "data-node-kind").to_owned(),
+                )
+            })
+            .collect();
+        values.sort();
+        values
+    };
+    assert_eq!(signature(fragment), signature(graph(&detail)));
+    assert!(
+        signature(fragment)
+            .iter()
+            .any(|(label, state, _)| label == "complete" && state == "done")
+    );
+    assert!(
+        signature(fragment)
+            .iter()
+            .any(|(label, state, _)| label == "future" && state == "waiting")
+    );
+    assert!(
+        fragment.contains("data-poll=\"false\""),
+        "overview uses canonical timeline updates"
+    );
+    assert!(
+        !fragment.contains("<form"),
+        "approval forms stay on the authenticated release page"
+    );
+}
+
+#[tokio::test]
+async fn simultaneous_project_workspaces_do_not_share_dom_ids_or_execution_state() {
+    let first = artifact();
+    let mut second = artifact();
+    second.artifact_id = "worker-artifact".into();
+    let mut fixture = behavior(vec![stage("deploy", "RUNNING", &[])], vec![]);
+    if let Some(Ok(intents)) = fixture.get_release_intent_states_result.as_mut() {
+        intents.push(ReleaseIntentState {
+            release_intent_id: "worker-intent".into(),
+            artifact_id: second.artifact_id.clone(),
+            project: "worker".into(),
+            created_at: second.created_at.clone(),
+            stages: vec![stage("deploy", "FAILED", &[])],
+            steps: vec![],
+        });
+    }
+    fixture.list_projects_result = Some(Ok(vec!["my-api".into(), "worker".into()]));
+    fixture.list_artifacts_by_project = Some(std::collections::HashMap::from([
+        ("my-api".into(), vec![first]),
+        ("worker".into(), vec![second]),
+    ]));
+    let (body, _) = request(fixture, "/api/orgs/testorg/timeline").await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let releases = timeline_releases(&body);
+    let fragments: Vec<_> = releases
+        .iter()
+        .filter_map(|release| release["graph_html"].as_str())
+        .collect();
+    assert_eq!(fragments.len(), 2);
+    let ids = Regex::new(r#"\sid="([^"]+)""#).unwrap();
+    let first_ids: HashSet<_> = ids
+        .captures_iter(fragments[0])
+        .map(|value| value[1].to_owned())
+        .collect();
+    let second_ids: HashSet<_> = ids
+        .captures_iter(fragments[1])
+        .map(|value| value[1].to_owned())
+        .collect();
+    assert!(
+        first_ids.is_disjoint(&second_ids),
+        "HTML, ARIA and marker identifiers are instance-scoped"
+    );
+    let states: HashSet<_> = fragments
+        .iter()
+        .flat_map(|fragment| {
+            nodes(fragment)
+                .into_iter()
+                .map(|node| node.state.to_owned())
+        })
+        .collect();
+    assert_eq!(
+        states,
+        HashSet::from(["running".to_owned(), "failed".to_owned()])
+    );
+}
+
+#[tokio::test]
+async fn timeline_graph_markup_escapes_hostile_titles_failure_reasons_and_plan_output() {
+    let title = "<img src=x onerror=alert(1)>";
+    let failure = "</svg><script>alert(1)</script>";
+    let mut release = artifact();
+    release.context.title = title.into();
+    let mut execution = step("deploy", title, "FAILED");
+    execution.error_message = Some(failure.into());
+    let mut fixture = behavior(
+        vec![
+            PipelineRunStageState {
+                stage_type: "plan".into(),
+                ..stage("plan", "SUCCEEDED", &[])
+            },
+            stage("deploy", "FAILED", &["plan"]),
+        ],
+        vec![execution],
+    );
+    fixture.list_artifacts_result = Some(Ok(vec![release]));
+    fixture.get_plan_output_result = Some(Ok(forage_core::platform::PlanOutput {
+        plan_output: format!("{title}\n{failure}"),
+        status: "SUCCEEDED".into(),
+        outputs: vec![],
+    }));
+    fixture.evaluate_policies_result = Some(Ok(vec![PolicyEvaluation {
+        policy_name: title.into(),
+        policy_type: "soak_time".into(),
+        passed: false,
+        reason: failure.into(),
+        approval_state: None,
+    }]));
+    let (body, _) = request(fixture, "/api/orgs/testorg/projects/my-api/timeline").await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let releases = timeline_releases(&body);
+    assert_eq!(
+        releases[0]["title"], title,
+        "JSON keeps data separate from HTML"
+    );
+    let fragment = releases[0]["graph_html"]
+        .as_str()
+        .expect("rendered graph markup");
+    assert!(
+        fragment.contains("&lt;img src=x onerror=alert(1)&gt;"),
+        "{fragment}"
+    );
+    assert!(
+        fragment.contains("&lt;/svg&gt;&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{fragment}"
+    );
+    assert!(
+        !fragment.contains(title) && !fragment.contains(failure),
+        "{fragment}"
+    );
+    assert!(
+        !Regex::new(r"(?i)<(?:img|script)\b")
+            .unwrap()
+            .is_match(fragment),
+        "{fragment}"
+    );
+    let destination = nodes(fragment)
+        .into_iter()
+        .find(|node| node.state == "failed" && attr(node.markup, "data-node-label").contains("&lt;img"))
+        .expect("failed destination remains a graph node");
+    assert!(
+        destination.markup.contains("&lt;/svg&gt;&lt;script&gt;"),
+        "failure stays escaped in node attributes and text"
+    );
+    assert!(
+        fragment.contains("<template data-graph-plan="),
+        "hostile plan output follows the inert plan-template path"
     );
 }

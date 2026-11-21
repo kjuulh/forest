@@ -32,6 +32,14 @@ pub struct ReleasePage {
     pub graph_js: String,
 }
 
+pub struct GraphFragmentPage {
+    pub graph: super::release_graph::ReleaseGraph,
+    pub release: ReleaseDetails,
+    pub workspace_id: String,
+    pub detail_url: String,
+    pub logs_url: String,
+}
+
 // Class names stay whole literals: Tailwind scans this directory for them.
 pub fn health_classes(status: &str) -> (&'static str, &'static str, &'static str) {
     match status {

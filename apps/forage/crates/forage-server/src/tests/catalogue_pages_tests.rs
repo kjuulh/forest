@@ -348,6 +348,7 @@ fn the_timeline_url_cannot_break_out_of_its_attribute() {
         chrome: Default::default(),
         org: "evil\"><script>alert(1)</script>".into(),
         prefetch_js: "/static/js/timeline-prefetch.js".into(),
+        graph_js: "/static/js/release-graph.js".into(),
     };
     let html = crate::views::pages::releases::render(&page);
     assert!(!html.contains("<script>alert(1)</script>"), "{html}");

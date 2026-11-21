@@ -1,7 +1,7 @@
 use forage_ui::components::{IconLink, TimelinePrefetch};
 use forage_ui::layouts::Shell;
 use crate::views::models::settings_href;
-props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_token, username, role, prefetch_js };
+props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_token, username, role, prefetch_js, graph_js };
 
 <Shell chrome={chrome}>
   <section class="app-container pt-12">
@@ -18,5 +18,6 @@ props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_tok
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+    <script src={graph_js}></script>
   </:scripts>
 </Shell>

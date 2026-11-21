@@ -4,7 +4,7 @@
     return;
   }
 
-  var current = null;
+  var controllers = new Map();
   var controlSections = ["pipeline", "policies", "destinations"];
 
   function pageURL() {
@@ -12,18 +12,24 @@
   }
 
   function initialize() {
-    if (current) current.destroy();
-    current = null;
-    var root = document.getElementById("release-graph");
-    if (!root) return;
-    current = attach(root, pageURL());
-    current.schedule();
+    controllers.forEach(function (controller, root) {
+      if (!controller.valid()) {
+        controller.destroy();
+        controllers.delete(root);
+      }
+    });
+    document.querySelectorAll("[data-release-graph]").forEach(function (root) {
+      if (controllers.has(root)) return;
+      var controller = attach(root, pageURL());
+      controllers.set(root, controller);
+      controller.schedule();
+    });
   }
 
   function attach(root, url) {
     var viewport = root.querySelector("[data-graph-viewport]");
     var svg = root.querySelector(".release-graph-svg");
-    var queue = document.getElementById("release-queue");
+    var overview = root.dataset.context === "overview";
     var inspector = root.querySelector("[data-graph-inspector]");
     var status = root.querySelector("[data-graph-refresh-status]");
     var lifetime = new AbortController();
@@ -43,13 +49,15 @@
     var space = false;
     var suppressClick = false;
     var actions = [];
-    var planText = null;
+    var planText;
     var resize = null;
     var intersection = null;
-    var visibleSurfaces = new Set();
+    var inspectorVisible = root.dataset.inspector === "true";
+    var wasFullscreen = false;
+    var compactInspectorVisible = inspectorVisible;
 
     function valid() {
-      return !disposed && root.isConnected && document.getElementById("release-graph") === root && pageURL() === url;
+      return !disposed && root.isConnected && root.hasAttribute("data-release-graph") && pageURL() === url;
     }
 
     function listen(target, event, handler, options) {
@@ -68,9 +76,21 @@
         || nodes[0];
     }
 
+    function detailLink(label, node) {
+      if (!root.dataset.detailUrl) return null;
+      var destination = new URL(root.dataset.detailUrl, location.href);
+      if (destination.origin !== location.origin) return null;
+      var href = node && node.getAttribute("href");
+      if (href && href.charAt(0) === "#") destination.hash = href;
+      var link = document.createElement("a");
+      link.href = destination.href;
+      link.textContent = label;
+      return link;
+    }
+
     function targetFor(node) {
       var href = node && node.getAttribute("href");
-      return href && href.charAt(0) === "#" ? document.getElementById(href.slice(1)) : null;
+      return !overview && href && href.charAt(0) === "#" ? document.getElementById(href.slice(1)) : null;
     }
 
     function text(field, value) {
@@ -90,6 +110,9 @@
       var signature = JSON.stringify(actions.map(function (button) {
         return [button.form.action, button.textContent || button.value, button.disabled];
       }));
+      var approvalLink = overview && node && ["approval", "policy"].includes(node.dataset.nodeKind)
+        && detailLink(node.dataset.nodeKind === "approval" ? "Review approvals on release" : "Review policy on release", node);
+      signature += approvalLink ? approvalLink.href : "";
       // Preserve focused mirror controls while reconnecting them to the current real forms.
       if (container.dataset.signature === signature) return;
       container.dataset.signature = signature;
@@ -103,19 +126,22 @@
         button.dataset.approvalAction = /reject/i.test(button.textContent) ? "reject" : "approve";
         container.append(button);
       });
+      if (approvalLink) container.append(approvalLink);
     }
 
     function renderPlan(node) {
       var index = node ? node.dataset.planIndex : "";
       var template = index !== "" && root.querySelector('template[data-graph-plan="' + index + '"]');
-      var output = template ? template.content.textContent : null;
+      var link = !template && overview && detailLink("View plan on release", node);
+      var output = template ? template.content.textContent : link ? link.href : null;
       if (output === planText) return;
       planText = output;
       var panel = root.querySelector('[data-graph-panel="plan"]');
       if (template) panel.replaceChildren(template.content.cloneNode(true));
+      else if (link) panel.replaceChildren(link);
       else {
         var empty = document.createElement("p");
-        empty.textContent = "No plan output for this node.";
+        empty.textContent = overview ? "Open the release to view plan output." : "No plan output for this node.";
         panel.replaceChildren(empty);
       }
     }
@@ -137,6 +163,7 @@
       if (pin) {
         pinned = true;
         inspector.open = true;
+        setInspector(true);
       }
       var data = node.dataset;
       text("kind", data.nodeKind);
@@ -151,7 +178,7 @@
       root.querySelector("[data-graph-inspector-state]").dataset.state = data.state;
       root.querySelector("[data-graph-selection-mode]").textContent = pinned ? "Pinned" : "Preview";
       root.querySelector('[data-graph-action="unpin"]').hidden = !pinned;
-      root.querySelector('[data-graph-action="view-stage"]').hidden = !targetFor(node);
+      root.querySelector('[data-graph-action="view-stage"]').hidden = !targetFor(node) && !(overview && root.dataset.detailUrl);
       nodes.forEach(function (candidate) {
         candidate.setAttribute("aria-pressed", String(pinned && candidate === node));
       });
@@ -162,14 +189,15 @@
     function mountLogs() {
       var panel = root.querySelector('[data-graph-panel="logs"]');
       if (!panel || root.dataset.hasLogs !== "true" || panel.querySelector("release-logs")) return;
-      var source = document.querySelector("#logs release-logs[url]");
-      if (!source) {
+      var source = !overview && document.querySelector("#logs release-logs[url]");
+      var logsUrl = root.dataset.logsUrl || (source && source.getAttribute("url"));
+      if (!logsUrl || new URL(logsUrl, location.href).origin !== location.origin) {
         panel.textContent = "Logs are not available for this release.";
         return;
       }
       var logs = document.createElement("release-logs");
-      logs.id = source.id + "-graph";
-      logs.setAttribute("url", source.getAttribute("url"));
+      logs.id = root.id + "-logs";
+      logs.setAttribute("url", logsUrl);
       panel.replaceChildren(logs);
     }
 
@@ -217,23 +245,23 @@
     function fit() {
       if (!svg || !viewport.clientWidth || !viewport.clientHeight) return;
       var list = nodes;
-      var active = mode === "selected" ? findNode(selected) || activeNode() : activeNode();
-      var readable = mode === "active" || mode === "selected";
+      var active = activeNode();
+      var readable = mode === "active";
       if (readable && active) {
-        var neighborhood = new Set([active.id]);
+        var neighborhood = new Set([active.dataset.nodeId]);
         svg.querySelectorAll("[data-from][data-to]").forEach(function (edge) {
-          if (edge.dataset.from === active.id || edge.dataset.to === active.id) {
+          if (edge.dataset.from === active.dataset.nodeId || edge.dataset.to === active.dataset.nodeId) {
             neighborhood.add(edge.dataset.from);
             neighborhood.add(edge.dataset.to);
           }
         });
-        list = nodes.filter(function (node) { return neighborhood.has(node.id); });
+        list = nodes.filter(function (node) { return neighborhood.has(node.dataset.nodeId); });
       }
       var box = mode === "fit"
         ? { x: 0, y: 0, width: Number(svg.dataset.graphWidth) || 272, height: Number(svg.dataset.graphHeight) || 168 }
         : bounds(list);
       var zoom = Math.min((viewport.clientWidth - 64) / box.width, (viewport.clientHeight - 80) / box.height, readable ? 1.2 : 1);
-      // Wide fan-outs must not shrink the selected work below a readable size.
+      // Wide fan-outs must not shrink active work below a readable size.
       if (readable && active && zoom < 0.65) {
         box = bounds([active]);
         zoom = Math.min((viewport.clientWidth - 48) / box.width, (viewport.clientHeight - 64) / box.height, 1);
@@ -258,19 +286,74 @@
       else fit();
     }
 
-    function openNode(key) {
-      if (!valid()) return false;
-      var node = key ? findNode(key) : null;
-      if (key && !node) return false;
-      if (node) {
-        inspect(node, true);
-        selectTab("details");
-        mode = "selected";
-        fit();
+    function update(nextRoot) {
+      if (!valid() || !nextRoot || nextRoot.id !== root.id || !nextRoot.hasAttribute("data-release-graph")) return false;
+      var nextSvg = nextRoot.querySelector(".release-graph-svg");
+      if (!nextSvg) return false;
+      var sameRelease = root.dataset.releaseKey === nextRoot.dataset.releaseKey;
+      var active = document.activeElement;
+      var focusWithin = root.contains(active);
+      var focusedSubmit = active && active.getAttribute("data-graph-submit");
+      var focusedNode = active && active.closest("[data-node-id]");
+      var focusedKey = focusedNode && focusedNode.dataset.nodeKey;
+      // The connected inspector owns log streams, focus and fullscreen state.
+      svg.replaceWith(nextSvg);
+      svg = nextSvg;
+      nodes = Array.from(svg.querySelectorAll("[data-node-id]"));
+      root.querySelector("[data-graph-plans]").replaceWith(nextRoot.querySelector("[data-graph-plans]"));
+      ["data-graph-count", "data-graph-release-context"].forEach(function (attribute) {
+        root.querySelector("[" + attribute + "]").textContent = nextRoot.querySelector("[" + attribute + "]").textContent;
+      });
+      ["releaseKey", "context", "compact", "poll", "detailUrl", "logsUrl", "live", "hasLogs"].forEach(function (key) {
+        root.dataset[key] = nextRoot.dataset[key];
+      });
+      overview = root.dataset.context === "overview";
+      root.querySelector("[data-graph-live]").hidden = root.dataset.live !== "true";
+      var nextEmpty = nextRoot.querySelector(".release-graph-empty");
+      var oldEmpty = viewport.querySelector(".release-graph-empty");
+      if (oldEmpty) oldEmpty.remove();
+      if (nextEmpty) viewport.append(nextEmpty);
+      var logsTab = root.querySelector('[data-graph-tab="logs"]');
+      var logsPanel = root.querySelector('[data-graph-panel="logs"]');
+      if (root.dataset.hasLogs === "true" && !logsTab) {
+        root.querySelector(".release-graph-tabs").append(nextRoot.querySelector('[data-graph-tab="logs"]'));
+        root.querySelector('[data-graph-panel="plan"]').after(nextRoot.querySelector('[data-graph-panel="logs"]'));
+      } else if (root.dataset.hasLogs !== "true" && logsTab) {
+        logsTab.remove();
+        logsPanel.remove();
       }
-      root.scrollIntoView({ behavior: "auto", block: "start" });
-      (node || root).focus({ preventScroll: true });
+      if (!sameRelease) {
+        selected = null;
+        pinned = false;
+        tab = "details";
+        planText = undefined;
+        mode = "active";
+        var mountedLogs = root.querySelector('[data-graph-panel="logs"]');
+        if (mountedLogs) mountedLogs.replaceChildren();
+      }
+      var remembered = sameRelease && pinned && findNode(selected);
+      if (!remembered) pinned = false;
+      inspect(remembered || activeNode(), false);
+      selectTab(tab);
+      if (sameRelease && mode === "manual") applyCamera();
+      else fit();
+      if (focusedKey && focusWithin) (findNode(focusedKey) || viewport).focus({ preventScroll: true });
+      else if (focusWithin && !active.isConnected) {
+        var restored = focusedSubmit !== null && root.querySelector('[data-graph-submit="' + focusedSubmit + '"]');
+        (restored || viewport).focus({ preventScroll: true });
+      }
+      status.textContent = "";
+      delete status.dataset.error;
+      schedule();
       return true;
+    }
+
+    function setInspector(visible) {
+      inspectorVisible = visible;
+      inspector.hidden = !visible;
+      if (!inspector.hidden) inspector.open = true;
+      root.dataset.inspector = String(!inspector.hidden);
+      root.querySelector('[data-graph-action="inspector"]').setAttribute("aria-expanded", String(!inspector.hidden));
     }
 
     function fullscreenState() {
@@ -278,6 +361,13 @@
       var button = root.querySelector('[data-graph-action="fullscreen"]');
       button.setAttribute("aria-pressed", String(full));
       button.textContent = full ? "Exit fullscreen" : "Fullscreen";
+      if (full !== wasFullscreen) {
+        wasFullscreen = full;
+        if (full) {
+          compactInspectorVisible = inspectorVisible;
+          setInspector(true);
+        } else setInspector(compactInspectorVisible);
+      }
       measure();
     }
 
@@ -294,7 +384,13 @@
     }
 
     async function viewStage() {
-      var target = targetFor(findNode(selected));
+      var node = findNode(selected);
+      if (overview) {
+        var link = detailLink("View stage", node);
+        if (link) location.assign(link.href);
+        return;
+      }
+      var target = targetFor(node);
       if (!target) return;
       if (document.fullscreenElement === root) {
         try { await document.exitFullscreen(); } catch (_) { return; }
@@ -313,8 +409,10 @@
       var section = event.target.closest("#pipeline, #policies, #destinations");
       if (section) dirty.add(section.id);
     }
-    listen(document, "input", rememberDirty);
-    listen(document, "change", rememberDirty);
+    if (!overview) {
+      listen(document, "input", rememberDirty);
+      listen(document, "change", rememberDirty);
+    }
     listen(root, "focusin", function (event) {
       var node = event.target.closest("[data-node-id]");
       if (node && !pinned && selected !== node.dataset.nodeKey) inspect(node, false);
@@ -352,6 +450,7 @@
         case "fit": mode = "fit"; fit(); break;
         case "active": mode = "active"; fit(); break;
         case "fullscreen": fullscreen(); break;
+        case "inspector": setInspector(!inspectorVisible); measure(); break;
         case "view-stage": viewStage(); break;
         case "unpin": pinned = false; inspect(findNode(selected) || activeNode(), false); break;
       }
@@ -446,43 +545,23 @@
 
     function schedule() {
       clearTimeout(timer);
-      if (valid() && !request && pageActive && onScreen && !document.hidden && root.dataset.live === "true") timer = setTimeout(refresh, 5000);
+      if (valid() && root.dataset.poll !== "false" && !request && pageActive && onScreen && !document.hidden && root.dataset.live === "true") timer = setTimeout(refresh, 5000);
     }
 
     async function refresh() {
-      if (!valid() || !pageActive || !onScreen || document.hidden || root.dataset.live !== "true") return;
+      if (!valid() || root.dataset.poll === "false" || !pageActive || !onScreen || document.hidden || root.dataset.live !== "true") return;
       request = new AbortController();
       var pending = request;
       try {
-        var response = await fetch(url, { method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: pending.signal });
+        var response = await fetch(root.dataset.detailUrl || url, { method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: pending.signal });
         if (!response.ok) throw new Error("Refresh failed");
         var html = await response.text();
         if (!valid() || !pageActive || !onScreen || document.hidden || pending.signal.aborted) return;
         var parsed = new window.DOMParser().parseFromString(html, "text/html");
-        var replacement = parsed.getElementById("release-graph");
-        var nextSvg = replacement && replacement.querySelector(".release-graph-svg");
-        if (!nextSvg) throw new Error("Release graph missing");
+        var replacement = parsed.getElementById(root.id);
+        if (!replacement || !replacement.querySelector(".release-graph-svg")) throw new Error("Release graph missing");
         if (drag) return;
         var active = document.activeElement;
-        var focusWithin = root.contains(active);
-        var focusedSubmit = active.getAttribute("data-graph-submit");
-        var focusedNode = active.closest && active.closest("[data-node-id]");
-        var focusedKey = focusedNode && focusedNode.dataset.nodeKey;
-        var focusInQueue = queue && queue.contains(active);
-        var focusedQueueControl = focusInQueue && active.closest("[data-release-graph-open]");
-        var focusedQueueKey = focusedQueueControl && focusedQueueControl.dataset.queueNodeKey;
-        var nextQueue = parsed.getElementById("release-queue");
-        if (queue && nextQueue) {
-          var scrollLeft = queue.querySelector(".release-queue-nodes").scrollLeft;
-          if (intersection) {
-            intersection.unobserve(queue);
-            visibleSurfaces.delete(queue);
-          }
-          queue.replaceWith(nextQueue);
-          queue = nextQueue;
-          queue.querySelector(".release-queue-nodes").scrollLeft = scrollLeft;
-          if (intersection) intersection.observe(queue);
-        }
         controlSections.forEach(function (id) {
           var oldSection = document.getElementById(id);
           var newSection = parsed.getElementById(id);
@@ -495,49 +574,8 @@
             oldSection.replaceWith(newSection);
           }
         });
-        if (!document.getElementById("logs") && parsed.getElementById("logs")) root.before(parsed.getElementById("logs"));
-        // Keep the workspace, inspector and mounted log element connected across updates.
-        svg.replaceWith(nextSvg);
-        svg = nextSvg;
-        nodes = Array.from(svg.querySelectorAll("[data-node-id]"));
-        root.querySelector("[data-graph-plans]").replaceWith(replacement.querySelector("[data-graph-plans]"));
-        ["data-graph-count", "data-graph-release-context"].forEach(function (attribute) {
-          root.querySelector("[" + attribute + "]").textContent = replacement.querySelector("[" + attribute + "]").textContent;
-        });
-        root.dataset.live = replacement.dataset.live;
-        root.dataset.hasLogs = replacement.dataset.hasLogs;
-        root.querySelector("[data-graph-live]").hidden = root.dataset.live !== "true";
-        var nextEmpty = replacement.querySelector(".release-graph-empty");
-        var oldEmpty = viewport.querySelector(".release-graph-empty");
-        if (oldEmpty) oldEmpty.remove();
-        if (nextEmpty) viewport.append(nextEmpty);
-        var logsTab = root.querySelector('[data-graph-tab="logs"]');
-        var logsPanel = root.querySelector('[data-graph-panel="logs"]');
-        if (root.dataset.hasLogs === "true" && !logsTab) {
-          root.querySelector(".release-graph-tabs").append(replacement.querySelector('[data-graph-tab="logs"]'));
-          root.querySelector('[data-graph-panel="plan"]').after(replacement.querySelector('[data-graph-panel="logs"]'));
-        } else if (root.dataset.hasLogs !== "true" && logsTab) {
-          logsTab.remove();
-          logsPanel.remove();
-        }
-        var remembered = findNode(selected);
-        if (!remembered) pinned = false;
-        inspect(remembered || activeNode(), false);
-        selectTab(tab);
-        measure();
-        if (focusInQueue) {
-          var queueControl = queue && !queue.hidden && (
-            Array.from(queue.querySelectorAll("[data-queue-node-key]")).find(function (node) { return node.dataset.queueNodeKey === focusedQueueKey; })
-            || queue.querySelector("[data-release-graph-open]")
-          );
-          (queueControl || root).focus({ preventScroll: true });
-        } else if (focusedKey) (findNode(focusedKey) || viewport).focus({ preventScroll: true });
-        else if (focusWithin && !active.isConnected) {
-          var restored = focusedSubmit !== null && root.querySelector('[data-graph-submit="' + focusedSubmit + '"]');
-          (restored || viewport).focus({ preventScroll: true });
-        }
-        status.textContent = "";
-        delete status.dataset.error;
+        if (!document.getElementById("logs") && parsed.getElementById("logs")) root.after(parsed.getElementById("logs"));
+        update(replacement);
       } catch (error) {
         if (valid() && !document.hidden && !pending.signal.aborted) {
           status.dataset.error = "true";
@@ -569,38 +607,35 @@
     selectTab(tab);
     resize = new ResizeObserver(measure);
     resize.observe(viewport);
-    if (window.IntersectionObserver) {
+    if (window.IntersectionObserver && root.dataset.poll !== "false") {
       intersection = new IntersectionObserver(function (entries) {
-        entries.forEach(function (entry) {
-          if (entry.isIntersecting) visibleSurfaces.add(entry.target);
-          else visibleSurfaces.delete(entry.target);
-        });
-        onScreen = visibleSurfaces.size > 0;
+        onScreen = entries[entries.length - 1].isIntersecting;
         if (onScreen) schedule();
         else stop();
       });
       intersection.observe(root);
-      if (queue) intersection.observe(queue);
+      onScreen = false;
     }
     measure();
-    return { root: root, schedule: schedule, destroy: destroy, openNode: openNode };
+    return { root: root, valid: valid, schedule: schedule, destroy: destroy, update: update };
   }
 
-  var observer = new MutationObserver(function () {
-    if (current && !current.root.isConnected) {
-      current.destroy();
-      current = null;
-    }
+  function containsGraph(node) {
+    return node.nodeType === 1 && (node.matches("[data-release-graph]") || node.querySelector("[data-release-graph]"));
+  }
+
+  var observer = new MutationObserver(function (records) {
+    if (records.some(function (record) {
+      return Array.from(record.addedNodes).some(containsGraph) || Array.from(record.removedNodes).some(containsGraph);
+    })) initialize();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  initialize.update = function (root, nextRoot) {
+    initialize();
+    var controller = controllers.get(root);
+    return controller ? controller.update(nextRoot) : false;
+  };
   window.__forageReleaseGraph = initialize;
-  document.addEventListener("click", function (event) {
-    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    var control = event.target.closest("[data-release-graph-open]");
-    if (!control || !current || !current.openNode(control.dataset.queueNodeKey)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }, { capture: true });
   document.addEventListener("sedx:load", initialize);
   initialize();
 })();

@@ -86,7 +86,6 @@ pub struct ReleaseGraph {
     pub live: bool,
     pub has_logs: bool,
     pub plans: Vec<GraphPlan>,
-    pub queue: Vec<usize>,
 }
 
 pub struct GraphPlan {
@@ -241,11 +240,11 @@ impl ReleaseGraph {
         index
     }
 
-    pub fn build(
+    pub fn build<'a>(
         intent: Option<&ReleaseIntentState>,
         policies: &[PolicyCheck],
         configured: &[ArtifactDestination],
-        stage_views: &[forage_ui::release::Stage],
+        plan_outputs: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Self {
         let mut graph = Self::default();
         let Some(intent) = intent else {
@@ -266,14 +265,10 @@ impl ReleaseGraph {
         };
         graph.has_logs = true;
         let mut links = Vec::new();
-        let mut queue_candidates = Vec::new();
         let mut state_dependencies = Vec::new();
         let mut entries = HashMap::with_capacity(intent.stages.len());
         let mut exits = HashMap::with_capacity(intent.stages.len());
-        let stage_views: HashMap<_, _> = stage_views
-            .iter()
-            .map(|view| (view.id.as_str(), view))
-            .collect();
+        let plan_outputs: HashMap<_, _> = plan_outputs.into_iter().collect();
         let stage_for_release: HashMap<_, _> = intent
             .stages
             .iter()
@@ -353,31 +348,22 @@ impl ReleaseGraph {
                 stage.started_at.as_deref(),
                 stage.completed_at.as_deref(),
             );
-            let plan_index = stage_views
-                .get(stage.stage_id.as_str())
-                .and_then(|view| view.plan_output.as_ref())
-                .map(|output| {
-                    let plan_index = graph.plans.len();
-                    graph.nodes[index].preview = output
-                        .lines()
-                        .find(|line| !line.trim().is_empty())
-                        .unwrap_or_default()
-                        .trim()
-                        .chars()
-                        .take(80)
-                        .collect();
-                    graph.plans.push(GraphPlan {
-                        output: output.clone(),
-                    });
-                    plan_index
+            let plan_index = plan_outputs.get(stage.stage_id.as_str()).map(|&output| {
+                let plan_index = graph.plans.len();
+                graph.nodes[index].preview = output
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or_default()
+                    .trim()
+                    .chars()
+                    .take(80)
+                    .collect();
+                graph.plans.push(GraphPlan {
+                    output: output.to_owned(),
                 });
+                plan_index
+            });
             graph.nodes[index].plan_index = plan_index;
-            if matches!(
-                state,
-                NodeState::Running | NodeState::Queued | NodeState::Waiting | NodeState::Blocked
-            ) {
-                queue_candidates.push(index);
-            }
             entries.insert(stage.stage_id.as_str(), index);
             let mut leaves = Vec::new();
             for step in &steps_by_stage[stage.stage_id.as_str()] {
@@ -425,15 +411,6 @@ impl ReleaseGraph {
                 );
                 graph.nodes[child].plan_index = plan_index;
                 graph.nodes[child].preview = graph.nodes[index].preview.clone();
-                if matches!(
-                    step_state,
-                    NodeState::Running
-                        | NodeState::Queued
-                        | NodeState::Waiting
-                        | NodeState::Blocked
-                ) {
-                    queue_candidates.push(child);
-                }
                 links.push((index, child));
                 leaves.push(child);
             }
@@ -540,9 +517,6 @@ impl ReleaseGraph {
                 .into();
                 graph.nodes[gate].plan_index = plan_index;
                 graph.nodes[gate].preview = graph.nodes[index].preview.clone();
-                if matches!(approval, "AWAITING_APPROVAL" | "AWAITINGAPPROVAL") {
-                    queue_candidates.push(gate);
-                }
                 links.extend(leaves.iter().map(|&leaf| (leaf, gate)));
                 leaves = vec![gate];
             }
@@ -641,12 +615,6 @@ impl ReleaseGraph {
                 step.started_at.as_deref(),
                 step.completed_at.as_deref(),
             );
-            if matches!(
-                state,
-                NodeState::Running | NodeState::Queued | NodeState::Waiting | NodeState::Blocked
-            ) {
-                queue_candidates.push(index);
-            }
         }
         if graph.nodes.is_empty() {
             for dest in configured {
@@ -663,35 +631,6 @@ impl ReleaseGraph {
             }
         }
         graph.layout(&links, &state_dependencies);
-        graph.queue = queue_candidates
-            .into_iter()
-            .filter(|&index| !graph.nodes[index].state.terminal())
-            .collect();
-        for (index, node) in graph.nodes.iter().enumerate() {
-            if node.state == NodeState::Next {
-                graph.queue.push(index);
-            }
-        }
-        // Future pending stages are not yet in the scheduler's queue.
-        for stage in &intent.stages {
-            let index = entries[stage.stage_id.as_str()];
-            if stage.status == "PENDING"
-                && graph.nodes[index].state == NodeState::Blocked
-                && stage.depends_on.iter().all(|dep| {
-                    entries
-                        .get(dep.as_str())
-                        .is_some_and(|&entry| graph.nodes[entry].state == NodeState::Done)
-                        && exits.get(dep.as_str()).is_some_and(|leaves| {
-                            leaves
-                                .iter()
-                                .all(|&leaf| graph.nodes[leaf].state == NodeState::Done)
-                        })
-                })
-                && !graph.queue.contains(&index)
-            {
-                graph.queue.push(index);
-            }
-        }
         graph
     }
 

@@ -1,40 +1,20 @@
 use crate::views::release_graph::{ReleaseGraph as Graph, NodeState};
-component ReleaseQueue(graph: &Graph) {
-<section id="release-queue" class="release-queue" data-release-queue aria-labelledby="release-queue-heading" hidden={graph.queue.is_empty()}>
-  <header class="release-queue-heading">
-    <h2 id="release-queue-heading">Queue <span>· {graph.queue.len()} {if graph.queue.len() == 1 { item } else { items }}</span></h2>
-    <a href="#release-graph" data-release-graph-open>Open full workspace <span aria-hidden="true">↗</span></a>
-  </header>
-  <ul class="release-queue-nodes" aria-label="Current release work">
-    {for index in graph.queue.iter() {
-      {let node = &graph.nodes[*index];}
-      <li>
-        <a class="release-queue-node" href="#release-graph" data-release-graph-open data-queue-node-key="{node.href}|{node.context}|{node.label}" data-node-label={node.label} data-state={node.state.class()} data-state-label={node.state.label()} aria-label="{node.label} — {node.environment} — {node.context} — {node.state.label()}. {node.summary}. {node.reason}. Open in full workspace.">
-          <span class="release-queue-label">{node.label}</span>
-          <span class="release-queue-state">{if !node.environment.is_empty() { {node.environment} · }}{node.state.label()}</span>
-          <span class="release-queue-reason">{if node.reason.is_empty() { {node.summary} } else { {node.reason} }}</span>
-        </a>
-      </li>
-    }}
-  </ul>
-</section>
-}
-
-component ReleaseGraph(graph: &Graph, release: &crate::views::release::ReleaseDetails) {
-<section id="release-graph" class="release-graph" tabindex="-1" aria-labelledby="release-graph-heading" data-live={if graph.live { "true" } else { "false" }} data-has-logs={if graph.has_logs { "true" } else { "false" }}>
+component ReleaseGraph(graph: &Graph, release: &crate::views::release::ReleaseDetails, workspace_id: &str = "release-graph", detail_url: &str = "", logs_url: &str = "", overview: bool = false, compact: bool = true) {
+<section id={workspace_id} class="release-graph" tabindex="-1" aria-labelledby="{workspace_id}-heading" data-release-graph data-release-key={release.slug} data-context={if *overview { "overview" } else { "detail" }} data-compact={if *compact { "true" } else { "false" }} data-inspector={if *compact { "false" } else { "true" }} data-poll={if *overview { "false" } else { "true" }} data-detail-url={detail_url} data-logs-url={logs_url} data-live={if graph.live { "true" } else { "false" }} data-has-logs={if graph.has_logs { "true" } else { "false" }}>
   <header class="release-graph-heading">
     <div class="release-graph-heading-context">
-      <h2 id="release-graph-heading">Release pipeline</h2>
+      <h2 id="{workspace_id}-heading">Release pipeline</h2>
       <span data-graph-release-context>{release.heading}{if let Some(version) = &release.version { · {version} }}{if let Some(branch) = &release.branch { · {branch} }}{if let Some(sha) = &release.short_sha { · {sha} }}</span>
     </div>
     <span class="release-graph-count" data-graph-count>{graph.nodes.len()} nodes · {graph.edges.len()} connections</span>
-    <span class="release-graph-live" data-graph-live hidden={!graph.live}><span aria-hidden="true"></span>Live · 5s</span>
+    <span class="release-graph-live" data-graph-live hidden={!graph.live}><span aria-hidden="true"></span>{if *overview { Live } else { Live · 5s }}</span>
     <div class="release-graph-tools" aria-label="Graph controls">
       <button type="button" data-graph-zoom="out" aria-label="Zoom out">−</button>
       <output data-graph-zoom-label aria-label="Graph zoom">Fit</output>
       <button type="button" data-graph-zoom="in" aria-label="Zoom in">+</button>
       <button type="button" data-graph-action="fit" title="Fit all nodes (F)">Fit</button>
       <button type="button" data-graph-action="active" title="Focus active neighborhood (A)">Active</button>
+      <button type="button" data-graph-action="inspector" aria-expanded={if *compact { "false" } else { "true" }} aria-controls="{workspace_id}-inspector">Inspector</button>
       <button type="button" data-graph-action="fullscreen" aria-pressed="false">Fullscreen</button>
     </div>
   </header>
@@ -51,22 +31,22 @@ component ReleaseGraph(graph: &Graph, release: &crate::views::release::ReleaseDe
       {if graph.nodes.is_empty() { <p class="release-graph-empty">No pipeline stages or destinations are configured for this release.</p> }}
       <svg xmlns="http://www.w3.org/2000/svg" class="release-graph-svg" width={graph.width} height={graph.height} viewBox="0 0 {graph.width} {graph.height}" role="group" aria-label="Release dependency graph" data-graph-width={graph.width} data-graph-height={graph.height}>
         <defs>
-          <marker id="release-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker id="{workspace_id}-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9" class="release-graph-arrow"></path>
           </marker>
         </defs>
         <g class="release-graph-edges" aria-hidden="true">
           {for edge in graph.edges.iter() {
-            <path d={edge.path} data-from={edge.from} data-to={edge.to} data-state={edge.state.class()} vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
+            <path d={edge.path} data-from={edge.from} data-to={edge.to} data-state={edge.state.class()} vector-effect="non-scaling-stroke" marker-end="url(#{workspace_id}-arrow)"></path>
             <circle class="release-graph-port" cx={edge.start_x} cy={edge.start_y} r="4" data-state={edge.state.class()}></circle>
             <circle class="release-graph-port" cx={edge.end_x} cy={edge.end_y} r="4" data-state={edge.state.class()}></circle>
           }}
         </g>
         <g class="release-graph-nodes">
           {for node in graph.nodes.iter() {
-            <a id={node.id} class="release-graph-node" href={node.href} role="button" tabindex="0" data-node-id={node.id} data-node-key="{node.href}|{node.context}|{node.label}" data-state={node.state.class()} data-state-label={node.state.label()} data-node-kind={node.kind} data-node-label={node.label} data-node-context={node.context} data-node-environment={node.environment} data-node-summary={node.summary} data-node-preview={node.preview} data-node-reason={node.reason} data-node-details={node.details} data-node-timestamp={node.timestamp} data-plan-index={node.plan_index.map(|index| index.to_string()).unwrap_or_default()} aria-pressed="false" aria-labelledby="{node.id}-title" aria-describedby="{node.id}-description">
-              <title id="{node.id}-title">{node.label} — {node.context} — {node.state.label()}</title>
-              <desc id="{node.id}-description">{node.summary}. {node.reason} {node.details}. Select to inspect.</desc>
+            <a id="{workspace_id}-{node.id}" class="release-graph-node" href={node.href} role="button" tabindex="0" data-node-id={node.id} data-node-key="{node.href}|{node.context}|{node.label}" data-state={node.state.class()} data-state-label={node.state.label()} data-node-kind={node.kind} data-node-label={node.label} data-node-context={node.context} data-node-environment={node.environment} data-node-summary={node.summary} data-node-preview={node.preview} data-node-reason={node.reason} data-node-details={node.details} data-node-timestamp={node.timestamp} data-plan-index={node.plan_index.map(|index| index.to_string()).unwrap_or_default()} aria-pressed="false" aria-labelledby="{workspace_id}-{node.id}-title" aria-describedby="{workspace_id}-{node.id}-description">
+              <title id="{workspace_id}-{node.id}-title">{node.label} — {node.context} — {node.state.label()}</title>
+              <desc id="{workspace_id}-{node.id}-description">{node.summary}. {node.reason} {node.details}. Select to inspect.</desc>
               <svg class="release-graph-card" x={node.x} y={node.y} width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
                 <rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
                 <rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
@@ -94,7 +74,7 @@ component ReleaseGraph(graph: &Graph, release: &crate::views::release::ReleaseDe
       </svg>
       <p class="release-graph-canvas-hint">Drag to pan · Scroll to zoom · F Fit · A Active</p>
     </div>
-    <details class="release-graph-inspector" data-graph-inspector open>
+    <details id="{workspace_id}-inspector" class="release-graph-inspector" data-graph-inspector open hidden={compact}>
       <summary>Inspector <span data-graph-selection-mode>Preview</span></summary>
       <div class="release-graph-inspector-body">
         <p class="release-graph-inspector-kind" data-graph-inspector-kind></p>
@@ -103,18 +83,18 @@ component ReleaseGraph(graph: &Graph, release: &crate::views::release::ReleaseDe
         <p data-graph-inspector-summary></p>
         <p class="release-graph-inspector-timestamp" data-graph-inspector-timestamp></p>
         <div class="release-graph-tabs" role="tablist" aria-label="Node inspection">
-          <button id="graph-tab-details" type="button" role="tab" aria-selected="true" aria-controls="graph-panel-details" data-graph-tab="details">Details</button>
-          <button id="graph-tab-plan" type="button" role="tab" aria-selected="false" aria-controls="graph-panel-plan" data-graph-tab="plan" tabindex="-1">Plan</button>
-          {if graph.has_logs { <button id="graph-tab-logs" type="button" role="tab" aria-selected="false" aria-controls="graph-panel-logs" data-graph-tab="logs" tabindex="-1">Logs</button> }}
+          <button id="{workspace_id}-tab-details" type="button" role="tab" aria-selected="true" aria-controls="{workspace_id}-panel-details" data-graph-tab="details">Details</button>
+          <button id="{workspace_id}-tab-plan" type="button" role="tab" aria-selected="false" aria-controls="{workspace_id}-panel-plan" data-graph-tab="plan" tabindex="-1">Plan</button>
+          {if graph.has_logs { <button id="{workspace_id}-tab-logs" type="button" role="tab" aria-selected="false" aria-controls="{workspace_id}-panel-logs" data-graph-tab="logs" tabindex="-1">Logs</button> }}
         </div>
-        <div id="graph-panel-details" class="release-graph-panel" role="tabpanel" aria-labelledby="graph-tab-details" data-graph-panel="details">
+        <div id="{workspace_id}-panel-details" class="release-graph-panel" role="tabpanel" aria-labelledby="{workspace_id}-tab-details" data-graph-panel="details">
           <p data-graph-inspector-context></p>
           <p data-graph-inspector-reason></p>
           <p data-graph-inspector-details></p>
           <p data-graph-inspector-preview></p>
         </div>
-        <div id="graph-panel-plan" class="release-graph-panel" role="tabpanel" aria-labelledby="graph-tab-plan" data-graph-panel="plan" hidden><p>No plan output for this node.</p></div>
-        {if graph.has_logs { <div id="graph-panel-logs" class="release-graph-panel release-graph-log-panel" role="tabpanel" aria-labelledby="graph-tab-logs" data-graph-panel="logs" hidden></div> }}
+        <div id="{workspace_id}-panel-plan" class="release-graph-panel" role="tabpanel" aria-labelledby="{workspace_id}-tab-plan" data-graph-panel="plan" hidden></div>
+        {if graph.has_logs { <div id="{workspace_id}-panel-logs" class="release-graph-panel release-graph-log-panel" role="tabpanel" aria-labelledby="{workspace_id}-tab-logs" data-graph-panel="logs" hidden></div> }}
         <div class="release-graph-approval-actions" data-graph-approval-actions></div>
         <div class="release-graph-inspector-tools">
           <button type="button" data-graph-action="view-stage" hidden>View stage</button>

@@ -6,28 +6,27 @@ Status: implemented and verified locally; stacked fork reviews and deployment pe
 
 An individual release already exposes stages, policies, destinations, logs and
 its specification. Those sections do not show dependency order or distinguish
-parallel destinations at a glance. The full editor belongs to an individual
-release; the overview adds a compact stage-to-destination flow.
+parallel destinations at a glance. The same full node editor is available on
+individual releases and both release overviews, alongside the existing charts.
 
 ## Behavioural contract
 
 ### Placement and source of truth
 
-- A full-width node workspace follows the existing release-detail content.
-  Its large dotted canvas, toolbar and adjacent inspector supplement those
-  sections without replacing them or duplicating their mutation forms.
-  The workspace heading identifies the release and its available source context.
-- Above the detail content, a compact queue shows current execution, outstanding
-  approval and immediately ready work. Completed work and future pending
-  descendants do not occupy it. Selecting a queued item opens that exact node
-  in the full workspace.
-- Project and organisation overviews retain their timelines and add compact
-  flows for the latest release per project. They use the same fetched timeline
-  data and live refresh, not additional endpoints or polling loops.
-- Timeline JSON adds stage `depends_on` IDs and optional destination `stage_id`
-  provenance. Older clients ignore these additive fields. No RPC or database
-  schema changes are required. The overview attaches plan results to their
-  actual plan stage and never calls an untyped success deployed.
+- A compact full-width node workspace sits above the existing release-detail
+  content. Its canvas, toolbar and expandable inspector supplement those sections
+  without replacing them or duplicating their mutation forms.
+- Completed, active and future nodes all remain in the graph. Active changes the
+  camera, not the dataset; Fit exposes the entire dependency graph.
+- Project and organisation overviews use the identical server-rendered graph for
+  the latest release per project. Existing compact flow charts and timelines remain.
+  Overview graphs follow canonical timeline refresh, without extra polling loops.
+- Timeline JSON adds stage `depends_on`, optional destination `stage_id` provenance
+  and optional `graph_html` for the latest release per project. Older clients ignore
+  these additive fields. No RPC, forest-server or database schema changes are needed.
+- Overview graph projection fetches existing plan outputs and current policies,
+  bounded to four concurrent release projections. It uses the same graph builder
+  and component as details, including plan previews and policy nodes.
 - The latest release intent supplies stages and their explicit `depends_on`
   edges. Independent branches are not joined by incidental display order.
 - Intent steps identify destination execution by `stage_id`, not only by
@@ -66,11 +65,11 @@ emphasis respects reduced-motion preferences.
 
 ### Markup, access and security
 
-- The graph section has `id="release-graph"` and `data-live="true"` or `"false"`.
-- Each node has a lowercase `data-state` and a unique `data-node-id` of the form
-  `graph-node-N`. User-controlled stage or destination identifiers are not SVG
-  graph identifiers.
-- Edges expose `data-from` and `data-to` referencing those graph identifiers.
+- The detail graph has `id="release-graph"`; overview instances namespace all DOM,
+  ARIA and marker identifiers by project and artifact. Each exposes `data-live`.
+- Nodes have lowercase `data-state` and logical `data-node-id="graph-node-N"`.
+  DOM IDs are instance-prefixed; user-supplied labels never become SVG identifiers.
+- Edges expose `data-from` and `data-to` referencing the logical node identifiers.
 - SVG nodes remain keyboard-accessible anchors with existing stage, destination
   or policy targets as a progressive-enhancement fallback. Enhanced selection
   opens the inspector rather than relying on bottom-of-page jump links.
@@ -83,9 +82,9 @@ emphasis respects reduced-motion preferences.
   release has logs. One escaped inert template holds each plan's complete
   output, shared by its stage and destination nodes rather than duplicated in
   every card.
-- Approval and rejection submit the existing authenticated forms with their
-  original CSRF fields. The inspector introduces no duplicate forms or action
-  endpoints.
+- Detail approval and rejection submit the existing authenticated forms with their
+  original CSRF fields. Overview approval controls link to that release's real
+  approval section; no duplicate forms or action endpoints are introduced.
 - Active automatically frames current work as canvas space changes; Fit frames
   the whole graph. Fullscreen expands the workspace. Manual zoom and pan support
   exploration; live refresh preserves selection, camera and mounted logs.
@@ -109,8 +108,8 @@ release routes through the existing mock platform boundary. It covers:
 - environment and duration in visible cards, visible wait and policy reasons,
   and one shared escaped plan-output template;
 - configured destinations and escaped hostile text;
-- workspace placement below existing detail content and absence from both
-  overview routes;
+- above-fold placement without dropping existing detail content, full overview/detail
+  node projection equivalence and independent DOM identifiers across projects;
 - unfinished and terminal `data-live` flags;
 - safe graph identifiers, keyboard fallback targets, inspector and auto-fit
   controls, and reuse of the original authenticated forms without duplication;
@@ -127,8 +126,8 @@ its profile under the workspace `.workspace-cache/`, not Playwright.
 
 The workspace does not edit pipeline structure, introduce deployment actions,
 replace the release timeline, add storage or migrations, or depend on a CDN.
-Dependency topology and card positions are derived on the server for the full
-workspace; the compact overview projects the existing timeline JSON.
+Dependency topology and card positions are derived on the server. Both surfaces
+consume the same graph component; overview HTML travels in the timeline JSON.
 
 ## Verification status
 
@@ -149,19 +148,19 @@ release data and the strict CSP promoted from report-only to enforcing:
   inspector, mounted logs, pinned selection and manual camera; terminal state
   stopped live updates;
 - running animation was present normally and absent under reduced motion.
-- the compact above-fold queue refreshed while the full editor was below the
-  viewport, and its controls pinned/focused the exact selected node;
-- the compact overview rendered both project and organisation data, followed
-  canonical SSE refresh without reloading, and linked into the full release
-  workspace. New overview markup contains no inline styles or scripts.
+- shared full viewers rendered in both overviews alongside the retained compact
+  flow charts and timeline cards, including two projects with the same release slug;
+- automatic cameras followed live execution changes; policy-only context changes
+  refreshed cards without requiring a stage transition;
+- hostile title, destination/policy labels, failure reasons and plan output passed
+  the actual timeline JSON render regression. Chrome mounted the hostile title
+  and failure reason as text, with zero injected image/script/event-handler nodes.
 
-Screenshots: workspace `notes/node-workspace-light-desktop.png`,
-`notes/node-workspace-dark-desktop.png` and `notes/node-workspace-dark-mobile.png`.
-The editable design source is `notes/design/release-pipeline-v3.drawio`.
-Compact screenshots: `notes/release-queue-above-fold.png`,
-`notes/release-overview-light-desktop.png` and
-`notes/release-overview-dark-mobile.png`; editable design
-`notes/design/release-pipeline-v4-compact.drawio`.
+Final screenshots: workspace `notes/full-details-light-desktop.png`,
+`notes/full-overview-light-desktop.png`, `notes/full-overview-dark-mobile.png`,
+`notes/full-overview-editor-light.png` and `notes/full-overview-hostile-inert.png`.
+Editable design source: `notes/design/release-pipeline-v3.drawio`; the shared
+viewer reuses its full node workspace with a compact initial viewport.
 These artifacts are outside the repository. The temporary browser harness was
 removed after verification; no test-only route or deployment shortcut ships.
 

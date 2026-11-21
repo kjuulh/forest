@@ -1,0 +1,3 @@
+use crate::views::components::ReleaseGraph;
+props crate::views::release::GraphFragmentPage { graph, release, workspace_id, detail_url, logs_url };
+<ReleaseGraph graph={graph} release={release} workspace_id={workspace_id} detail_url={detail_url} logs_url={logs_url} overview={true} compact={true} />

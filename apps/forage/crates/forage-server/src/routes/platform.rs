@@ -942,6 +942,7 @@ async fn project_releases(
         username: session.user.username.clone(),
         role: current_role,
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::project_releases::render(&page);
 
@@ -1183,7 +1184,7 @@ async fn artifact_detail(
             .max_by_key(|ri| &ri.created_at),
         &policies,
         &artifact.destinations,
-        &stages,
+        stages.iter().filter_map(|stage| stage.plan_output.as_deref().map(|output| (stage.id.as_str(), output))),
     );
 
     let page = crate::views::release::ReleasePage {
@@ -1828,6 +1829,8 @@ pub struct ApiRelease {
     pub destinations: Vec<ApiDestinationState>,
     pub env_groups: Vec<ApiEnvGroup>,
     pub pipeline_stages: Vec<ApiPipelineStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_html: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1878,6 +1881,77 @@ pub struct ApiLane {
     pub description: Option<String>,
 }
 
+async fn timeline_graph_fragments(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    items: &[ArtifactWithProject],
+    intents: &[forage_core::platform::ReleaseIntentState],
+) -> std::collections::HashMap<String, String> {
+    use futures_util::{StreamExt, stream::FuturesUnordered};
+
+    let mut latest = std::collections::HashMap::<&str, &ArtifactWithProject>::new();
+    for item in items {
+        latest.entry(item.project_name.as_str()).and_modify(|previous| {
+            if item.artifact.created_at > previous.artifact.created_at { *previous = item; }
+        }).or_insert(item);
+    }
+    let mut latest_intents = std::collections::HashMap::<&str, &forage_core::platform::ReleaseIntentState>::new();
+    for intent in intents {
+        latest_intents.entry(intent.artifact_id.as_str()).and_modify(|previous| {
+            if intent.created_at > previous.created_at { *previous = intent; }
+        }).or_insert(intent);
+    }
+    let mut pending = FuturesUnordered::new();
+    let mut fragments = std::collections::HashMap::with_capacity(latest.len());
+    for item in latest.into_values() {
+        let intent = latest_intents.get(item.artifact.artifact_id.as_str()).copied();
+        pending.push(async move {
+            let mut outputs = std::collections::HashMap::new();
+            let mut policies = Vec::new();
+            if let Some(intent) = intent {
+                for stage in intent.stages.iter().filter(|stage| stage.stage_type == "plan") {
+                    match state.platform_client.get_plan_output(&session.access_token, &intent.release_intent_id, &stage.stage_id).await {
+                        Ok(output) if !output.plan_output.trim().is_empty() => { outputs.insert(stage.stage_id.clone(), output.plan_output); }
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!(stage_id = %stage.stage_id, error = %error, "overview plan output unavailable"),
+                    }
+                }
+                let environments: std::collections::BTreeSet<_> = intent.stages.iter().filter_map(|stage| stage.environment.as_deref()).collect();
+                for environment in environments {
+                    if let Ok(evaluations) = state.platform_client.evaluate_policies(&session.access_token, org, &item.project_name, environment, Some(&intent.release_intent_id)).await {
+                        policies.extend(evaluations.into_iter().map(|evaluation| crate::views::release::PolicyCheck {
+                            name: evaluation.policy_name, policy_type: evaluation.policy_type,
+                            passed: evaluation.passed, reason: evaluation.reason,
+                            target_environment: environment.to_owned(), approval: evaluation.approval_state,
+                        }));
+                    }
+                }
+            }
+            policies.sort_by(|a, b| a.policy_type.cmp(&b.policy_type).then(a.name.cmp(&b.name)).then(a.target_environment.cmp(&b.target_environment)));
+            let artifact = &item.artifact;
+            let metadata = artifact.context.description.as_deref().filter(|description| description.starts_with("Branch:")).map(parse_description_metadata).unwrap_or_default();
+            let page = crate::views::release::GraphFragmentPage {
+                graph: crate::views::release_graph::ReleaseGraph::build(intent, &policies, &artifact.destinations, outputs.iter().map(|(id, output)| (id.as_str(), output.as_str()))),
+                release: crate::views::release::details(artifact, &metadata),
+                workspace_id: format!("release-graph-{}", forage_core::integrations::slack_release::anchor_id(&format!("{}-{}", item.project_name, artifact.artifact_id))),
+                detail_url: crate::views::release::release_href(org, &item.project_name, &artifact.slug),
+                logs_url: crate::views::release::logs_href(org, &item.project_name, &artifact.slug),
+            };
+            (artifact.artifact_id.clone(), crate::views::fragments::release_graph::render(&page))
+        });
+        if pending.len() == 4 {
+            if let Some((id, html)) = pending.next().await {
+                fragments.insert(id, html);
+            }
+        }
+    }
+    while let Some((id, html)) = pending.next().await {
+        fragments.insert(id, html);
+    }
+    fragments
+}
+
 fn build_timeline_json(
     items: Vec<ArtifactWithProject>,
     environments: &[forage_core::platform::Environment],
@@ -1885,6 +1959,7 @@ fn build_timeline_json(
     release_intents: &[forage_core::platform::ReleaseIntentState],
     pipelines_by_project: &PipelinesByProject,
     approval_envs: &[String],
+    mut graph_fragments: std::collections::HashMap<String, String>,
 ) -> ApiTimelineResponse {
     let mut states_by_artifact: std::collections::HashMap<
         &str,
@@ -2163,6 +2238,7 @@ fn build_timeline_json(
 
         raw_releases.push(RawRelease {
             release: ApiRelease {
+                graph_html: graph_fragments.remove(artifact.artifact_id.as_str()),
                 release_intent_id: intent_id_by_artifact
                     .get(artifact.artifact_id.as_str())
                     .map(|s| s.to_string()),
@@ -2352,6 +2428,7 @@ async fn timeline_api(
         })
         .collect();
 
+    let graph_fragments = timeline_graph_fragments(&state, &session, &org, &items, &release_intents).await;
     let data = build_timeline_json(
         items,
         &environments,
@@ -2359,6 +2436,7 @@ async fn timeline_api(
         &release_intents,
         &pipelines_map,
         &approval_envs,
+        graph_fragments,
     );
 
     Ok(Json(data).into_response())
@@ -2413,6 +2491,7 @@ async fn org_timeline_api(
     }
 
     let items = fetch_org_artifacts(&state, &session.access_token, &org, &projects).await;
+    let graph_fragments = timeline_graph_fragments(&state, &session, &org, &items, &release_intents).await;
     let data = build_timeline_json(
         items,
         &environments,
@@ -2420,6 +2499,7 @@ async fn org_timeline_api(
         &release_intents,
         &pipelines_by_project,
         &[],
+        graph_fragments,
     );
 
     Ok(Json(data).into_response())
@@ -2473,6 +2553,7 @@ async fn releases_page(
         ),
         org: org.clone(),
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::releases::render(&page);
 

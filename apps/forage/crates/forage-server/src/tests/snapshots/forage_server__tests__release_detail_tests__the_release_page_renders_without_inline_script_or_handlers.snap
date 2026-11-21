@@ -26,20 +26,262 @@ Longer body">feat: ledger…</h1>
 <span class="text-xs text-gray-400"><time datetime="2026-03-07T12:00:00Z" class="">AGO</time></span>
 </div>
 </div>
-<section id="release-queue" class="release-queue" data-release-queue aria-labelledby="release-queue-heading">
-<header class="release-queue-heading">
-<h2 id="release-queue-heading">Queue <span>· 1 item</span></h2>
-<a href="#release-graph" data-release-graph-open>Open full workspace <span aria-hidden="true">↗</span></a>
+<section id="release-graph" class="release-graph" tabindex="-1" aria-labelledby="release-graph-heading" data-release-graph data-release-key="my-api-rel" data-context="detail" data-compact="true" data-inspector="false" data-poll="true" data-detail-url="/orgs/testorg/projects/my-api/releases/my-api-rel" data-logs-url="/api/orgs/testorg/projects/my-api/releases/my-api-rel/logs" data-live="true" data-has-logs="true">
+<header class="release-graph-heading">
+<div class="release-graph-heading-context">
+<h2 id="release-graph-heading">Release pipeline</h2>
+<span data-graph-release-context>feat: ledger…· v3.1.0· main· 01234567</span>
+</div>
+<span class="release-graph-count" data-graph-count>8 nodes · 3 connections</span>
+<span class="release-graph-live" data-graph-live><span aria-hidden="true"></span>Live · 5s</span>
+<div class="release-graph-tools" aria-label="Graph controls">
+<button type="button" data-graph-zoom="out" aria-label="Zoom out">−</button>
+<output data-graph-zoom-label aria-label="Graph zoom">Fit</output>
+<button type="button" data-graph-zoom="in" aria-label="Zoom in">+</button>
+<button type="button" data-graph-action="fit" title="Fit all nodes (F)">Fit</button>
+<button type="button" data-graph-action="active" title="Focus active neighborhood (A)">Active</button>
+<button type="button" data-graph-action="inspector" aria-expanded="false" aria-controls="release-graph-inspector">Inspector</button>
+<button type="button" data-graph-action="fullscreen" aria-pressed="false">Fullscreen</button>
+</div>
 </header>
-<ul class="release-queue-nodes" aria-label="Current release work">
-<li>
-<a class="release-queue-node" href="#release-graph" data-release-graph-open data-queue-node-key="#stage-plan-prod|prod|Plan approval" data-node-label="Plan approval" data-state="waiting" data-state-label="Waiting" aria-label="Plan approval — prod — prod — Waiting. Manual plan gate. Waiting for plan approval. Open in full workspace.">
-<span class="release-queue-label">Plan approval</span>
-<span class="release-queue-state">prod ·Waiting</span>
-<span class="release-queue-reason">Waiting for plan approval</span>
-</a>
-</li>
+<details class="release-graph-legend-disclosure">
+<summary>States</summary>
+<ul class="release-graph-legend" aria-label="Node state legend">
+<li data-state="running"><span class="release-graph-legend-dot" aria-hidden="true"></span>Running now</li><li data-state="next"><span class="release-graph-legend-dot" aria-hidden="true"></span>Next</li><li data-state="queued"><span class="release-graph-legend-dot" aria-hidden="true"></span>Queued</li><li data-state="waiting"><span class="release-graph-legend-dot" aria-hidden="true"></span>Waiting</li><li data-state="blocked"><span class="release-graph-legend-dot" aria-hidden="true"></span>Blocked</li><li data-state="failed"><span class="release-graph-legend-dot" aria-hidden="true"></span>Failed</li><li data-state="done"><span class="release-graph-legend-dot" aria-hidden="true"></span>Done</li><li data-state="skipped"><span class="release-graph-legend-dot" aria-hidden="true"></span>Skipped</li><li data-state="cancelled"><span class="release-graph-legend-dot" aria-hidden="true"></span>Cancelled</li><li data-state="superseded"><span class="release-graph-legend-dot" aria-hidden="true"></span>Superseded</li><li data-state="unknown"><span class="release-graph-legend-dot" aria-hidden="true"></span>Unknown</li>
 </ul>
+</details>
+<div class="release-graph-workspace">
+<div class="release-graph-viewport" tabindex="0" role="region" aria-label="Release dependency canvas. F fits all nodes; A focuses active nodes. Drag to pan, scroll to zoom." data-graph-viewport>
+
+<svg xmlns="http://www.w3.org/2000/svg" class="release-graph-svg" width="1344" height="1048" viewBox="0 0 1344 1048" role="group" aria-label="Release dependency graph" data-graph-width="1344" data-graph-height="1048">
+<defs>
+<marker id="release-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 1 1 L 9 5 L 1 9" class="release-graph-arrow"></path>
+</marker>
+</defs>
+<g class="release-graph-edges" aria-hidden="true">
+<path d="M 976.0 524.0 L 1040.0 524.0" data-from="graph-node-2" data-to="graph-node-3" data-state="waiting" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
+<circle class="release-graph-port" cx="976" cy="524" r="4" data-state="waiting"></circle>
+<circle class="release-graph-port" cx="1040" cy="524" r="4" data-state="waiting"></circle><path d="M 304.0 116.0 L 326.0 116.0 Q 336.0 116.0 336.0 126.0 L 336.0 514.0 Q 336.0 524.0 346.0 524.0 L 368.0 524.0" data-from="graph-node-0" data-to="graph-node-1" data-state="done" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
+<circle class="release-graph-port" cx="304" cy="116" r="4" data-state="done"></circle>
+<circle class="release-graph-port" cx="368" cy="524" r="4" data-state="done"></circle><path d="M 640.0 524.0 L 704.0 524.0" data-from="graph-node-1" data-to="graph-node-2" data-state="done" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
+<circle class="release-graph-port" cx="640" cy="524" r="4" data-state="done"></circle>
+<circle class="release-graph-port" cx="704" cy="524" r="4" data-state="done"></circle>
+</g>
+<g class="release-graph-nodes">
+<a id="release-graph-graph-node-0" class="release-graph-node" href="#stage-deploy-staging" role="button" tabindex="0" data-node-id="graph-node-0" data-node-key="#stage-deploy-staging|deploy · staging|deploy-staging" data-state="done" data-state-label="Done" data-node-kind="deploy" data-node-label="deploy-staging" data-node-context="deploy · staging" data-node-environment="staging" data-node-summary="Pipeline stage" data-node-preview="" data-node-reason="" data-node-details="Started: 2026-03-07T12:00:30Z" data-node-timestamp="Started 12:00 UTC" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-0-title" aria-describedby="release-graph-graph-node-0-description">
+<title id="release-graph-graph-node-0-title">deploy-staging — deploy · staging — Done</title>
+<desc id="release-graph-graph-node-0-description">Pipeline stage.  Started: 2026-03-07T12:00:30Z. Select to inspect.</desc>
+<svg class="release-graph-card" x="32" y="32" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6M4 16v5h16v-5"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">deploy</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">deploy-staging</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">Pipeline stage</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61"></text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Done</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end">Started 12:00 UTC</text></svg>
+</svg>
+</a><a id="release-graph-graph-node-1" class="release-graph-node" href="#stage-soak" role="button" tabindex="0" data-node-id="graph-node-1" data-node-key="#stage-soak|wait|soak" data-state="done" data-state-label="Done" data-node-kind="wait" data-node-label="soak" data-node-context="wait" data-node-environment="" data-node-summary="Soak timer · 30s" data-node-preview="" data-node-reason="" data-node-details="Duration: 30s" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-1-title" aria-describedby="release-graph-graph-node-1-description">
+<title id="release-graph-graph-node-1-title">soak — wait — Done</title>
+<desc id="release-graph-graph-node-1-description">Soak timer · 30s.  Duration: 30s. Select to inspect.</desc>
+<svg class="release-graph-card" x="368" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0M12 7v5l3 2"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">wait</text></svg>
+
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">soak</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">Soak timer · 30s</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61"></text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Done</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-2" class="release-graph-node" href="#stage-plan-prod" role="button" tabindex="0" data-node-id="graph-node-2" data-node-key="#stage-plan-prod|plan · prod|plan-prod" data-state="done" data-state-label="Done" data-node-kind="plan" data-node-label="plan-prod" data-node-context="plan · prod" data-node-environment="prod" data-node-summary="Pipeline stage" data-node-preview="+ ledger_table &lt;new&gt;" data-node-reason="" data-node-details="" data-node-timestamp="" data-plan-index="0" aria-pressed="false" aria-labelledby="release-graph-graph-node-2-title" aria-describedby="release-graph-graph-node-2-description">
+<title id="release-graph-graph-node-2-title">plan-prod — plan · prod — Done</title>
+<desc id="release-graph-graph-node-2-description">Pipeline stage.  . Select to inspect.</desc>
+<svg class="release-graph-card" x="704" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M5 5h14M5 12h14M5 19h9"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">plan</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">plan-prod</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">Pipeline stage</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">+ ledger_table &lt;new&gt;</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Done</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-3" class="release-graph-node" href="#stage-plan-prod" role="button" tabindex="0" data-node-id="graph-node-3" data-node-key="#stage-plan-prod|prod|Plan approval" data-state="waiting" data-state-label="Waiting" data-node-kind="approval" data-node-label="Plan approval" data-node-context="prod" data-node-environment="prod" data-node-summary="Manual plan gate" data-node-preview="+ ledger_table &lt;new&gt;" data-node-reason="Waiting for plan approval" data-node-details="" data-node-timestamp="" data-plan-index="0" aria-pressed="false" aria-labelledby="release-graph-graph-node-3-title" aria-describedby="release-graph-graph-node-3-description">
+<title id="release-graph-graph-node-3-title">Plan approval — prod — Waiting</title>
+<desc id="release-graph-graph-node-3-description">Manual plan gate. Waiting for plan approval . Select to inspect.</desc>
+<svg class="release-graph-card" x="1040" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">approval</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">Plan approval</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">Manual plan gate</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">Waiting for plan approval</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Waiting</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-4" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-4" data-node-key="#policies|approval · staging|two-person-rule" data-state="blocked" data-state-label="Blocked" data-node-kind="policy" data-node-label="two-person-rule" data-node-context="approval · staging" data-node-environment="staging" data-node-summary="approval" data-node-preview="" data-node-reason="1 of 2 approvals" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-4-title" aria-describedby="release-graph-graph-node-4-description">
+<title id="release-graph-graph-node-4-title">two-person-rule — approval · staging — Blocked</title>
+<desc id="release-graph-graph-node-4-description">approval. 1 of 2 approvals Current policy evaluation. Select to inspect.</desc>
+<svg class="release-graph-card" x="32" y="236" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">two-person-rule</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">approval</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">1 of 2 approvals</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Blocked</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-5" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-5" data-node-key="#policies|approval · prod|two-person-rule" data-state="blocked" data-state-label="Blocked" data-node-kind="policy" data-node-label="two-person-rule" data-node-context="approval · prod" data-node-environment="prod" data-node-summary="approval" data-node-preview="" data-node-reason="1 of 2 approvals" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-5-title" aria-describedby="release-graph-graph-node-5-description">
+<title id="release-graph-graph-node-5-title">two-person-rule — approval · prod — Blocked</title>
+<desc id="release-graph-graph-node-5-description">approval. 1 of 2 approvals Current policy evaluation. Select to inspect.</desc>
+<svg class="release-graph-card" x="32" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">two-person-rule</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">approval</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">1 of 2 approvals</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Blocked</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-6" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-6" data-node-key="#policies|soak_time · staging|soak-an-hour" data-state="done" data-state-label="Done" data-node-kind="policy" data-node-label="soak-an-hour" data-node-context="soak_time · staging" data-node-environment="staging" data-node-summary="soak time" data-node-preview="" data-node-reason="soaked" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-6-title" aria-describedby="release-graph-graph-node-6-description">
+<title id="release-graph-graph-node-6-title">soak-an-hour — soak_time · staging — Done</title>
+<desc id="release-graph-graph-node-6-description">soak time. soaked Current policy evaluation. Select to inspect.</desc>
+<svg class="release-graph-card" x="32" y="644" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">soak-an-hour</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">soak time</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">soaked</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Done</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a><a id="release-graph-graph-node-7" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-7" data-node-key="#policies|soak_time · prod|soak-an-hour" data-state="done" data-state-label="Done" data-node-kind="policy" data-node-label="soak-an-hour" data-node-context="soak_time · prod" data-node-environment="prod" data-node-summary="soak time" data-node-preview="" data-node-reason="soaked" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="release-graph-graph-node-7-title" aria-describedby="release-graph-graph-node-7-description">
+<title id="release-graph-graph-node-7-title">soak-an-hour — soak_time · prod — Done</title>
+<desc id="release-graph-graph-node-7-description">soak time. soaked Current policy evaluation. Select to inspect.</desc>
+<svg class="release-graph-card" x="32" y="848" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
+<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
+<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
+<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
+<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
+<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
+<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
+<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
+<text class="release-graph-node-label" x="0" y="16">soak-an-hour</text>
+<text class="release-graph-node-summary" data-node-summary x="0" y="38">soak time</text>
+<text class="release-graph-node-preview" data-node-preview x="0" y="61">soaked</text>
+</svg>
+<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
+<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
+<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
+<text class="release-graph-node-state" x="33" y="150">Done</text>
+<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
+</svg>
+</a>
+</g>
+</svg>
+<p class="release-graph-canvas-hint">Drag to pan · Scroll to zoom · F Fit · A Active</p>
+</div>
+<details id="release-graph-inspector" class="release-graph-inspector" data-graph-inspector open hidden>
+<summary>Inspector <span data-graph-selection-mode>Preview</span></summary>
+<div class="release-graph-inspector-body">
+<p class="release-graph-inspector-kind" data-graph-inspector-kind></p>
+<h3 data-graph-inspector-title>Select a node</h3>
+<p class="release-graph-inspector-state" data-graph-inspector-state></p>
+<p data-graph-inspector-summary></p>
+<p class="release-graph-inspector-timestamp" data-graph-inspector-timestamp></p>
+<div class="release-graph-tabs" role="tablist" aria-label="Node inspection">
+<button id="release-graph-tab-details" type="button" role="tab" aria-selected="true" aria-controls="release-graph-panel-details" data-graph-tab="details">Details</button>
+<button id="release-graph-tab-plan" type="button" role="tab" aria-selected="false" aria-controls="release-graph-panel-plan" data-graph-tab="plan" tabindex="-1">Plan</button>
+<button id="release-graph-tab-logs" type="button" role="tab" aria-selected="false" aria-controls="release-graph-panel-logs" data-graph-tab="logs" tabindex="-1">Logs</button>
+</div>
+<div id="release-graph-panel-details" class="release-graph-panel" role="tabpanel" aria-labelledby="release-graph-tab-details" data-graph-panel="details">
+<p data-graph-inspector-context></p>
+<p data-graph-inspector-reason></p>
+<p data-graph-inspector-details></p>
+<p data-graph-inspector-preview></p>
+</div>
+<div id="release-graph-panel-plan" class="release-graph-panel" role="tabpanel" aria-labelledby="release-graph-tab-plan" data-graph-panel="plan" hidden></div>
+<div id="release-graph-panel-logs" class="release-graph-panel release-graph-log-panel" role="tabpanel" aria-labelledby="release-graph-tab-logs" data-graph-panel="logs" hidden></div>
+<div class="release-graph-approval-actions" data-graph-approval-actions></div>
+<div class="release-graph-inspector-tools">
+<button type="button" data-graph-action="view-stage" hidden>View stage</button>
+<button type="button" data-graph-action="unpin" hidden>Unpin selection</button>
+</div>
+</div>
+</details>
+</div>
+<div data-graph-plans hidden>
+<template data-graph-plan="0"><pre>+ ledger_table &lt;new&gt;</pre></template>
+</div>
+<p class="release-graph-refresh" role="status" aria-live="polite" data-graph-refresh-status></p>
 </section>
 <div class="mb-8">
 <p class="text-gray-700 whitespace-pre-wrap break-words" title="Moves billing to the new ledger">Moves billing to the new ledger</p>
@@ -328,261 +570,5 @@ Pull request
 <div class="text-sm text-gray-500">
 <p>Created <time datetime="2026-03-07T12:00:00Z" class="">AGO</time></p>
 </div>
-<section id="release-graph" class="release-graph" tabindex="-1" aria-labelledby="release-graph-heading" data-live="true" data-has-logs="true">
-<header class="release-graph-heading">
-<div class="release-graph-heading-context">
-<h2 id="release-graph-heading">Release pipeline</h2>
-<span data-graph-release-context>feat: ledger…· v3.1.0· main· 01234567</span>
-</div>
-<span class="release-graph-count" data-graph-count>8 nodes · 3 connections</span>
-<span class="release-graph-live" data-graph-live><span aria-hidden="true"></span>Live · 5s</span>
-<div class="release-graph-tools" aria-label="Graph controls">
-<button type="button" data-graph-zoom="out" aria-label="Zoom out">−</button>
-<output data-graph-zoom-label aria-label="Graph zoom">Fit</output>
-<button type="button" data-graph-zoom="in" aria-label="Zoom in">+</button>
-<button type="button" data-graph-action="fit" title="Fit all nodes (F)">Fit</button>
-<button type="button" data-graph-action="active" title="Focus active neighborhood (A)">Active</button>
-<button type="button" data-graph-action="fullscreen" aria-pressed="false">Fullscreen</button>
-</div>
-</header>
-<details class="release-graph-legend-disclosure">
-<summary>States</summary>
-<ul class="release-graph-legend" aria-label="Node state legend">
-<li data-state="running"><span class="release-graph-legend-dot" aria-hidden="true"></span>Running now</li><li data-state="next"><span class="release-graph-legend-dot" aria-hidden="true"></span>Next</li><li data-state="queued"><span class="release-graph-legend-dot" aria-hidden="true"></span>Queued</li><li data-state="waiting"><span class="release-graph-legend-dot" aria-hidden="true"></span>Waiting</li><li data-state="blocked"><span class="release-graph-legend-dot" aria-hidden="true"></span>Blocked</li><li data-state="failed"><span class="release-graph-legend-dot" aria-hidden="true"></span>Failed</li><li data-state="done"><span class="release-graph-legend-dot" aria-hidden="true"></span>Done</li><li data-state="skipped"><span class="release-graph-legend-dot" aria-hidden="true"></span>Skipped</li><li data-state="cancelled"><span class="release-graph-legend-dot" aria-hidden="true"></span>Cancelled</li><li data-state="superseded"><span class="release-graph-legend-dot" aria-hidden="true"></span>Superseded</li><li data-state="unknown"><span class="release-graph-legend-dot" aria-hidden="true"></span>Unknown</li>
-</ul>
-</details>
-<div class="release-graph-workspace">
-<div class="release-graph-viewport" tabindex="0" role="region" aria-label="Release dependency canvas. F fits all nodes; A focuses active nodes. Drag to pan, scroll to zoom." data-graph-viewport>
-
-<svg xmlns="http://www.w3.org/2000/svg" class="release-graph-svg" width="1344" height="1048" viewBox="0 0 1344 1048" role="group" aria-label="Release dependency graph" data-graph-width="1344" data-graph-height="1048">
-<defs>
-<marker id="release-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-<path d="M 1 1 L 9 5 L 1 9" class="release-graph-arrow"></path>
-</marker>
-</defs>
-<g class="release-graph-edges" aria-hidden="true">
-<path d="M 976.0 524.0 L 1040.0 524.0" data-from="graph-node-2" data-to="graph-node-3" data-state="waiting" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
-<circle class="release-graph-port" cx="976" cy="524" r="4" data-state="waiting"></circle>
-<circle class="release-graph-port" cx="1040" cy="524" r="4" data-state="waiting"></circle><path d="M 304.0 116.0 L 326.0 116.0 Q 336.0 116.0 336.0 126.0 L 336.0 514.0 Q 336.0 524.0 346.0 524.0 L 368.0 524.0" data-from="graph-node-0" data-to="graph-node-1" data-state="done" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
-<circle class="release-graph-port" cx="304" cy="116" r="4" data-state="done"></circle>
-<circle class="release-graph-port" cx="368" cy="524" r="4" data-state="done"></circle><path d="M 640.0 524.0 L 704.0 524.0" data-from="graph-node-1" data-to="graph-node-2" data-state="done" vector-effect="non-scaling-stroke" marker-end="url(#release-graph-arrow)"></path>
-<circle class="release-graph-port" cx="640" cy="524" r="4" data-state="done"></circle>
-<circle class="release-graph-port" cx="704" cy="524" r="4" data-state="done"></circle>
-</g>
-<g class="release-graph-nodes">
-<a id="graph-node-0" class="release-graph-node" href="#stage-deploy-staging" role="button" tabindex="0" data-node-id="graph-node-0" data-node-key="#stage-deploy-staging|deploy · staging|deploy-staging" data-state="done" data-state-label="Done" data-node-kind="deploy" data-node-label="deploy-staging" data-node-context="deploy · staging" data-node-environment="staging" data-node-summary="Pipeline stage" data-node-preview="" data-node-reason="" data-node-details="Started: 2026-03-07T12:00:30Z" data-node-timestamp="Started 12:00 UTC" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-0-title" aria-describedby="graph-node-0-description">
-<title id="graph-node-0-title">deploy-staging — deploy · staging — Done</title>
-<desc id="graph-node-0-description">Pipeline stage.  Started: 2026-03-07T12:00:30Z. Select to inspect.</desc>
-<svg class="release-graph-card" x="32" y="32" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6M4 16v5h16v-5"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">deploy</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">deploy-staging</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">Pipeline stage</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61"></text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Done</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end">Started 12:00 UTC</text></svg>
-</svg>
-</a><a id="graph-node-1" class="release-graph-node" href="#stage-soak" role="button" tabindex="0" data-node-id="graph-node-1" data-node-key="#stage-soak|wait|soak" data-state="done" data-state-label="Done" data-node-kind="wait" data-node-label="soak" data-node-context="wait" data-node-environment="" data-node-summary="Soak timer · 30s" data-node-preview="" data-node-reason="" data-node-details="Duration: 30s" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-1-title" aria-describedby="graph-node-1-description">
-<title id="graph-node-1-title">soak — wait — Done</title>
-<desc id="graph-node-1-description">Soak timer · 30s.  Duration: 30s. Select to inspect.</desc>
-<svg class="release-graph-card" x="368" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0M12 7v5l3 2"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">wait</text></svg>
-
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">soak</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">Soak timer · 30s</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61"></text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Done</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-2" class="release-graph-node" href="#stage-plan-prod" role="button" tabindex="0" data-node-id="graph-node-2" data-node-key="#stage-plan-prod|plan · prod|plan-prod" data-state="done" data-state-label="Done" data-node-kind="plan" data-node-label="plan-prod" data-node-context="plan · prod" data-node-environment="prod" data-node-summary="Pipeline stage" data-node-preview="+ ledger_table &lt;new&gt;" data-node-reason="" data-node-details="" data-node-timestamp="" data-plan-index="0" aria-pressed="false" aria-labelledby="graph-node-2-title" aria-describedby="graph-node-2-description">
-<title id="graph-node-2-title">plan-prod — plan · prod — Done</title>
-<desc id="graph-node-2-description">Pipeline stage.  . Select to inspect.</desc>
-<svg class="release-graph-card" x="704" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M5 5h14M5 12h14M5 19h9"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">plan</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">plan-prod</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">Pipeline stage</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">+ ledger_table &lt;new&gt;</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Done</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-3" class="release-graph-node" href="#stage-plan-prod" role="button" tabindex="0" data-node-id="graph-node-3" data-node-key="#stage-plan-prod|prod|Plan approval" data-state="waiting" data-state-label="Waiting" data-node-kind="approval" data-node-label="Plan approval" data-node-context="prod" data-node-environment="prod" data-node-summary="Manual plan gate" data-node-preview="+ ledger_table &lt;new&gt;" data-node-reason="Waiting for plan approval" data-node-details="" data-node-timestamp="" data-plan-index="0" aria-pressed="false" aria-labelledby="graph-node-3-title" aria-describedby="graph-node-3-description">
-<title id="graph-node-3-title">Plan approval — prod — Waiting</title>
-<desc id="graph-node-3-description">Manual plan gate. Waiting for plan approval . Select to inspect.</desc>
-<svg class="release-graph-card" x="1040" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">approval</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">Plan approval</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">Manual plan gate</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">Waiting for plan approval</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Waiting</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-4" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-4" data-node-key="#policies|approval · staging|two-person-rule" data-state="blocked" data-state-label="Blocked" data-node-kind="policy" data-node-label="two-person-rule" data-node-context="approval · staging" data-node-environment="staging" data-node-summary="approval" data-node-preview="" data-node-reason="1 of 2 approvals" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-4-title" aria-describedby="graph-node-4-description">
-<title id="graph-node-4-title">two-person-rule — approval · staging — Blocked</title>
-<desc id="graph-node-4-description">approval. 1 of 2 approvals Current policy evaluation. Select to inspect.</desc>
-<svg class="release-graph-card" x="32" y="236" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">two-person-rule</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">approval</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">1 of 2 approvals</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Blocked</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-5" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-5" data-node-key="#policies|approval · prod|two-person-rule" data-state="blocked" data-state-label="Blocked" data-node-kind="policy" data-node-label="two-person-rule" data-node-context="approval · prod" data-node-environment="prod" data-node-summary="approval" data-node-preview="" data-node-reason="1 of 2 approvals" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-5-title" aria-describedby="graph-node-5-description">
-<title id="graph-node-5-title">two-person-rule — approval · prod — Blocked</title>
-<desc id="graph-node-5-description">approval. 1 of 2 approvals Current policy evaluation. Select to inspect.</desc>
-<svg class="release-graph-card" x="32" y="440" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">two-person-rule</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">approval</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">1 of 2 approvals</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Blocked</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-6" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-6" data-node-key="#policies|soak_time · staging|soak-an-hour" data-state="done" data-state-label="Done" data-node-kind="policy" data-node-label="soak-an-hour" data-node-context="soak_time · staging" data-node-environment="staging" data-node-summary="soak time" data-node-preview="" data-node-reason="soaked" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-6-title" aria-describedby="graph-node-6-description">
-<title id="graph-node-6-title">soak-an-hour — soak_time · staging — Done</title>
-<desc id="graph-node-6-description">soak time. soaked Current policy evaluation. Select to inspect.</desc>
-<svg class="release-graph-card" x="32" y="644" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">staging</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">soak-an-hour</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">soak time</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">soaked</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Done</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a><a id="graph-node-7" class="release-graph-node" href="#policies" role="button" tabindex="0" data-node-id="graph-node-7" data-node-key="#policies|soak_time · prod|soak-an-hour" data-state="done" data-state-label="Done" data-node-kind="policy" data-node-label="soak-an-hour" data-node-context="soak_time · prod" data-node-environment="prod" data-node-summary="soak time" data-node-preview="" data-node-reason="soaked" data-node-details="Current policy evaluation" data-node-timestamp="" data-plan-index="" aria-pressed="false" aria-labelledby="graph-node-7-title" aria-describedby="graph-node-7-description">
-<title id="graph-node-7-title">soak-an-hour — soak_time · prod — Done</title>
-<desc id="graph-node-7-description">soak time. soaked Current policy evaluation. Select to inspect.</desc>
-<svg class="release-graph-card" x="32" y="848" width="272" height="168" viewBox="0 0 272 168" overflow="visible" aria-hidden="true">
-<rect class="release-graph-node-depth" x="2" y="5" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-node-surface" x="1" y="1" width="270" height="166" rx="12"></rect>
-<rect class="release-graph-type-surface" x="14" y="13" width="26" height="26" rx="6"></rect>
-<svg class="release-graph-type-symbol" x="20" y="19" width="14" height="14" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8 12l3 3 5-6"></path></svg>
-<svg class="release-graph-label" x="49" y="14" width="125" height="24" viewBox="0 0 125 24"><text class="release-graph-node-kind" x="0" y="16">policy</text></svg>
-<rect class="release-graph-env-surface" x="182" y="17" width="76" height="19" rx="5"></rect>
-<svg class="release-graph-label" x="187" y="18" width="66" height="18" viewBox="0 0 66 18"><text class="release-graph-node-env" data-node-environment x="33" y="13" text-anchor="middle">prod</text></svg>
-<svg class="release-graph-label" x="16" y="47" width="240" height="74" viewBox="0 0 240 74">
-<text class="release-graph-node-label" x="0" y="16">soak-an-hour</text>
-<text class="release-graph-node-summary" data-node-summary x="0" y="38">soak time</text>
-<text class="release-graph-node-preview" data-node-preview x="0" y="61">soaked</text>
-</svg>
-<path class="release-graph-node-divider" d="M 16 126 H 256"></path>
-<rect class="release-graph-state-surface" x="14" y="136" width="108" height="21" rx="5"></rect>
-<circle class="release-graph-state-dot" cx="24" cy="146" r="3"></circle>
-<text class="release-graph-node-state" x="33" y="150">Done</text>
-<svg class="release-graph-label" x="130" y="136" width="126" height="22" viewBox="0 0 126 22"><text class="release-graph-node-timestamp" x="126" y="14" text-anchor="end"></text></svg>
-</svg>
-</a>
-</g>
-</svg>
-<p class="release-graph-canvas-hint">Drag to pan · Scroll to zoom · F Fit · A Active</p>
-</div>
-<details class="release-graph-inspector" data-graph-inspector open>
-<summary>Inspector <span data-graph-selection-mode>Preview</span></summary>
-<div class="release-graph-inspector-body">
-<p class="release-graph-inspector-kind" data-graph-inspector-kind></p>
-<h3 data-graph-inspector-title>Select a node</h3>
-<p class="release-graph-inspector-state" data-graph-inspector-state></p>
-<p data-graph-inspector-summary></p>
-<p class="release-graph-inspector-timestamp" data-graph-inspector-timestamp></p>
-<div class="release-graph-tabs" role="tablist" aria-label="Node inspection">
-<button id="graph-tab-details" type="button" role="tab" aria-selected="true" aria-controls="graph-panel-details" data-graph-tab="details">Details</button>
-<button id="graph-tab-plan" type="button" role="tab" aria-selected="false" aria-controls="graph-panel-plan" data-graph-tab="plan" tabindex="-1">Plan</button>
-<button id="graph-tab-logs" type="button" role="tab" aria-selected="false" aria-controls="graph-panel-logs" data-graph-tab="logs" tabindex="-1">Logs</button>
-</div>
-<div id="graph-panel-details" class="release-graph-panel" role="tabpanel" aria-labelledby="graph-tab-details" data-graph-panel="details">
-<p data-graph-inspector-context></p>
-<p data-graph-inspector-reason></p>
-<p data-graph-inspector-details></p>
-<p data-graph-inspector-preview></p>
-</div>
-<div id="graph-panel-plan" class="release-graph-panel" role="tabpanel" aria-labelledby="graph-tab-plan" data-graph-panel="plan" hidden><p>No plan output for this node.</p></div>
-<div id="graph-panel-logs" class="release-graph-panel release-graph-log-panel" role="tabpanel" aria-labelledby="graph-tab-logs" data-graph-panel="logs" hidden></div>
-<div class="release-graph-approval-actions" data-graph-approval-actions></div>
-<div class="release-graph-inspector-tools">
-<button type="button" data-graph-action="view-stage" hidden>View stage</button>
-<button type="button" data-graph-action="unpin" hidden>Unpin selection</button>
-</div>
-</div>
-</details>
-</div>
-<div data-graph-plans hidden>
-<template data-graph-plan="0"><pre>+ ledger_table &lt;new&gt;</pre></template>
-</div>
-<p class="release-graph-refresh" role="status" aria-live="polite" data-graph-refresh-status></p>
-</section>
 </section>
 </main>
