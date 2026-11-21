@@ -61,6 +61,17 @@ A plan that changes nothing ("No changes.") never holds the destination, nor doe
 
 Either way its saved plan file is deleted. Deploy stages, releases without a plan stage, and destination types that save no plan never wait for this. (Server behaviour after v0.3.18.)
 
+A `forest/generic@1` destination whose provider seals plans (for example the grund provider) is held the same way: its sealed plan counts as a saved plan that changes something, so a release plans only after an earlier release's deploy to that destination has finished. A provider can also report a deploy failure as a **stale plan**: the destination changed after the approved plan. Forest then doesn't fail the pipeline outright:
+
+- if a later release of the same project is headed for that destination, the deploy stage is **superseded**, with the reason `superseded by release <slug>: <destination> changed after this release planned, and <slug> releases it next`, and the stages after it are superseded too;
+- otherwise the release plans again once: its plan stage runs afresh (and parks for approval again unless it auto-approves), and the deploy stage shows `re-planning: <destination> changed after the approved plan…` until it runs. If the destination moves again, the deploy fails.
+
+A newer release counts only while it is still active, or once its deploy to that destination has succeeded; a failed, rejected or cancelled one supersedes nothing. When a `supersede_pending` policy with `same_branch_only` covers the environment, only a newer release from the same branch counts. A replan also re-runs any gate or wait between the plan and the deploy (never another deploy stage), and waits while another deploy stage is still applying the same plan.
+
+At dispatch, a `forest/generic@1` deploy is also checked against newer releases: if a release of the same project created after it is already deployed to that destination, or has a deploy queued, assigned or running there, the older deploy is **superseded** (`superseded by release <slug>: a newer release is already deployed or queued for <destination>…`) instead of running. Two deploys never run against one such destination at once: a deploy stays queued while another deploy to it is assigned or running. This holds however the older deploy was delayed (a soak policy, approval or the plan guard), so a backlog never lands an older artifact over a newer one. To roll back, release the older artifact again: that creates a newer release.
+
+On its own, the guard makes a burst of releases plan and deploy one at a time, every one of them. To have a burst collapse to its newest release, add a [`supersede_pending`](policies.md) policy for the environment. (Gitea fork server, after dc877a6.)
+
 A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's terraform destinations, and its output starts with a `DESTROY PLAN` banner. It can never be auto-approved. Resources with `prevent_destroy` make it fail, which is the intended outcome for anything holding data.
 
 ## Starting a pipeline

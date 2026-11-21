@@ -106,4 +106,9 @@ message Outcome {
   string error_message = 2;
 
   string plan_output = 3;
+
+  // Machine-readable cause of a failure. "stale_plan": the destination changed
+  // since the approved plan, so the same change needs a fresh plan. Empty
+  // otherwise.
+  string failure_reason = 4;
 }

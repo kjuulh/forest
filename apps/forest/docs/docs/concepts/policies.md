@@ -19,6 +19,7 @@ forest project policy create -o my-org -p my-service \
 
 - Only a successful **deploy** of that artifact to the source environment counts. A successful plan does not, and neither does another artifact's deploy.
 - An artifact never deployed to the source environment has not soaked, so a release of it to the target waits.
+- The source and target must differ. A soak policy from an environment to itself could never pass, since nothing would deploy there until it already had, so on the Gitea fork server after dc877a6 creating or updating one is refused, and an existing one reports `can never pass` as its blocker.
 - A direct release waits as `QUEUED` and is dispatched once the soak is met. A pipeline stage waits and is re-checked.
 - After **v0.3.16**, release status includes the live artifact-specific soak reason for queued steps and ready pending plan/deploy stages, including the missing source environment and required duration. `forest release show <slug>` labels it `blocked:`; a queued prerequisite is not a terminal failure.
 - Reasons are derived on each status read, not persisted as execution errors. A successful plan or another artifact's deploy cannot clear this artifact's blocker. Policy changes, assignment and same-artifact successful deploys are reflected on the next read; if evaluation fails, status says policies could not be evaluated rather than implying approval.

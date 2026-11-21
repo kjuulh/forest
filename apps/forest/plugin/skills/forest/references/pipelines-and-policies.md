@@ -54,7 +54,7 @@ forest project pipeline create -o <org> -p <project> --name rollout --stages-jso
 | `wait` | `duration_seconds` |
 | `gate` | `requires: [{signal, in: [...]}]`, `timeout_seconds`, `on_timeout: "fail" \| "proceed"` |
 
-`depends_on` builds a DAG. Cycles and unknown dependencies are refused, and a failed stage cancels what depends on it. `--stages-file` reads the same JSON from a file, and `pipeline update` and `pipeline delete` exist. For `forest/terraform@1`, the deploy stage applies exactly the plan that was approved.
+`depends_on` builds a DAG. Cycles and unknown dependencies are refused, and a failed stage cancels what depends on it. `--stages-file` reads the same JSON from a file, and `pipeline update` and `pipeline delete` exist. For `forest/terraform@1`, the deploy stage applies exactly the plan that was approved. On the Gitea fork server after dc877a6, a `forest/generic@1` destination with a plan-sealing provider (grund) waits like terraform, so a plan never overlaps another release's deploy. A deploy the provider reports as a stale plan is superseded when a later active (or already deployed) release targets the destination, and otherwise replans once. A burst still deploys every release in turn unless a `supersede_pending` policy covers the environment. At dispatch, an older generic deploy is superseded when a newer release is already deployed or queued for the destination, so a soak backlog never lands older artifacts over newer ones. A rollback is a new release of the older artifact. See [pipelines](../../../../docs/docs/concepts/pipelines.md).
 
 ## Approval
 
@@ -89,7 +89,7 @@ forest project policy create -o <org> -p <project> --name soak \
 | Type | Server with the v0.3.17 change | Older server (v0.3.16 and before) |
 |---|---|---|
 | `branch_restriction` | `-e` and `-d` releases refused with `blocked by policy`; pipeline plan/deploy stages fail for that env; queued work rechecks its annotation branch at dispatch and fails if policy changed to disallow it | only `-e` releases checked; `-d` releases and pipeline stages are not |
-| `soak_time` | only a successful **deploy** of the **same artifact** to the source env counts; never deployed there means not soaked; direct releases wait `QUEUED`, stages wait | the scheduler counts any artifact's success; pipelines count this artifact but include plan steps; no source success at all passes |
+| `soak_time` | source and target must differ (on the Gitea fork after dc877a6, a self-referential soak is refused; it would park every release forever); only a successful **deploy** of the **same artifact** to the source env counts; never deployed there means not soaked; direct releases wait `QUEUED`, stages wait | the scheduler counts any artifact's success; pipelines count this artifact but include plan steps; no source success at all passes |
 | policy evaluation error | fails closed: release refused, trigger blocked, queued release held | treated as "no policies" |
 | `supersede_pending` | newer pending releases replace older ones for the target (`--same-branch-only` to narrow); after v0.3.18 plans only replace plans and deploys only deploys, and a newer terraform plan supersedes an older plan still awaiting approval | same |
 | approval (server-side; the CLI can't create it) | pipelines only | same |

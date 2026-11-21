@@ -132,6 +132,9 @@ pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> 
             if duration <= 0 {
                 bail!("duration_seconds must be positive for soak_time policy");
             }
+            if source == target {
+                bail!("{}", crate::services::policy::self_soak_reason(source));
+            }
         }
         "branch_restriction" => {
             let target = config
@@ -530,6 +533,13 @@ mod tests {
             let back: PolicyEvent = serde_json::from_value(json).unwrap();
             assert_eq!(event.event_type(), back.event_type());
         }
+    }
+
+    #[test]
+    fn a_soak_policy_cannot_wait_on_its_own_target_environment() {
+        let cfg = serde_json::json!({"source_environment": "dev", "target_environment": "dev", "duration_seconds": 30});
+        let err = validate_policy_config("soak_time", &cfg).unwrap_err();
+        assert!(err.to_string().contains("can never pass"), "{err}");
     }
 
     #[test]

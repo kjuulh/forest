@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO destinations\n                   (name, environment, organisation, type_organisation, type_name,\n                    type_version, metadata, environment_id)\n               VALUES ($1, 'dev', $2, 'forest', 'generic', 1, '{}', $3)\n               RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b101f9d06ee2db58586dd8fce7ca508f892ef0b7558aced37ddde7c32c632943"
+}

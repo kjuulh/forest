@@ -20,6 +20,7 @@ pub mod release_logs_registry;
 pub mod release_registry;
 
 pub mod domain_policy;
+pub mod newest_wins;
 pub mod notification_registry;
 pub mod oauth_apps;
 pub mod org_rules;
@@ -33,5 +34,6 @@ pub mod release_owner;
 pub mod release_pipeline;
 pub mod release_signals;
 pub mod release_token_registry;
+pub mod stale_plan;
 pub mod supersede;
 pub mod users;

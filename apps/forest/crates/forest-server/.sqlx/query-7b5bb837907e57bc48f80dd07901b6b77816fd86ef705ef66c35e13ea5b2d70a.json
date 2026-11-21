@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.ref->>'commit_branch' as \"branch?\"\n           FROM release_intents ri\n           JOIN annotations a ON a.id = ri.annotation_id\n           WHERE ri.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "branch?",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7b5bb837907e57bc48f80dd07901b6b77816fd86ef705ef66c35e13ea5b2d70a"
+}

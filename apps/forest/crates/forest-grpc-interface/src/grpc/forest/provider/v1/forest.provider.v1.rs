@@ -126,6 +126,11 @@ pub struct Outcome {
     pub error_message: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub plan_output: ::prost::alloc::string::String,
+    /// Machine-readable cause of a failure. "stale_plan": the destination changed
+    /// since the approved plan, so the same change needs a fresh plan. Empty
+    /// otherwise.
+    #[prost(string, tag="4")]
+    pub failure_reason: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

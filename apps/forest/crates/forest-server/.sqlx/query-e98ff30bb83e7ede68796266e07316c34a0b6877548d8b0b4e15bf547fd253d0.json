@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET status = 'FAILED',\n             error_message = 'provider reported failure: grund rolled the stack back after this revision failed'\n         WHERE release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e98ff30bb83e7ede68796266e07316c34a0b6877548d8b0b4e15bf547fd253d0"
+}

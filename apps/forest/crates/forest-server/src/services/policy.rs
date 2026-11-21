@@ -398,6 +398,9 @@ impl PolicyRegistry {
                 if c.target_environment.is_empty() {
                     anyhow::bail!("target_environment is required for soak_time policy");
                 }
+                if c.source_environment == c.target_environment {
+                    anyhow::bail!("{}", self_soak_reason(&c.source_environment));
+                }
                 if c.duration_seconds <= 0 {
                     anyhow::bail!("duration_seconds must be positive for soak_time policy");
                 }
@@ -712,12 +715,23 @@ pub async fn last_source_deploy(
     .context("find the last successful deploy to the soak source environment")
 }
 
+pub fn self_soak_reason(environment: &str) -> String {
+    format!(
+        "a soak_time policy whose source and target are both '{environment}' can never pass: \
+         nothing deploys to {environment} until it has already deployed to {environment}. \
+         Set the source to the environment before it, or disable the policy"
+    )
+}
+
 pub fn soak_verdict(
     last_deploy: Option<chrono::DateTime<chrono::Utc>>,
     now: chrono::DateTime<chrono::Utc>,
     config: &SoakTimeConfig,
     for_artifact: bool,
 ) -> (bool, String) {
+    if config.source_environment == config.target_environment {
+        return (false, self_soak_reason(&config.target_environment));
+    }
     let subject = if for_artifact {
         "this artifact"
     } else {
@@ -840,6 +854,19 @@ mod tests {
             .0
         );
         assert!(soak_verdict(Some(deployed_at), boundary, &config, true).0);
+    }
+
+    #[test]
+    fn a_soak_policy_on_its_own_environment_says_it_can_never_pass() {
+        let config = SoakTimeConfig {
+            source_environment: "dev".into(),
+            target_environment: "dev".into(),
+            duration_seconds: 30,
+        };
+        let (passed, reason) =
+            soak_verdict(Some(chrono::Utc::now()), chrono::Utc::now(), &config, true);
+        assert!(!passed);
+        assert!(reason.contains("can never pass"), "{reason}");
     }
 
     #[test]
