@@ -74,6 +74,13 @@ impl StageKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanHold {
+    Waiting,
+    Stale,
+    Superseded,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Stage {
     pub id: String,
@@ -90,6 +97,39 @@ pub struct Stage {
 impl Stage {
     pub fn awaiting_approval(&self) -> bool {
         self.status == RunStatus::AwaitingApproval
+    }
+
+    pub fn plan_hold(&self) -> Option<PlanHold> {
+        if self.kind != StageKind::Plan {
+            return None;
+        }
+        let reason = self.error_message.as_deref()?.trim();
+        if reason.is_empty() {
+            return None;
+        }
+        match self.status {
+            RunStatus::AwaitingApproval => reason.starts_with("stale:").then_some(PlanHold::Stale),
+            RunStatus::Running | RunStatus::Queued => Some(PlanHold::Waiting),
+            _ if reason.starts_with("superseded") => Some(PlanHold::Superseded),
+            _ => None,
+        }
+    }
+
+    pub fn approvable(&self) -> bool {
+        self.awaiting_approval() && self.plan_hold() != Some(PlanHold::Stale)
+    }
+
+    pub fn hold_note(&self) -> Option<&str> {
+        self.plan_hold()
+            .and(self.error_message.as_deref())
+            .map(str::trim)
+    }
+
+    pub fn failure_message(&self) -> Option<&str> {
+        match self.plan_hold() {
+            Some(_) => None,
+            None => self.error_message.as_deref(),
+        }
     }
 
     pub fn shows_environment(&self) -> bool {
@@ -121,12 +161,15 @@ impl Stage {
                     None => verb.to_string(),
                 });
             }
-            StageKind::Plan => match s {
-                RunStatus::Succeeded => "Plan approved",
-                RunStatus::AwaitingApproval => "Awaiting plan approval",
-                RunStatus::Running => "Planning",
-                RunStatus::Failed => "Plan failed",
-                RunStatus::Cancelled => "Plan cancelled",
+            StageKind::Plan => match (self.plan_hold(), s) {
+                (Some(PlanHold::Waiting), _) => "Waiting to plan",
+                (Some(PlanHold::Stale), _) => "Plan stale",
+                (Some(PlanHold::Superseded), _) => "Plan superseded",
+                (None, RunStatus::Succeeded) => "Plan approved",
+                (None, RunStatus::AwaitingApproval) => "Awaiting plan approval",
+                (None, RunStatus::Running) => "Planning",
+                (None, RunStatus::Failed) => "Plan failed",
+                (None, RunStatus::Cancelled) => "Plan cancelled",
                 _ => "Plan",
             },
             StageKind::Other => return None,
@@ -157,6 +200,20 @@ pub struct DestinationRun {
 }
 
 impl DestinationRun {
+    pub fn waiting_note(&self) -> Option<&str> {
+        self.error_message
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| self.status == RunStatus::Queued && !m.is_empty())
+    }
+
+    pub fn failure_message(&self) -> Option<&str> {
+        match self.waiting_note() {
+            Some(_) => None,
+            None => self.error_message.as_deref(),
+        }
+    }
+
     pub fn status_text(&self) -> Option<(String, &'static str)> {
         let (label, class) = self.status.destination_label()?;
         let text = match self.queue_position.filter(|p| *p != 0) {
@@ -264,6 +321,81 @@ mod tests {
             stage(StageKind::Deploy, RunStatus::Failed).label_class(),
             "text-red-700"
         );
+    }
+
+    fn plan_with(status: RunStatus, reason: &str) -> Stage {
+        Stage {
+            error_message: Some(reason.into()),
+            ..stage(StageKind::Plan, status)
+        }
+    }
+
+    #[test]
+    fn a_running_plan_with_a_reason_is_waiting_and_says_so_without_an_error() {
+        let reason =
+            "waiting for release brave-otter to apply its plan for prod-eu before planning";
+        let plan = plan_with(RunStatus::Running, reason);
+        assert_eq!(plan.plan_hold(), Some(PlanHold::Waiting));
+        assert_eq!(plan.label().as_deref(), Some("Waiting to plan"));
+        assert_eq!(plan.hold_note(), Some(reason));
+        assert_eq!(plan.failure_message(), None);
+    }
+
+    #[test]
+    fn a_stale_plan_awaits_approval_but_cannot_be_approved() {
+        let plan = plan_with(
+            RunStatus::AwaitingApproval,
+            "stale: release brave-otter planned prod-eu after this plan; reject it and release again to plan afresh",
+        );
+        assert_eq!(plan.plan_hold(), Some(PlanHold::Stale));
+        assert_eq!(plan.label().as_deref(), Some("Plan stale"));
+        assert!(plan.awaiting_approval());
+        assert!(!plan.approvable());
+        assert!(stage(StageKind::Plan, RunStatus::AwaitingApproval).approvable());
+    }
+
+    #[test]
+    fn a_superseded_plan_names_what_superseded_it() {
+        let plan = plan_with(
+            RunStatus::Pending,
+            "superseded by release brave-otter, which planned prod-eu after it (supersede-pending policy 'collapse')",
+        );
+        assert_eq!(plan.plan_hold(), Some(PlanHold::Superseded));
+        assert_eq!(plan.label().as_deref(), Some("Plan superseded"));
+    }
+
+    #[test]
+    fn a_failed_plan_keeps_its_error() {
+        let plan = plan_with(RunStatus::Failed, "terraform exploded");
+        assert_eq!(plan.plan_hold(), None);
+        assert_eq!(plan.label().as_deref(), Some("Plan failed"));
+        assert_eq!(plan.failure_message(), Some("terraform exploded"));
+        let deploy = Stage {
+            error_message: Some("waiting".into()),
+            ..stage(StageKind::Deploy, RunStatus::Running)
+        };
+        assert_eq!(deploy.plan_hold(), None);
+    }
+
+    #[test]
+    fn a_queued_destination_reason_is_a_note_and_a_failed_one_an_error() {
+        let queued = DestinationRun {
+            status: RunStatus::Queued,
+            error_message: Some("waiting for release brave-otter".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            queued.waiting_note(),
+            Some("waiting for release brave-otter")
+        );
+        assert_eq!(queued.failure_message(), None);
+        let failed = DestinationRun {
+            status: RunStatus::Failed,
+            error_message: Some("boom".into()),
+            ..Default::default()
+        };
+        assert_eq!(failed.waiting_note(), None);
+        assert_eq!(failed.failure_message(), Some("boom"));
     }
 
     #[test]

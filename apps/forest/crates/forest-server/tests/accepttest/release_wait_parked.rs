@@ -213,3 +213,51 @@ async fn the_replay_marker_is_sent_once_and_the_stream_stays_open() -> anyhow::R
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_plan_cannot_be_approved_but_can_be_rejected() -> anyhow::Result<()> {
+    let (given, token, intent_id) = a_release_parked_on_plan_approval().await?;
+    let reason = "stale: release calm-heron planned infra after this plan; reject it and release again to plan afresh";
+    sqlx::query!(
+        "UPDATE release_intents SET stage_states = jsonb_set(
+             jsonb_set(stage_states, '{plan-prod,stale_by}', to_jsonb($2::text)),
+             '{plan-prod,error_message}', to_jsonb($3::text))
+         WHERE id = $1",
+        intent_id,
+        uuid::Uuid::now_v7().to_string(),
+        reason,
+    )
+    .execute(&given.fixture().db)
+    .await?;
+
+    let refused = given
+        .fixture()
+        .releases()
+        .approve_plan_stage(authed_request(
+            &token,
+            forest_grpc_interface::ApprovePlanStageRequest {
+                release_intent_id: intent_id.to_string(),
+                stage_id: "plan-prod".into(),
+            },
+        ))
+        .await
+        .expect_err("a stale plan must not be approved");
+    assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(refused.message(), reason);
+
+    given
+        .fixture()
+        .releases()
+        .reject_plan_stage(authed_request(
+            &token,
+            forest_grpc_interface::RejectPlanStageRequest {
+                release_intent_id: intent_id.to_string(),
+                stage_id: "plan-prod".into(),
+                reason: None,
+            },
+        ))
+        .await
+        .expect("a stale plan can still be rejected to close the release");
+
+    Ok(())
+}

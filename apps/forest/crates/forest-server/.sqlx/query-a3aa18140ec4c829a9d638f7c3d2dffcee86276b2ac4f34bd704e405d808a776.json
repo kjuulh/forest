@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO terraform_plans\n                   (release_intent_id, destination_id, work_dir, plan, created_at, has_changes)\n               VALUES ($1, $2, '.', '\\x00', now() - make_interval(days => $3), $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3aa18140ec4c829a9d638f7c3d2dffcee86276b2ac4f34bd704e405d808a776"
+}

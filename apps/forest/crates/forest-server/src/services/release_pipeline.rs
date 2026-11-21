@@ -166,6 +166,9 @@ pub struct StageState {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_waiting_on: Option<Vec<String>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +215,7 @@ impl StageState {
             approved_by: None,
             gate_deadline: None,
             gate_waiting_on: None,
+            stale_by: None,
         }
     }
 }

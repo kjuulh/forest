@@ -163,13 +163,22 @@ impl Scene {
     }
 
     async fn saved_plan(&self, intent: Uuid, age_days: i32) {
+        self.saved_plan_with(intent, age_days, Some(true)).await;
+    }
+
+    async fn saved_no_op_plan(&self, intent: Uuid) {
+        self.saved_plan_with(intent, 0, Some(false)).await;
+    }
+
+    async fn saved_plan_with(&self, intent: Uuid, age_days: i32, has_changes: Option<bool>) {
         sqlx::query!(
             r#"INSERT INTO terraform_plans
-                   (release_intent_id, destination_id, work_dir, plan, created_at)
-               VALUES ($1, $2, '.', '\x00', now() - make_interval(days => $3))"#,
+                   (release_intent_id, destination_id, work_dir, plan, created_at, has_changes)
+               VALUES ($1, $2, '.', '\x00', now() - make_interval(days => $3), $4)"#,
             intent,
             self.destination_id,
             age_days,
+            has_changes,
         )
         .execute(&self.f.db)
         .await
@@ -219,15 +228,114 @@ impl Scene {
         .expect("update stage states");
     }
 
-    async fn waits(&self, release_id: Uuid) -> bool {
-        let state = self
-            .f
+    async fn release_state(
+        &self,
+        release_id: Uuid,
+    ) -> forest_server::services::release_event_store::ReleaseState {
+        self.f
             .state
             .release_event_store()
             .get_release_state(&release_id)
             .await
-            .expect("release state");
-        plan_guard::waits_for_outstanding_plan(&self.f.db, &state).await
+            .expect("release state")
+    }
+
+    async fn waits(&self, release_id: Uuid) -> bool {
+        let state = self.release_state(release_id).await;
+        plan_guard::waits_for_outstanding_plan(
+            &self.f.db,
+            &self.f.state.nats,
+            &self.f.state.policy_registry(),
+            &state,
+        )
+        .await
+    }
+
+    async fn wait_reason(&self, release_id: Uuid) -> Option<String> {
+        let state = self.release_state(release_id).await;
+        plan_guard::wait_reason(&self.f.db, &state).await
+    }
+
+    async fn destination_name(&self) -> String {
+        sqlx::query_scalar!(
+            "SELECT name FROM destinations WHERE id = $1",
+            self.destination_id
+        )
+        .fetch_one(&self.f.db)
+        .await
+        .expect("destination")
+    }
+
+    async fn annotated_intent(
+        &self,
+        stage_states: serde_json::Value,
+        slug: &str,
+        branch: &str,
+    ) -> Uuid {
+        let intent = self.intent(stage_states).await;
+        sqlx::query!(
+            r#"INSERT INTO annotations
+                   (id, slug, artifact_id, metadata, source, context, project_id, ref)
+               SELECT ri.annotation_id, $2, ri.artifact, '{}', '{}', '{}', ri.project_id,
+                      jsonb_build_object('commit_branch', $3::text)
+               FROM release_intents ri WHERE ri.id = $1"#,
+            intent,
+            format!("{slug}-{}", Uuid::now_v7()),
+            branch,
+        )
+        .execute(&self.f.db)
+        .await
+        .expect("insert annotation");
+        intent
+    }
+
+    async fn slug(&self, intent: Uuid) -> String {
+        sqlx::query_scalar!(
+            "SELECT a.slug FROM release_intents ri JOIN annotations a ON a.id = ri.annotation_id
+             WHERE ri.id = $1",
+            intent,
+        )
+        .fetch_one(&self.f.db)
+        .await
+        .expect("slug")
+    }
+
+    async fn plan_stage(&self, intent: Uuid) -> serde_json::Value {
+        sqlx::query_scalar!(
+            r#"SELECT stage_states->'plan-prod' as "stage!" FROM release_intents WHERE id = $1"#,
+            intent,
+        )
+        .fetch_one(&self.f.db)
+        .await
+        .expect("plan stage")
+    }
+
+    async fn has_saved_plan(&self, intent: Uuid) -> bool {
+        sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM terraform_plans
+                WHERE release_intent_id = $1 AND destination_id = $2) as "exists!""#,
+            intent,
+            self.destination_id,
+        )
+        .fetch_one(&self.f.db)
+        .await
+        .expect("saved plan lookup")
+    }
+
+    async fn enable_supersede_pending_same_branch(&self) {
+        sqlx::query!(
+            r#"INSERT INTO policies (project_id, name, policy_type, config)
+               VALUES ($1, 'collapse-prod', 'supersede_pending', $2)"#,
+            self.project_id,
+            serde_json::json!({
+                "target_environment": self.environment,
+                "same_branch_only": true,
+                "cancel_in_progress": false,
+            }),
+        )
+        .execute(&self.f.db)
+        .await
+        .expect("create supersede_pending policy");
     }
 
     async fn collapse(&self, candidate: Uuid) -> Verdict {
@@ -421,9 +529,237 @@ async fn an_earlier_plan_in_flight_holds_a_later_one() -> anyhow::Result<()> {
 
     s.set_status(a_plan, "SUCCEEDED").await;
     s.saved_plan(a, 0).await;
+    s.set_stage_states(a, stage_states(approved(), "PENDING"))
+        .await;
     assert!(
         s.waits(b_plan).await,
-        "then waiting for A to apply the plan it saved"
+        "then waiting for A to apply the plan it saved and had approved"
+    );
+
+    s.cleanup().await;
+    Ok(())
+}
+
+fn awaiting_approval() -> serde_json::Value {
+    serde_json::json!({ "status": "ACTIVE", "approval_status": "AWAITING_APPROVAL" })
+}
+
+async fn parked_no_op_plans_never_hold_a_new_plan() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let mut parked = Vec::new();
+    for i in 0..4 {
+        let a = s.intent(stage_states(awaiting_approval(), "PENDING")).await;
+        s.release(a, "plan-prod", "plan", "SUCCEEDED", -3600 + i)
+            .await;
+        s.saved_no_op_plan(a).await;
+        parked.push(a);
+    }
+
+    let b = s.intent(stage_states(planning(), "PENDING")).await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert_eq!(s.wait_reason(b_plan).await, None);
+    assert!(
+        !s.waits(b_plan).await,
+        "four parked 'No changes' plans must not hold the destination"
+    );
+    assert_eq!(s.waiting_lines(b_plan).await, 0);
+    for a in parked {
+        let stage = s.plan_stage(a).await;
+        assert_eq!(stage["stale_by"], serde_json::json!(b.to_string()));
+        assert_eq!(stage["approval_status"], "AWAITING_APPROVAL");
+        assert!(
+            stage["error_message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("stale: release ")),
+            "{stage}"
+        );
+        assert!(
+            !s.has_saved_plan(a).await,
+            "the stale plan file is discarded"
+        );
+    }
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn an_approved_no_op_plan_does_not_hold() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let a = s.intent(stage_states(approved(), "PENDING")).await;
+    s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_no_op_plan(a).await;
+
+    let b = s.intent(stage_states(planning(), "PENDING")).await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(!s.waits(b_plan).await);
+    assert!(
+        s.has_saved_plan(a).await,
+        "an approved plan is left for its own deploy to apply"
+    );
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn a_plan_saved_before_changes_were_recorded_still_holds() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let a = s.intent(stage_states(approved(), "PENDING")).await;
+    s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_plan_with(a, 0, None).await;
+
+    let b = s.intent(stage_states(planning(), "PENDING")).await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(s.waits(b_plan).await);
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn an_unapproved_older_plan_is_marked_stale_without_a_policy() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let a = s
+        .annotated_intent(
+            stage_states(awaiting_approval(), "PENDING"),
+            "old-otter",
+            "main",
+        )
+        .await;
+    s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_plan(a, 0).await;
+
+    let b = s
+        .annotated_intent(stage_states(planning(), "PENDING"), "new-heron", "main")
+        .await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(!s.waits(b_plan).await, "B plans at once");
+
+    let b_slug = s.slug(b).await;
+    let dest = s.destination_name().await;
+    let stage = s.plan_stage(a).await;
+    assert_eq!(stage["status"], "ACTIVE");
+    assert_eq!(
+        stage["error_message"],
+        serde_json::json!(plan_guard::stale_reason(&b_slug, &dest))
+    );
+    assert!(!s.has_saved_plan(a).await);
+
+    assert!(!s.waits(b_plan).await, "re-checking changes nothing");
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn an_unapproved_older_plan_is_superseded_under_the_policy() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    s.enable_supersede_pending().await;
+
+    let a = s
+        .annotated_intent(
+            stage_states(awaiting_approval(), "PENDING"),
+            "old-otter",
+            "main",
+        )
+        .await;
+    s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_plan(a, 0).await;
+
+    let b = s
+        .annotated_intent(
+            stage_states(planning(), "PENDING"),
+            "new-heron",
+            "renovate/x",
+        )
+        .await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(!s.waits(b_plan).await);
+
+    let b_slug = s.slug(b).await;
+    let dest = s.destination_name().await;
+    let stage = s.plan_stage(a).await;
+    assert_eq!(stage["status"], "SUPERSEDED");
+    assert!(stage.get("approval_status").is_none(), "{stage}");
+    assert_eq!(
+        stage["error_message"],
+        serde_json::json!(plan_guard::superseded_reason(
+            &b_slug,
+            &dest,
+            "collapse-prod"
+        ))
+    );
+    assert!(!s.has_saved_plan(a).await);
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn a_same_branch_policy_only_marks_another_branch_stale() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    s.enable_supersede_pending_same_branch().await;
+
+    let same = s
+        .annotated_intent(stage_states(awaiting_approval(), "PENDING"), "same", "main")
+        .await;
+    s.release(same, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_plan(same, 0).await;
+    let other = s
+        .annotated_intent(
+            stage_states(awaiting_approval(), "PENDING"),
+            "other",
+            "feature/y",
+        )
+        .await;
+    s.release(other, "plan-prod", "plan", "SUCCEEDED", -50)
+        .await;
+    s.saved_plan(other, 0).await;
+
+    let b = s
+        .annotated_intent(stage_states(planning(), "PENDING"), "newest", "main")
+        .await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    assert!(!s.waits(b_plan).await);
+    assert_eq!(s.plan_stage(same).await["status"], "SUPERSEDED");
+    let other_stage = s.plan_stage(other).await;
+    assert_eq!(other_stage["status"], "ACTIVE");
+    assert_eq!(other_stage["stale_by"], serde_json::json!(b.to_string()));
+
+    s.cleanup().await;
+    Ok(())
+}
+
+async fn the_wait_names_the_release_holding_the_destination() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+
+    let a = s
+        .annotated_intent(stage_states(approved(), "PENDING"), "brave-otter", "main")
+        .await;
+    s.release(a, "plan-prod", "plan", "SUCCEEDED", -60).await;
+    s.saved_plan(a, 0).await;
+
+    let b = s.intent(stage_states(planning(), "PENDING")).await;
+    let b_plan = s.release(b, "plan-prod", "plan", "QUEUED", 0).await;
+
+    let a_slug = s.slug(a).await;
+    let dest = s.destination_name().await;
+    assert_eq!(
+        s.wait_reason(b_plan).await,
+        Some(format!(
+            "waiting for release {a_slug} to apply its plan for {dest} before planning"
+        ))
+    );
+    assert_eq!(
+        s.plan_stage(a).await,
+        approved(),
+        "showing the wait changes nothing"
     );
 
     s.cleanup().await;
@@ -588,6 +924,34 @@ async fn plan_waits_for_outstanding_plan() -> anyhow::Result<()> {
     held_plans_cannot_crowd_other_releases_out_of_the_sweep()
         .await
         .context("held plans cannot crowd other releases out of the sweep")?;
+
+    parked_no_op_plans_never_hold_a_new_plan()
+        .await
+        .context("parked no-op plans never hold a new plan")?;
+
+    an_approved_no_op_plan_does_not_hold()
+        .await
+        .context("an approved no-op plan does not hold")?;
+
+    a_plan_saved_before_changes_were_recorded_still_holds()
+        .await
+        .context("a plan saved before changes were recorded still holds")?;
+
+    an_unapproved_older_plan_is_marked_stale_without_a_policy()
+        .await
+        .context("an unapproved older plan is marked stale without a policy")?;
+
+    an_unapproved_older_plan_is_superseded_under_the_policy()
+        .await
+        .context("an unapproved older plan is superseded under the policy")?;
+
+    a_same_branch_policy_only_marks_another_branch_stale()
+        .await
+        .context("a same-branch policy only marks another branch stale")?;
+
+    the_wait_names_the_release_holding_the_destination()
+        .await
+        .context("the wait names the release holding the destination")?;
 
     Ok(())
 }

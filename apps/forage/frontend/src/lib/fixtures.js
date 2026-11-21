@@ -19,6 +19,13 @@ export const PROVIDER_ERROR =
   'returned 500 Internal Server Error: comparison failed: source "sdr_revenue" ' +
   'row 0 column "revenue_bloom_eur" must be an exact decimal string';
 
+export const PLAN_WAITING_REASON =
+  "waiting for release boyishly-powerful-lizardfish to apply its plan for hetzner-prod before planning";
+export const PLAN_STALE_REASON =
+  "stale: release boyishly-powerful-lizardfish planned hetzner-prod after this plan; reject it and release again to plan afresh";
+export const PLAN_SUPERSEDED_REASON =
+  "superseded by release boyishly-powerful-lizardfish, which planned hetzner-prod after it (supersede-pending policy 'collapse-prod')";
+
 export const FIXTURES = [
   {
     key: "complete",
@@ -126,6 +133,58 @@ export const FIXTURES = [
       slug: "awaiting-over-pending", has_pipeline: true, release_intent_id: "ri-3",
       destinations: [dest("prod", "PENDING")],
       pipeline_stages: [plan("prod", "RUNNING", "AWAITINGAPPROVAL"), deploy("prod", "PENDING")],
+    },
+  },
+  {
+    key: "plan-waiting",
+    title: "Plan held — another release's plan is unapplied",
+    why:
+      "Another release holds an unapplied plan for prod's destination, so " +
+      "forest defers this plan. It is RUNNING, but nothing is planning: the " +
+      "row says who it waits for instead of reading as a stuck plan.",
+    expect: { dev: "live", prod: "flight" },
+    release: {
+      slug: "plan-waiting", has_pipeline: true, release_intent_id: "ri-5",
+      destinations: [
+        dest("dev", "SUCCEEDED", true),
+        { ...dest("prod", "QUEUED", false, "hetzner-prod"), error_message: PLAN_WAITING_REASON },
+      ],
+      pipeline_stages: [
+        plan("dev", "SUCCEEDED"), deploy("dev", "SUCCEEDED"),
+        { ...plan("prod", "RUNNING"), error_message: PLAN_WAITING_REASON }, deploy("prod", "PENDING"),
+      ],
+    },
+  },
+  {
+    key: "plan-stale",
+    title: "Plan stale — a newer release planned after it",
+    why:
+      "Approving would apply a plan made against state that has moved, and " +
+      "forest refuses it. The row offers Reject only and says to re-run.",
+    expect: { prod: "awaiting" },
+    release: {
+      slug: "plan-stale", has_pipeline: true, release_intent_id: "ri-6",
+      destinations: [],
+      pipeline_stages: [
+        { ...plan("prod", "RUNNING", "AWAITING_APPROVAL"), error_message: PLAN_STALE_REASON },
+        deploy("prod", "PENDING"),
+      ],
+    },
+  },
+  {
+    key: "plan-superseded",
+    title: "Plan superseded — a supersede-pending policy retired it",
+    why:
+      "The web API folds SUPERSEDED into PENDING; the reason is what tells " +
+      "this plan apart from one still to run.",
+    expect: { prod: "pending" },
+    release: {
+      slug: "plan-superseded", has_pipeline: true,
+      destinations: [],
+      pipeline_stages: [
+        { ...plan("prod", "PENDING"), error_message: PLAN_SUPERSEDED_REASON },
+        deploy("prod", "PENDING"),
+      ],
     },
   },
   {

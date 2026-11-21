@@ -1353,13 +1353,17 @@ impl ReleaseService for ReleaseServer {
         let mut destinations = Vec::with_capacity(rows.len());
         for r in rows {
             let error_message = if r.status == "QUEUED" {
-                release_policy_blocker(
+                match release_policy_blocker(
                     &self.state,
                     &r.release_intent_id,
                     &r.environment,
                     &mut policy_blockers,
                 )
                 .await
+                {
+                    Some(reason) => Some(reason),
+                    None => plan_wait(&self.state, &r.release_id).await,
+                }
             } else {
                 r.error_message
             };
@@ -1430,17 +1434,28 @@ impl ReleaseService for ReleaseServer {
         let mut policy_blockers = PolicyBlockerCache::new();
         let mut release_intents = Vec::with_capacity(results.len());
         for (intent, steps) in results {
-            let stages = intent_to_stage_states(&self.state, &intent, &mut policy_blockers).await;
+            let mut stages =
+                intent_to_stage_states(&self.state, &intent, &mut policy_blockers).await;
             let mut proto_steps = Vec::with_capacity(steps.len());
             for s in steps {
                 let error_message = if s.status == "QUEUED" {
-                    release_policy_blocker(
+                    match release_policy_blocker(
                         &self.state,
                         &intent.release_intent_id,
                         &s.environment,
                         &mut policy_blockers,
                     )
                     .await
+                    {
+                        Some(reason) => Some(reason),
+                        None => {
+                            let wait = plan_wait(&self.state, &s.release_id).await;
+                            if let Some(reason) = &wait {
+                                show_plan_wait(&mut stages, s.stage_id.as_deref(), reason);
+                            }
+                            wait
+                        }
+                    }
                 } else {
                     s.error_message
                 };
@@ -1567,6 +1582,13 @@ impl ReleaseService for ReleaseServer {
         if state.approval_status != Some(ApprovalStatus::AwaitingApproval) {
             return Err(tonic::Status::failed_precondition(
                 "stage is not awaiting approval",
+            ));
+        }
+        if state.stale_by.is_some() {
+            return Err(tonic::Status::failed_precondition(
+                state.error_message.clone().unwrap_or_else(|| {
+                    "this plan is stale; reject it and release again to plan afresh".into()
+                }),
             ));
         }
 
@@ -1958,6 +1980,31 @@ fn stage_def_to_type_fields(
             None,
             None,
         ),
+    }
+}
+
+async fn plan_wait(state: &State, release_id: &Uuid) -> Option<String> {
+    let release = state
+        .release_event_store()
+        .get_release_state(release_id)
+        .await
+        .ok()?;
+    crate::services::plan_guard::wait_reason(&state.db, &release).await
+}
+
+fn show_plan_wait(
+    stages: &mut [forest_grpc_interface::PipelineStageState],
+    stage_id: Option<&str>,
+    reason: &str,
+) {
+    let Some(stage) = stages
+        .iter_mut()
+        .find(|st| Some(st.stage_id.as_str()) == stage_id)
+    else {
+        return;
+    };
+    if stage.error_message.is_none() {
+        stage.error_message = Some(reason.to_owned());
     }
 }
 

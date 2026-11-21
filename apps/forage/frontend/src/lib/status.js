@@ -8,6 +8,52 @@ export const STATUS_CONFIG = {
   CANCELLED: { label: "Cancelled", stageLabel: "Cancelled", color: "text-gray-500", icon: "ban", iconColor: "text-gray-400" },
 };
 
+function isPlanApprovalPending(stage) {
+  return stage.stage_type === "plan" && (
+    stage.status === "AWAITING_APPROVAL" ||
+    stage.approval_status === "AWAITINGAPPROVAL" ||
+    stage.approval_status === "AWAITING_APPROVAL"
+  );
+}
+
+function releaseNamedIn(reason) {
+  return reason.match(/\brelease ([\w.-]+)/)?.[1] || null;
+}
+
+export function queuedDestinationNote(row) {
+  const reason = (row?.error_message || "").trim();
+  if (row?.status !== "QUEUED" || !reason) return null;
+  const release = releaseNamedIn(reason);
+  return { reason, chip: release ? `Waiting for ${release}` : "Waiting" };
+}
+
+export function planHold(stage) {
+  if (!stage || stage.stage_type !== "plan") return null;
+  const reason = (stage.error_message || "").trim();
+  if (!reason) return null;
+  const release = releaseNamedIn(reason);
+  if (isPlanApprovalPending(stage)) {
+    return reason.startsWith("stale:") ? { kind: "stale", reason, release } : null;
+  }
+  if (stage.status === "RUNNING" || stage.status === "QUEUED") {
+    return { kind: "waiting", reason, release };
+  }
+  if (reason.startsWith("superseded")) {
+    return { kind: "superseded", reason, release };
+  }
+  return null;
+}
+
+export function planHoldChip(hold) {
+  if (!hold) return null;
+  switch (hold.kind) {
+    case "waiting": return hold.release ? `Waiting for ${hold.release}` : "Waiting";
+    case "stale": return hold.release ? `Stale: ${hold.release} planned after this` : "Stale";
+    case "superseded": return hold.release ? `Superseded by ${hold.release}` : "Superseded";
+    default: return null;
+  }
+}
+
 export function pipelineSummary(stages) {
   if (!stages || stages.length === 0) return null;
   let allDone = true, anyFailed = false, anyRunning = false, anyWaiting = false, anyQueued = false;
@@ -28,13 +74,17 @@ export function pipelineSummary(stages) {
       Array.isArray(s.gate_waiting_on) && s.gate_waiting_on.length > 0
   );
   let anyApprovalBlocked = stages.some(s => s.blocked_by);
-  let anyPlanAwaiting = stages.some(s => s.stage_type === "plan" && (s.status === "AWAITING_APPROVAL" || s.approval_status === "AWAITINGAPPROVAL" || s.approval_status === "AWAITING_APPROVAL"));
+  let anyPlanAwaiting = stages.some(s => isPlanApprovalPending(s) && planHold(s)?.kind !== "stale");
+  let anyPlanStale = stages.some(s => planHold(s)?.kind === "stale");
+  let anyPlanWaiting = stages.some(s => planHold(s)?.kind === "waiting");
 
   if (allDone) return { label: "Pipeline complete", color: "text-gray-600", icon: "check-circle", iconColor: "text-green-500", done, total };
   if (anyFailed) return { label: "Pipeline failed", color: "text-red-600", icon: "x-circle", iconColor: "text-red-500", done, total };
   if (anyPlanAwaiting) return { label: "Awaiting plan approval", color: "text-purple-700", icon: "shield", iconColor: "text-purple-500", done, total };
   if (anyApprovalBlocked) return { label: "Awaiting approval", color: "text-emerald-700", icon: "shield", iconColor: "text-emerald-500", done, total };
+  if (anyPlanStale) return { label: "Plan stale", color: "text-purple-700", icon: "shield", iconColor: "text-purple-500", done, total };
   if (anyGateAwaiting) return { label: "Waiting for signals", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
+  if (anyPlanWaiting) return { label: "Waiting to plan", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyWaiting) return { label: "Waiting for time window", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyRunning) return { label: "Deploying to", color: "text-yellow-700", icon: "pulse", iconColor: "text-yellow-500", done, total };
   if (anyQueued) return { label: "Queued", color: "text-blue-600", icon: "clock", iconColor: "text-blue-400", done, total };
@@ -82,7 +132,12 @@ export function gateStageLabel(status) {
   }
 }
 
-export function planStageLabel(status) {
+export function planStageLabel(status, hold = null) {
+  switch (hold?.kind) {
+    case "waiting": return "Waiting to plan";
+    case "stale": return "Plan stale";
+    case "superseded": return "Plan superseded";
+  }
   switch (status) {
     case "SUCCEEDED": return "Plan approved";
     case "RUNNING": return "Planning";

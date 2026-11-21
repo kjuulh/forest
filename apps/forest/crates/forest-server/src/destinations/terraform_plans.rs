@@ -9,6 +9,7 @@ pub struct SavedPlan {
     pub work_dir: String,
     pub plan: Vec<u8>,
     pub lock_file: Option<String>,
+    pub has_changes: bool,
 }
 
 #[derive(Clone)]
@@ -42,14 +43,15 @@ impl TerraformPlanStore {
             sqlx::query!(
                 r#"
                     INSERT INTO terraform_plans
-                        (release_intent_id, destination_id, work_dir, plan, lock_file)
-                    VALUES ($1, $2, $3, $4, $5)
+                        (release_intent_id, destination_id, work_dir, plan, lock_file, has_changes)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                 "#,
                 release_intent_id,
                 destination_id,
                 plan.work_dir,
                 plan.plan,
                 plan.lock_file,
+                plan.has_changes,
             )
             .execute(&mut *tx)
             .await
@@ -75,7 +77,7 @@ impl TerraformPlanStore {
     ) -> anyhow::Result<Vec<SavedPlan>> {
         let rows = sqlx::query!(
             r#"
-                SELECT work_dir, plan, lock_file
+                SELECT work_dir, plan, lock_file, has_changes
                 FROM terraform_plans
                 WHERE release_intent_id = $1 AND destination_id = $2
                 ORDER BY work_dir
@@ -93,6 +95,7 @@ impl TerraformPlanStore {
                 work_dir: r.work_dir,
                 plan: r.plan,
                 lock_file: r.lock_file,
+                has_changes: r.has_changes.unwrap_or(true),
             })
             .collect())
     }
@@ -182,6 +185,7 @@ mod tests {
             work_dir: dir.into(),
             plan: bytes.to_vec(),
             lock_file: Some(format!("# lock for {dir}")),
+            has_changes: true,
         }
     }
 
@@ -200,6 +204,23 @@ mod tests {
             store.load(intent, dest).await.unwrap(),
             vec![plan("dev/x/forest/terraform@1", &bytes)]
         );
+    }
+
+    #[tokio::test]
+    async fn a_plan_that_changes_nothing_is_remembered_as_such() {
+        let store = store().await;
+        let (intent, dest) = (Uuid::now_v7(), Uuid::now_v7());
+        let no_op = SavedPlan {
+            has_changes: false,
+            ..plan("a", b"1")
+        };
+
+        store
+            .save(intent, dest, std::slice::from_ref(&no_op))
+            .await
+            .unwrap();
+
+        assert_eq!(store.load(intent, dest).await.unwrap(), vec![no_op]);
     }
 
     #[tokio::test]

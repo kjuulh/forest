@@ -42,7 +42,7 @@ forest project policy create -o my-org -p my-service \
 
 ### Supersede pending
 
-Older releases still queued for an environment collapse to the newest. After v0.3.18 (server-side), queued plan steps collapse only against other queued plans and queued deploys only against other deploys, so a plan held behind another release's apply is never superseded by that release's deploy:
+Older releases still queued for an environment collapse to the newest. After v0.3.18 (server-side), queued plan steps collapse only against other queued plans and queued deploys only against other deploys, so a plan held behind another release's apply is never superseded by that release's deploy. For `forest/terraform@1` destinations it also supersedes an older plan still awaiting approval once a newer plan for the destination starts (with `--same-branch-only`, only one from the same branch; one from another branch is marked stale instead; see [pipelines](pipelines.md)):
 
 ```bash
 forest project policy create -o my-org -p my-service \
