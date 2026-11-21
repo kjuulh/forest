@@ -85,10 +85,14 @@ The wait stream includes:
 
 ### Release pipeline diagram
 
-In the fork's Forage UI after v0.3.18, the **Release pipeline** node workspace
-sits below the release header. Project and organisation overviews show the same
-full viewer for the latest release per project. Existing flow charts, timelines,
-stages, destinations, logs and details remain available.
+In the fork's Forage UI after v0.3.18, an individual release's **Release pipeline**
+workspace sits below its header. Overviews instead show one **Environment status**
+workspace with an environment card above each lane's destination cards. Rows wrap
+after four destinations; shared connectors keep the lanes separate. Each
+destination has one card showing current and incoming context, not a card per
+operation. Expanding an active timeline entry loads its full pipeline in place.
+Original timelines and stage disclosures remain; there is no separate
+lower-resolution graph.
 
 The server lays out dependency columns, with separate nodes for each stage's
 destination runs, plan approvals and current policy evaluations. Plan and
@@ -96,28 +100,37 @@ deploy executions remain separate; a newer release's destination status does
 not rewrite an older execution. Text labels distinguish running, next, queued,
 waiting, blocked, failed and terminal states.
 
-Completed, active and future nodes all remain in the graph. The compact viewport
-automatically focuses current work; it does not filter other nodes away.
-**Fullscreen** opens the larger editor without changing the graph.
-The retained overview flow labels completed plans **Plan complete**, not deployed.
+Within a pipeline, completed, active and future nodes all remain visible.
 
-The full-width workspace opens around the current execution automatically.
-**Fit** frames the whole graph; **Active** returns to the running or waiting
-neighborhood. Drag or middle-drag to pan, scroll to zoom, or expand to fullscreen.
-Cards include destination progress, duration, environment, plan previews and
-waiting/failure context. Select a node to pin its inspector.
+The pipeline camera automatically focuses current work; **Fit** shows the entire
+graph. Desktop environment overviews start with **Fit**; **Active** frames an
+active environment and its destinations. Drag or middle-drag to pan, scroll to
+zoom, or expand to fullscreen. Cards include environment, execution progress,
+duration and waiting/failure context. Select a node to pin its inspector.
+Pipeline details also show available plan previews.
 
-The inspector's **Plan** and **Logs** tabs show the fetched output in place.
-On details, approval controls submit the existing authenticated forms with their
-CSRF fields; **View stage** focuses the original section. Overview controls link
-to the release's approval section. Keyboard users can tab through nodes, press
-Enter to select, and use F/A for Fit/Active.
-Details refresh every five seconds while unfinished, visible and on screen;
-overviews use their existing canonical live updates. Both preserve a manually
-explored view and pinned inspector. Running emphasis respects reduced motion.
+An overview pipeline fetches plan output only when its inspector's **Plan** tab
+opens; the global workspace has no plan/log controls. Collapsed and initially
+inactive entries make no pipeline graph request.
+Detail approval controls submit the existing CSRF-protected forms; overview
+controls link to the release. Keyboard users can Tab to nodes, press Enter to
+select, and use F/A for Fit/Active.
+Details poll every ten seconds while unfinished, visible and on-screen. Overview
+refreshes coalesce at most once per ten seconds while visible; only expanded
+visible pipelines fetch their graph. Both preserve manual views and pinned
+inspection. Running emphasis respects reduced motion.
 
-Configured destinations without a run are shown as waiting, not deployed.
-Unknown or missing execution data is labelled rather than inferred as success.
+Each overview destination card keeps current completed operations alongside
+incoming changes, with a pending count when several are queued. Its inspector
+retains each operation's provenance, state, reason and timing. A newer completion
+does not hide queued work, and pinned selection follows the physical target
+across operation changes. Plan completion is not deployment success; missing
+operation provenance is labelled. Configured destinations without current state
+are unknown, not deployed.
+
+Final browser verification of the revised readable environment lanes and
+current/incoming cards is pending. Earlier workspace browser checks do not
+establish readability, framing or mobile overflow behavior for this revision.
 
 ## Combined Command
 

@@ -1,10 +1,57 @@
 <script>
-  import { latestReleases } from "./lib/release-flow.js";
+  import { onMount } from "svelte";
+  import { createLazyReleaseGraph } from "./lib/lazy-release-graph.js";
 
-  export let timeline = [];
-  export let project = "";
+  export let html = "";
+  export let url = "";
+  export let active = false;
+  export let expanded = true;
+  export let revision = 0;
 
-  $: releases = latestReleases(timeline, { project }).filter(release => release.graph_html);
+  let host;
+  let loader;
+  let loadedHTML = "";
+  let error = null;
+  let inViewport = false;
+  let documentVisible = false;
+  let fullscreen = false;
+  let openedActive = false;
+  $: openedActive = expanded && (active || openedActive);
+  $: displayedHTML = url ? loadedHTML : html;
+  $: loader?.update({ expanded, active, revision, visible: documentVisible && (inViewport || fullscreen) });
+
+  onMount(() => {
+    if (!url) return;
+    loader = createLazyReleaseGraph(url, state => {
+      loadedHTML = state.html;
+      error = state.error;
+    });
+    const visibilityChanged = () => { documentVisible = document.visibilityState === "visible"; };
+    visibilityChanged();
+    document.addEventListener("visibilitychange", visibilityChanged);
+    const observer = new IntersectionObserver(entries => {
+      inViewport = entries.some(entry => entry.isIntersecting);
+    });
+    observer.observe(host);
+    const fullscreenChanged = () => {
+      fullscreen = !!(document.fullscreenElement && host.contains(document.fullscreenElement))
+        || !!host.querySelector('[data-fullscreen="true"]');
+    };
+    host.addEventListener("release-graph:fullscreen", fullscreenChanged);
+    document.addEventListener("fullscreenchange", fullscreenChanged);
+    const stop = () => { documentVisible = false; };
+    window.addEventListener("pagehide", stop);
+    window.addEventListener("pageshow", visibilityChanged);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      host.removeEventListener("release-graph:fullscreen", fullscreenChanged);
+      document.removeEventListener("fullscreenchange", fullscreenChanged);
+      window.removeEventListener("pagehide", stop);
+      window.removeEventListener("pageshow", visibilityChanged);
+      loader.destroy();
+    };
+  });
 
   function workspace(node, html) {
     let currentRoot = null;
@@ -42,11 +89,13 @@
   }
 </script>
 
-{#if releases.length}
-  <section class="release-flows" aria-label="Latest release workspaces">
-    <h2 class="release-flows-heading">Latest release workspaces</h2>
-    {#each releases as release (release.project_name || project)}
-      <div use:workspace={release.graph_html}></div>
-    {/each}
-  </section>
-{/if}
+<div bind:this={host}>
+  {#if displayedHTML}
+    <div use:workspace={displayedHTML}></div>
+  {/if}
+  {#if error && url && expanded}
+    <p role="alert">{error}</p>
+  {:else if !displayedHTML && url && expanded && openedActive}
+    <p role="status">Loading pipeline graph…</p>
+  {/if}
+</div>

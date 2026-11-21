@@ -13,8 +13,8 @@ props crate::views::models::ProjectReleasesPage { chrome, org, project, csrf_tok
         <IconLink href={settings_href(org, project, "policies")} icon="policies">Policies</IconLink>
       </div>
     </div>
-    <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} />
-    <release-timeline id="rt-{org}-{project}" sedx-preserve org={org} project={project} csrf={csrf_token} username={username} role={role}></release-timeline>
+    <TimelinePrefetch org={org} project={Some(project.as_str())} src={prefetch_js} include_graph={true} />
+    <release-timeline id="rt-{org}-{project}" sedx-preserve org={org} project={project} csrf={csrf_token} username={username} role={role} graph="true"></release-timeline>
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>

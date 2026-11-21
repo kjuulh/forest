@@ -12,8 +12,9 @@
   } from "./lib/lane-states.js";
   import { laneGeometry } from "./lib/lane-geometry.js";
   import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, planHold, planHoldChip, queuedDestinationNote, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
-  import ReleaseFlow from "./ReleaseFlow.svelte";
   import ReleaseNodeWorkspaces from "./ReleaseNodeWorkspaces.svelte";
+  import { createTimelineScheduler } from "./lib/timeline-scheduler.js";
+  import { releaseGraphActive, releaseGraphUrl } from "./lib/lazy-release-graph.js";
 
   export let org = "";
   export let project = "";
@@ -21,6 +22,13 @@
   export let username = "";
   export let role = "";
   export let limit = "";
+  export let graph = "";
+
+  $: includeGraph = graph === "true" || graph === true;
+  let graphHTML = "";
+  let graphRevision = 0;
+  let expandedReleases = new Set();
+  let refreshScheduler = null;
 
   let timeline = [];
   let lanes = [];
@@ -199,37 +207,36 @@
     }
   }
 
-  let refetchTimer = null;
-
   function scheduleRefetch() {
-    if (refetchTimer) return;
-    refetchTimer = setTimeout(() => {
-      refetchTimer = null;
-      refreshData();
-    }, 300);
+    refreshScheduler?.request();
   }
 
-  async function loadData() {
-    try {
-      error = null;
-      const data = await fetchTimeline(org, project);
-      applyTimelineData(data.timeline, data.lanes);
-      initialLoading = false;
-      scheduleComputeLaneBars();
-    } catch (e) {
-      error = e.message;
-      initialLoading = false;
-    }
+  function loadData() {
+    scheduleRefetch();
   }
 
-  async function refreshData() {
-    try {
-      const data = await fetchTimeline(org, project);
-      applyTimelineData(data.timeline, data.lanes);
-      scheduleComputeLaneBars();
-    } catch (e) {
-      console.warn("[release-timeline] refresh failed:", e);
-    }
+  function refreshData() {
+    scheduleRefetch();
+  }
+
+  async function fetchData(signal) {
+    const data = await fetchTimeline(org, project, { includeGraph, signal });
+    if (signal.aborted) return;
+    error = null;
+    applyTimelineData(data.timeline, data.lanes);
+    graphHTML = data.graph_html || "";
+    graphRevision += 1;
+    initialLoading = false;
+    scheduleComputeLaneBars();
+  }
+
+  function toggleRelease(event, release) {
+    const key = releaseKey(release);
+    const next = new Set(expandedReleases);
+    if (event.currentTarget.open) next.add(key);
+    else next.delete(key);
+    expandedReleases = next;
+    scheduleComputeLaneBars();
   }
 
   function applyTimelineData(newTimeline, newLanes) {
@@ -248,7 +255,8 @@
       const newR = newItem.release;
       if (oldR.dest_envs === newR.dest_envs &&
           oldR.has_pipeline === newR.has_pipeline &&
-          oldR.graph_html === newR.graph_html &&
+          oldR.release_intent_id === newR.release_intent_id &&
+          oldR.summary_status === newR.summary_status &&
           pipelineStagesEqual(oldR.pipeline_stages, newR.pipeline_stages) &&
           destinationsEqual(oldR.destinations, newR.destinations)) {
         return existing;
@@ -584,14 +592,41 @@
   }
 
   onMount(() => {
+    refreshScheduler = createTimelineScheduler(fetchData, {
+      visible: document.visibilityState === "visible",
+      onError: e => {
+        if (initialLoading || error) {
+          error = e.message;
+          initialLoading = false;
+        } else {
+          console.warn("[release-timeline] refresh failed:", e);
+        }
+      },
+    });
+    const visibilityChanged = () => {
+      refreshScheduler.setVisible(document.visibilityState === "visible");
+    };
+    const stop = () => refreshScheduler.setVisible(false);
+    const resume = event => {
+      visibilityChanged();
+      if (event.persisted) refreshScheduler.request();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("pagehide", stop);
+    window.addEventListener("pageshow", resume);
     loadData();
-    timerInterval = setInterval(() => { now = Date.now(); }, 10000);
+    timerInterval = setInterval(() => { now = Date.now(); }, 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("pagehide", stop);
+      window.removeEventListener("pageshow", resume);
+      refreshScheduler.destroy();
+    };
   });
 
   onDestroy(() => {
     if (disconnectSSE) disconnectSSE();
-    if (timerInterval) clearInterval(timerInterval);
-    if (refetchTimer) clearTimeout(refetchTimer);
+    clearInterval(timerInterval);
     if (laneBarRaf) cancelAnimationFrame(laneBarRaf);
     laneBarScheduled = false;
   });
@@ -757,6 +792,10 @@
   </div>
 {/if}
 
+{#if includeGraph && graphHTML}
+  <ReleaseNodeWorkspaces html={graphHTML} />
+{/if}
+
 {#if initialLoading}
   <div class="rt-placeholder">
     <span class="rt-spinner" aria-hidden="true"></span>
@@ -773,8 +812,6 @@
     <p>Ship one with <code>forest release create</code>.</p>
   </div>
 {:else}
-  <ReleaseNodeWorkspaces {timeline} {project} />
-  <ReleaseFlow {timeline} {org} {project} />
   <div
     class="rt"
     style="grid-template-columns: {gutterWidth}px minmax(0, 1fr);"
@@ -941,7 +978,7 @@
               </div>
             </header>
 
-            <details class="rt-details" on:toggle={scheduleComputeLaneBars}>
+            <details class="rt-details" on:toggle={event => toggleRelease(event, release)}>
               <summary class="rt-summary">
                 {#if release.has_pipeline && !summary}
                   {@const envAllDone = release.env_groups && release.env_groups.length > 0 && release.env_groups.every(g => g.status === "SUCCEEDED")}
@@ -1037,6 +1074,16 @@
               </summary>
 
               <div class="rt-body">
+                {#if includeGraph}
+                  {#key `${releaseKey(release)}:${release.release_intent_id || ""}`}
+                    <ReleaseNodeWorkspaces
+                      url={releaseGraphUrl(org, project, release)}
+                      active={releaseGraphActive(release)}
+                      expanded={expandedReleases.has(releaseKey(release))}
+                      revision={graphRevision}
+                    />
+                  {/key}
+                {/if}
                 {#if release.description}
                   <p class="rt-description" title={release.description}>{release.description}</p>
                 {/if}

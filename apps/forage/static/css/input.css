@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import './release-flow.css';
 @plugin "@tailwindcss/typography";
 @source "../../crates/forage-ui/templates";
 @source "../../crates/forage-ui/src";
@@ -359,6 +358,17 @@ svg {
 .release-graph[data-fullscreen="true"] { position: fixed; inset: 0; z-index: 100; }
 html:has(.release-graph[data-fullscreen="true"]) { overflow: hidden; }
 @keyframes release-graph-running { 50% { opacity: 0.4; } }
+@media (min-width: 60.001rem) {
+  #release-environments:not(:fullscreen):not([data-fullscreen="true"]) {
+    width: min(1480px, calc(100vw - 4rem));
+    margin-inline: calc((100% - min(1480px, calc(100vw - 4rem))) / 2);
+  }
+  #release-environments:not(:fullscreen):not([data-fullscreen="true"]) .release-graph-workspace {
+    height: min(880px, 80dvh);
+    min-height: 420px;
+  }
+}
+#release-environments .release-graph-inspector-body p { white-space: pre-wrap; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .release-graph-node[data-state="running"] .release-graph-state-dot { animation: none; }
 }

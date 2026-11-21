@@ -32,6 +32,15 @@ describe("timelineUrl", () => {
     expect(timelineUrl("understory", "")).toBe("/api/orgs/understory/timeline");
     expect(timelineUrl("understory", undefined)).toBe("/api/orgs/understory/timeline");
   });
+
+  it("adds graph projection only when explicitly requested", () => {
+    expect(timelineUrl("understory", "forage", { includeGraph: true }))
+      .toBe("/api/orgs/understory/projects/forage/timeline?include_graph=true");
+    expect(timelineUrl("understory", "", { includeGraph: true }))
+      .toBe("/api/orgs/understory/timeline?include_graph=true");
+    expect(timelineUrl("understory", "forage", { includeGraph: false }))
+      .toBe("/api/orgs/understory/projects/forage/timeline");
+  });
 });
 
 describe("fetchTimeline", () => {
@@ -70,6 +79,44 @@ describe("fetchTimeline", () => {
     prime(timelineUrl("understory", ""), PAYLOAD);
     await expect(fetchTimeline("understory", "")).resolves.toEqual(PAYLOAD);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses only the opt-in prefetched graph payload and leaves the default payload untouched", async () => {
+    const plainURL = timelineUrl("understory", "forage");
+    const graphURL = timelineUrl("understory", "forage", { includeGraph: true });
+    const graphPayload = { ...PAYLOAD, graph_html: "<section>environments</section>" };
+    globalThis.__forestTimeline = {
+      [plainURL]: Promise.resolve(PAYLOAD),
+      [graphURL]: Promise.resolve(graphPayload),
+    };
+    await expect(fetchTimeline("understory", "forage", { includeGraph: true })).resolves.toEqual(graphPayload);
+    await expect(fetchTimeline("understory", "forage")).resolves.toEqual(PAYLOAD);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await fetchTimeline("understory", "forage", { includeGraph: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe(graphURL);
+  });
+
+  it("does not consume plain timeline prefetch data for an opted-in request", async () => {
+    const plainURL = timelineUrl("understory", "forage");
+    prime(plainURL, PAYLOAD);
+    await expect(fetchTimeline("understory", "forage", { includeGraph: true })).resolves.toEqual(FRESH);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(globalThis.__forestTimeline[plainURL]).toBeDefined();
+  });
+
+  it("passes cancellation through without changing default request options", async () => {
+    const controller = new AbortController();
+    await fetchTimeline("understory", "forage", { includeGraph: true, signal: controller.signal });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/orgs/understory/projects/forage/timeline?include_graph=true",
+      { credentials: "same-origin", signal: controller.signal },
+    );
+    await fetchTimeline("understory", "forage");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/orgs/understory/projects/forage/timeline",
+      { credentials: "same-origin" },
+    );
   });
 
   it("still reports a failed request", async () => {

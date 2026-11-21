@@ -78,22 +78,35 @@ How to read `release show`:
 
 `forest project releases` renders a plan stage as `deploy(<env>)`; trust `release show` for stage types. Neither command shows the image or SHA running in the service.
 
-In the fork's Forage UI after v0.3.18, **Release pipeline** sits below the release
-header. Project and organisation release overviews use the same full node viewer
-for the latest release per project. Existing flow charts and timelines remain.
-Nodes separate stages, per-stage destination runs, plan approvals and policies.
-Completed, active and future work stays in the graph; the camera focuses active
-work rather than filtering other nodes away.
-Cards expose environment, destination progress, duration, plan previews and
-waiting/failure context. **Fit** shows the whole DAG, **Active** returns to current
-work, and fullscreen expands the editor. Drag to pan, scroll to zoom, or use F/A
-from the canvas. Select a node for the inspector's Plan/Logs tabs.
+In the fork's Forage UI after v0.3.18, individual releases have a high-resolution
+**Release pipeline** workspace below the header. Overviews have one global
+**Environment status** workspace with readable environment lanes: a compact
+environment card sits above rows of destination cards, wrapping after four
+destinations. Shared connectors retain logical environment-to-destination edges.
+Each physical target has one card, not one per operation. Expanding an active
+timeline entry lazily loads its pipeline. Collapsed or initially inactive entries
+make no pipeline graph request. Original timelines and stage disclosures remain;
+there is no lower-resolution graph.
+Pipeline nodes separate stages, destination runs, approvals and policies. Their
+camera focuses active work without filtering completed or future nodes away.
+Desktop global overviews start with **Fit** for the whole workspace; **Active**
+frames the active environment and its destinations. Fullscreen expands the
+workspace. Drag to pan, scroll to zoom, or use F/A. Select a node to pin inspection.
+Overview Plan text loads only when Plan opens. The global view has no Plan/Logs.
 Detail approval controls reuse existing forms and CSRF fields; overview controls
-link to the release's real approval section. Details refresh every five seconds
-while unfinished, visible and on screen. Overviews use canonical timeline updates.
-Live updates preserve pinned inspection and manual camera exploration.
-The retained compact flow uses execution provenance: plan completion is not
-labelled deployed. None of these views proves which image is serving.
+link to the release. Details poll every ten seconds while unfinished and visible.
+Canonical overview requests start at most once per ten seconds while visible;
+only expanded visible pipeline fragments refresh. Pinned/manual inspection survives.
+Each target card retains current completed and incoming context, with a pending
+count when needed. The inspector keeps every operation's provenance, state,
+reason and timing. A newer completion never hides queued work; pinned selection
+follows the physical target across operation changes. A successful plan is not
+deployed; missing provenance is explicit. None of these views proves the image
+serving.
+
+Final readability browser verification of the revised lanes and current/incoming
+cards is pending. Earlier workspace checks do not prove the revised layout's
+framing, wrapped-card readability or mobile overflow behavior.
 
 ## Proving a deployment
 
