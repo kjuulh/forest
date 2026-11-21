@@ -98,6 +98,17 @@ impl Scheduler {
 }
 
 impl SchedulerInner {
+    async fn defer(&self, release_id: Uuid) {
+        if let Err(e) = crate::services::newest_wins::move_to_back_of_sweep(
+            &self.release_event_store.db,
+            release_id,
+        )
+        .await
+        {
+            tracing::warn!(%release_id, "could not move the deferred release to the back of the sweep: {e:#}");
+        }
+    }
+
     async fn handle_release(&self, release_id: Uuid) -> anyhow::Result<()> {
         if self.drain.is_draining() {
             tracing::info!(%release_id, "draining for shutdown — leaving release queued for another replica");
@@ -196,6 +207,7 @@ impl SchedulerInner {
                     env = %dest.environment,
                     "scheduler: release deferred, policies could not be evaluated: {e:#}"
                 );
+                self.defer(release_id).await;
                 return Ok(());
             }
         };
@@ -227,6 +239,7 @@ impl SchedulerInner {
                     "scheduler: release deferred by soak_time policy — {}",
                     eval.reason,
                 );
+                self.defer(release_id).await;
                 return Ok(());
             }
         }
@@ -480,6 +493,7 @@ impl SchedulerInner {
                 destination = %dest_index,
                 "no remote runner available, in-process disabled — leaving queued"
             );
+            self.defer(release_id).await;
             return Ok(());
         }
 

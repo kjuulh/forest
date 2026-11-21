@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_states\n                   (release_id, release_intent_id, project_id, destination_id,\n                    artifact_id, status, mode)\n               VALUES ($1, $2, $3, $4, $5, 'RUNNING', 'deploy')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c9dc2dbe96103f5b27aa15e7c63b31306b04a4a6dd19f67ff999e42e8ae2d9ec"
+}

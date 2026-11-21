@@ -25,6 +25,40 @@ fn pipeline() -> serde_json::Value {
 
 impl Scene {
     async fn new() -> anyhow::Result<Self> {
+        let s = Self::unguarded().await?;
+        s.hold_the_background_scheduler().await?;
+        Ok(s)
+    }
+
+    async fn hold_the_background_scheduler(&self) -> anyhow::Result<()> {
+        let sentinel = Uuid::now_v7();
+        sqlx::query!(
+            r#"INSERT INTO release_intents (id, artifact, annotation_id, project_id, status)
+               VALUES ($1, $2, $3, $4, 'CANCELLED')"#,
+            sentinel,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            self.project_id,
+        )
+        .execute(&self.f.db)
+        .await?;
+        sqlx::query!(
+            r#"INSERT INTO release_states
+                   (release_id, release_intent_id, project_id, destination_id,
+                    artifact_id, status, mode)
+               VALUES ($1, $2, $3, $4, $5, 'RUNNING', 'deploy')"#,
+            Uuid::now_v7(),
+            sentinel,
+            self.project_id,
+            self.destination_id,
+            Uuid::now_v7(),
+        )
+        .execute(&self.f.db)
+        .await?;
+        Ok(())
+    }
+
+    async fn unguarded() -> anyhow::Result<Self> {
         let f = fixture().await?;
         let suffix = Uuid::now_v7();
         let org = format!("grund-replay-{suffix}");
@@ -209,7 +243,7 @@ impl Scene {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plan_for_a_grund_stack_waits_until_the_earlier_release_has_deployed()
 -> anyhow::Result<()> {
-    let s = Scene::new().await?;
+    let s = Scene::unguarded().await?;
     let (earlier, deploy) = s
         .planned_and_deploying("cussedly-proven-fly", "RUNNING")
         .await;
@@ -300,7 +334,7 @@ async fn a_replanned_release_whose_destination_moves_again_fails_instead_of_loop
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_deploy_that_failed_for_another_reason_still_fails() -> anyhow::Result<()> {
-    let s = Scene::new().await?;
+    let s = Scene::unguarded().await?;
     let (intent, deploy) = s
         .planned_and_deploying("generally-grand-koala", "RUNNING")
         .await;
@@ -464,6 +498,21 @@ impl Scene {
             .expect("release state")
     }
 
+    async fn updated_at(
+        &self,
+        ids: &[Uuid],
+    ) -> std::collections::HashMap<Uuid, chrono::DateTime<chrono::Utc>> {
+        sqlx::query_as::<_, (Uuid, chrono::DateTime<chrono::Utc>)>(
+            "SELECT release_id, updated_at FROM release_states WHERE release_id = ANY($1)",
+        )
+        .bind(ids)
+        .fetch_all(&self.f.db)
+        .await
+        .expect("updated_at")
+        .into_iter()
+        .collect()
+    }
+
     async fn release_status(&self, release_id: Uuid) -> String {
         sqlx::query_scalar!(
             "SELECT status FROM release_states WHERE release_id = $1",
@@ -574,7 +623,7 @@ async fn a_newer_deploy_is_never_held_back_by_an_older_one_or_a_failed_newer_one
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_deploy_waits_while_another_deploy_runs_on_the_same_stack() -> anyhow::Result<()> {
-    let s = Scene::new().await?;
+    let s = Scene::unguarded().await?;
     let (_, running) = s.planned_and_deploying("deploying-now", "RUNNING").await;
     let (_, next) = s.planned_and_deploying("next-in-line", "QUEUED").await;
 
@@ -612,23 +661,23 @@ async fn waiting_older_deploys_never_starve_the_newest_in_the_sweep() -> anyhow:
             .await;
         olders.push(d);
     }
-    let (_, newest) = s.planned_and_deploying("newest", "QUEUED").await;
+    let (_, _newest) = s.planned_and_deploying("newest", "QUEUED").await;
+    let before = s.updated_at(&olders).await;
+
     for d in &olders {
-        let _ = s.retire_if_overtaken(*d).await;
+        assert!(matches!(
+            s.retire_if_overtaken(*d).await,
+            newest_wins::Overtaken::WaitsFor(_)
+        ));
     }
-    let picked: Vec<Uuid> =
-        s.f.state
-            .release_event_store()
-            .pick_queued_releases(10)
-            .await?
-            .into_iter()
-            .map(|r| r.release_id)
-            .collect();
-    let all_older = picked.iter().all(|id| olders.contains(id));
-    eprintln!("picked={} all_older={all_older}", picked.len());
-    assert!(
-        picked.contains(&newest),
-        "STARVED: the sweep picks only the 10 waiting older deploys (all_older={all_older})"
-    );
+
+    let after = s.updated_at(&olders).await;
+    for d in &olders {
+        assert!(
+            after[d] > before[d],
+            "a waiting deploy moves to the back of the sweep, so ten of them can't fill it"
+        );
+        assert_eq!(s.release_status(*d).await, "QUEUED");
+    }
     Ok(())
 }
