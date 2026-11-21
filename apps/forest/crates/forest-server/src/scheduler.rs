@@ -242,8 +242,8 @@ impl SchedulerInner {
             {
                 Ok(policy) => policy.is_some_and(|(_, config)| config.same_branch_only),
                 Err(e) => {
-                    tracing::warn!(%release_id, "supersede_pending lookup failed, leaving the deploy queued: {e:#}");
-                    return Ok(());
+                    tracing::warn!(%release_id, "supersede_pending lookup failed; only a same-branch release may overtake: {e:#}");
+                    true
                 }
             };
             let overtaken = if same_branch_only && branch.is_none() {
@@ -282,6 +282,14 @@ impl SchedulerInner {
                 Ok(None) => {}
                 Ok(Some(running)) => {
                     tracing::info!(%release_id, destination = %dest.name, %running, "deploy waits: release {running} is still deploying to this destination");
+                    if let Err(e) = crate::services::newest_wins::move_to_back_of_sweep(
+                        &self.release_event_store.db,
+                        release_id,
+                    )
+                    .await
+                    {
+                        tracing::warn!(%release_id, "could not requeue the waiting deploy: {e:#}");
+                    }
                     return Ok(());
                 }
                 Err(e) => {

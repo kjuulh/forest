@@ -925,9 +925,9 @@ fn validate_rule_set_input(
     validate_unique_names("policy", input.policies.iter().map(|r| r.name.as_str()))?;
     for rule in &input.policies {
         require_name("policy name", &rule.name)?;
-        let unchanged = accepted
-            .iter()
-            .any(|a| a.policy_type == rule.policy_type && a.config == rule.config);
+        let unchanged = accepted.iter().any(|a| {
+            a.name == rule.name && a.policy_type == rule.policy_type && a.config == rule.config
+        });
         if !unchanged {
             validate_policy_config(&rule.policy_type, &rule.config)
                 .with_context(|| format!("invalid policy rule '{}'", rule.name))?;
@@ -1145,6 +1145,17 @@ mod tests {
         assert!(
             validate_rule_set_input(&input, std::slice::from_ref(&self_soak)).is_ok(),
             "an unchanged rule already stored does not block other edits"
+        );
+        let renamed = OrgRuleSetInput {
+            policies: vec![StoredOrgPolicyRule {
+                name: "soak-dev-copy".into(),
+                ..self_soak.clone()
+            }],
+            ..input.clone()
+        };
+        assert!(
+            validate_rule_set_input(&renamed, std::slice::from_ref(&self_soak)).is_err(),
+            "a new rule copying a stored invalid config is still refused"
         );
     }
 

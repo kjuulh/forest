@@ -601,3 +601,34 @@ async fn a_deploy_waits_while_another_deploy_runs_on_the_same_stack() -> anyhow:
     );
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_older_deploys_never_starve_the_newest_in_the_sweep() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let mut olders = Vec::new();
+    for i in 0..10 {
+        let (_, d) = s
+            .planned_and_deploying(&format!("older-{i}"), "QUEUED")
+            .await;
+        olders.push(d);
+    }
+    let (_, newest) = s.planned_and_deploying("newest", "QUEUED").await;
+    for d in &olders {
+        let _ = s.retire_if_overtaken(*d).await;
+    }
+    let picked: Vec<Uuid> =
+        s.f.state
+            .release_event_store()
+            .pick_queued_releases(10)
+            .await?
+            .into_iter()
+            .map(|r| r.release_id)
+            .collect();
+    let all_older = picked.iter().all(|id| olders.contains(id));
+    eprintln!("picked={} all_older={all_older}", picked.len());
+    assert!(
+        picked.contains(&newest),
+        "STARVED: the sweep picks only the 10 waiting older deploys (all_older={all_older})"
+    );
+    Ok(())
+}

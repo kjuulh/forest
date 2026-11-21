@@ -22,6 +22,7 @@ pub enum Overtaken {
 struct Newer {
     slug: String,
     deployed: bool,
+    queued_deploy: Option<uuid::Uuid>,
 }
 
 async fn newer_deploy(
@@ -37,7 +38,15 @@ async fn newer_deploy(
                         AND rs.destination_id = $3
                         AND rs.mode <> 'plan'
                         AND rs.status = 'SUCCEEDED'
-                  ) as "deployed!"
+                  ) as "deployed!",
+                  (
+                      SELECT rs.release_id FROM release_states rs
+                      WHERE rs.release_intent_id = ri.id
+                        AND rs.destination_id = $3
+                        AND rs.mode <> 'plan'
+                        AND rs.status = 'QUEUED'
+                      LIMIT 1
+                  ) as "queued_deploy?"
            FROM release_intents ri
            LEFT JOIN annotations a ON a.id = ri.annotation_id
            WHERE ri.project_id = $1
@@ -64,6 +73,7 @@ async fn newer_deploy(
     Ok(newer.map(|n| Newer {
         slug: n.slug.unwrap_or_else(|| n.id.to_string()),
         deployed: n.deployed,
+        queued_deploy: n.queued_deploy,
     }))
 }
 
@@ -86,6 +96,12 @@ pub async fn retire_if_overtaken(
         return Ok(Overtaken::No);
     };
     if !newer.deployed {
+        move_to_back_of_sweep(&event_store.db, release.release_id).await?;
+        if let Some(queued) = newer.queued_deploy {
+            let _ = nats
+                .publish("forest.release.queued", queued.to_string().into())
+                .await;
+        }
         return Ok(Overtaken::WaitsFor(newer.slug));
     }
     event_store
@@ -128,4 +144,19 @@ pub async fn deploy_in_flight(
     .await
     .context("look for a deploy already running on the destination")?;
     Ok(running.map(|r| r.slug.unwrap_or_else(|| r.release_intent_id.to_string())))
+}
+
+pub async fn move_to_back_of_sweep(
+    db: &sqlx::PgPool,
+    release_id: uuid::Uuid,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE release_states SET updated_at = now()
+         WHERE release_id = $1 AND status = 'QUEUED'",
+        release_id,
+    )
+    .execute(db)
+    .await
+    .context("move the waiting deploy to the back of the sweep")?;
+    Ok(())
 }
