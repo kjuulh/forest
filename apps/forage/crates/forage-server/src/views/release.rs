@@ -28,6 +28,8 @@ pub struct ReleasePage {
     pub has_release_intents: bool,
     pub spec: Option<String>,
     pub health: Option<forage_core::platform::ReleaseHealth>,
+    pub graph: super::release_graph::ReleaseGraph,
+    pub graph_js: String,
 }
 
 // Class names stay whole literals: Tailwind scans this directory for them.

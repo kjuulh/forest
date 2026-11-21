@@ -1176,6 +1176,15 @@ async fn artifact_detail(
         .filter(|d| d.starts_with("Branch:"))
         .map(parse_description_metadata)
         .unwrap_or_default();
+    let graph = crate::views::release_graph::ReleaseGraph::build(
+        release_intents
+            .iter()
+            .filter(|ri| ri.artifact_id == artifact.artifact_id)
+            .max_by_key(|ri| &ri.created_at),
+        &policies,
+        &artifact.destinations,
+        &stages,
+    );
 
     let page = crate::views::release::ReleasePage {
         chrome: crate::views::chrome::signed_in(
@@ -1221,6 +1230,8 @@ async fn artifact_detail(
             .any(|ri| ri.artifact_id == artifact.artifact_id),
         spec: Some(artifact_spec).filter(|s| !s.is_empty()),
         health,
+        graph,
+        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::artifact_detail::render(&page);
 
@@ -1823,6 +1834,8 @@ pub struct ApiRelease {
 pub struct ApiDestinationState {
     pub name: String,
     pub environment: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_id: Option<String>,
     pub status: Option<String>,
     pub error_message: Option<String>,
     pub queued_at: Option<String>,
@@ -1842,6 +1855,7 @@ pub struct ApiEnvGroup {
 pub struct ApiPipelineStage {
     pub id: String,
     pub stage_type: String,
+    pub depends_on: Vec<String>,
     pub environment: Option<String>,
     pub duration_seconds: Option<i64>,
     pub status: String,
@@ -1904,6 +1918,26 @@ fn build_timeline_json(
                 .extend(ri.steps.iter());
         }
     }
+    let stage_by_release: std::collections::HashMap<&str, &str> = release_intents
+        .iter()
+        .flat_map(|intent| intent.stages.iter())
+        .flat_map(|stage| {
+            stage
+                .release_ids
+                .iter()
+                .map(move |release| (release.as_str(), stage.stage_id.as_str()))
+        })
+        .chain(
+            release_intents
+                .iter()
+                .flat_map(|intent| intent.steps.iter())
+                .filter_map(|step| {
+                    step.stage_id
+                        .as_deref()
+                        .map(|stage| (step.release_id.as_str(), stage))
+                }),
+        )
+        .collect();
 
     struct RawRelease {
         release: ApiRelease,
@@ -1958,6 +1992,11 @@ fn build_timeline_json(
                 ApiDestinationState {
                     name: ds.destination_name.clone(),
                     environment: ds.environment.clone(),
+                    stage_id: ds
+                        .release_id
+                        .as_deref()
+                        .and_then(|release| stage_by_release.get(release))
+                        .map(|stage| (*stage).to_owned()),
                     status: ds.status.clone(),
                     error_message: ds.error_message.clone(),
                     queued_at: ds.queued_at.clone(),
@@ -2075,6 +2114,7 @@ fn build_timeline_json(
                     stages.push(ApiPipelineStage {
                         id: rs.stage_id.clone(),
                         stage_type: rs.stage_type.clone(),
+                        depends_on: rs.depends_on.clone(),
                         environment: rs.environment.clone(),
                         duration_seconds: rs.duration_seconds,
                         status: display_status,

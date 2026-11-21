@@ -4,7 +4,8 @@ use forage_ui::layouts::Shell;
 use forage_ui::release::{source_icon, source_label, StageKind};
 use crate::views::models::project_href;
 use crate::views::release::{deploy_href, health_classes, health_label, logs_href, plan_stage_href, policies_passed, release_href, stages_done, user_href};
-props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_admin, release, summary, environments, has_pipeline, stages, release_intent_id, policies, destinations, configured_destinations, has_release_intents, spec, health };
+use crate::views::components::{ReleaseGraph, ReleaseQueue};
+props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_admin, release, summary, environments, has_pipeline, stages, release_intent_id, policies, destinations, configured_destinations, has_release_intents, spec, health, graph, graph_js };
 
 <Shell chrome={chrome}>
   <section class="app-container pt-12 pb-12">
@@ -38,6 +39,8 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
         <span class="text-xs text-gray-400"><Timeago value={release.created_at} /></span>
       </div>
     </div>
+
+    <ReleaseQueue graph={graph} />
 
     {if let Some(description) = &release.description {
       <div class="mb-8">
@@ -128,7 +131,7 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
     {if !policies.is_empty() {
       {let passed = policies_passed(policies);}
       {let total = policies.len();}
-      <div class="mb-8">
+      <div class="mb-8" id="policies">
         <div class="flex items-center gap-3 mb-3">
           <h2 class="text-sm font-semibold text-gray-900">Policy Requirements</h2>
           {if passed == total {
@@ -342,8 +345,11 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
     <div class="text-sm text-gray-500">
       <p>Created <Timeago value={release.created_at} /></p>
     </div>
+
+    <ReleaseGraph graph={graph} release={release} />
   </section>
   <:scripts>
     <script src="/static/js/components/forage-components.js?v={chrome.assets.components_js_hash}"></script>
+    <script src={graph_js}></script>
   </:scripts>
 </Shell>

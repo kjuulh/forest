@@ -78,6 +78,22 @@ How to read `release show`:
 
 `forest project releases` renders a plan stage as `deploy(<env>)`; trust `release show` for stage types. Neither command shows the image or SHA running in the service.
 
+In the fork's Forage UI after v0.3.18, open an individual release and scroll to
+**Release pipeline** for its server-rendered dependency diagram. Nodes separate
+stages, per-stage destination runs, plan approval and current policy evaluations.
+The compact **Queue** below the release header shows current and immediately
+ready work, not completed or future pending stages. Select an item to open that
+node in the full workspace.
+Cards expose environment, destination progress, duration, plan previews and
+waiting/failure context. The full-width node workspace automatically focuses
+current work; **Fit** shows the whole DAG, **Active** returns to current work,
+and fullscreen expands it. Drag to pan, scroll to zoom, or use F/A from the
+canvas. Select a node for the inspector's working Plan/Logs tabs and authenticated
+approval controls; these reuse the existing forms and CSRF fields.
+It refreshes every five seconds while unfinished, visible and on screen,
+preserving a manually explored view. It does not replace the overview or prove
+which image is serving.
+
 ## Proving a deployment
 
 A green release says the destination provider reported success. That is good evidence for `terraform` (the apply succeeded) and for providers that wait for convergence. It still is not proof that the new code is serving. Close the loop with what the service itself reports: the running image digest or build SHA on a health/version endpoint, the ECS task definition, the pod image, or the `service_version` stamped on telemetry. Compare it with the commit on the annotation (`source:` in `release show`). Say plainly which of these you checked.

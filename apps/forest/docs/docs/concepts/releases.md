@@ -83,6 +83,39 @@ The wait stream includes:
 - Status transitions
 - Pipeline stage updates (if using a pipeline)
 
+### Release pipeline diagram
+
+In the fork's Forage UI after v0.3.18, an individual release's **Release
+pipeline** diagram sits below the existing stages, destinations, logs and
+details. It is not part of the release overview.
+
+The server lays out dependency columns, with separate nodes for each stage's
+destination runs, plan approvals and current policy evaluations. Plan and
+deploy executions remain separate; a newer release's destination status does
+not rewrite an older execution. Text labels distinguish running, next, queued,
+waiting, blocked, failed and terminal states.
+
+Current work also appears in a compact **Queue** below the release header.
+It excludes completed work and future pending stages. Select a queued item to
+open and focus that exact node in the full workspace.
+
+The full-width workspace opens around the current execution automatically.
+**Fit** frames the whole graph; **Active** returns to the running or waiting
+neighborhood. Drag or middle-drag to pan, scroll to zoom, or expand to fullscreen.
+Cards include destination progress, duration, environment, plan previews and
+waiting/failure context. Select a node to pin its inspector.
+
+The inspector's **Plan** and **Logs** tabs show the fetched output in place.
+Approval controls submit the existing authenticated forms with their CSRF
+fields; **View stage** focuses the original stage section. Keyboard users can
+tab through nodes, use Enter to select, and press F or A for Fit or Active.
+The graph refreshes every five seconds while unfinished, visible and on screen,
+without reloading the page or resetting a manually explored view.
+Running emphasis respects reduced motion.
+
+Configured destinations without a run are shown as waiting, not deployed.
+Unknown or missing execution data is labelled rather than inferred as success.
+
 ## Combined Command
 
 `forest release create` prepares and annotates, auto-detecting organisation, project and git context:

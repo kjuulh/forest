@@ -8,6 +8,7 @@ pub use compiled::*;
 pub mod chrome;
 pub mod models;
 pub mod release;
+pub mod release_graph;
 pub mod org_settings;
 pub mod project_settings;
 pub mod destinations;
