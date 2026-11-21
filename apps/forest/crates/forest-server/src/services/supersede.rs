@@ -182,7 +182,11 @@ pub async fn collapse_queue(
     Ok(plan.verdict)
 }
 
-async fn notify_superseded(event_store: &ReleaseEventStore, nats: &async_nats::Client, id: Uuid) {
+pub(crate) async fn notify_superseded(
+    event_store: &ReleaseEventStore,
+    nats: &async_nats::Client,
+    id: Uuid,
+) {
     let Ok(state) = event_store.get_release_state(&id).await else {
         return;
     };

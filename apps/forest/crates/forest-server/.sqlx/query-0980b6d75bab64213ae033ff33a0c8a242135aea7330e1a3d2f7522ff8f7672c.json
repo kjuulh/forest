@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ri.id, a.slug as \"slug?\"\n           FROM release_intents ri\n           LEFT JOIN annotations a ON a.id = ri.annotation_id\n           WHERE ri.project_id = $1\n             AND ri.id <> $2\n             AND ri.created > (SELECT created FROM release_intents WHERE id = $2)\n             AND EXISTS (\n                 SELECT 1 FROM release_states rs\n                 WHERE rs.release_intent_id = ri.id\n                   AND rs.destination_id = $3\n                   AND rs.mode <> 'plan'\n                   AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING', 'SUCCEEDED')\n             )\n           ORDER BY ri.created DESC\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_intents",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "annotations",
+            "name": "slug"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0980b6d75bab64213ae033ff33a0c8a242135aea7330e1a3d2f7522ff8f7672c"
+}

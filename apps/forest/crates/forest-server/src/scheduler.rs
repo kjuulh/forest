@@ -231,6 +231,46 @@ impl SchedulerInner {
             }
         }
 
+        if crate::services::newest_wins::applies_to(
+            &dest.destination_type.organisation,
+            &dest.destination_type.name,
+        ) {
+            match crate::services::newest_wins::retire_if_overtaken(
+                &self.release_event_store,
+                &self.nats,
+                &release_state,
+                &dest.name,
+            )
+            .await
+            {
+                Ok(true) => {
+                    tracing::info!(%release_id, destination = %dest.name, "deploy superseded: a newer release already deployed or queued for this destination");
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(%release_id, "newest-wins check failed, leaving the deploy queued: {e:#}");
+                    return Ok(());
+                }
+            }
+            match crate::services::newest_wins::deploy_in_flight(
+                &self.release_event_store.db,
+                &release_state,
+            )
+            .await
+            {
+                Ok(None) => {}
+                Ok(Some(running)) => {
+                    tracing::info!(%release_id, destination = %dest.name, %running, "deploy waits: release {running} is still deploying to this destination");
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::warn!(%release_id, "in-flight deploy check failed, leaving the deploy queued: {e:#}");
+                    return Ok(());
+                }
+            }
+        }
+
         if crate::services::plan_guard::waits_for_outstanding_plan(
             &self.release_event_store.db,
             &self.nats,

@@ -1,5 +1,6 @@
 use forest_server::destinations::genericv1::STALE_PLAN_PREFIX;
 use forest_server::intent_coordinator;
+use forest_server::services::newest_wins;
 use forest_server::services::plan_guard;
 use forest_server::services::policy::PolicyRegistryState;
 use forest_server::services::release_event_store::ReleaseEventStoreState;
@@ -419,6 +420,130 @@ async fn two_stale_destinations_in_one_attempt_still_replan_once() -> anyhow::Re
     assert_eq!(
         deploy["status"], "PENDING",
         "one attempt, so it replans: {deploy}"
+    );
+    Ok(())
+}
+
+impl Scene {
+    async fn retire_if_overtaken(&self, release_id: Uuid) -> bool {
+        let state = self
+            .f
+            .state
+            .release_event_store()
+            .get_release_state(&release_id)
+            .await
+            .expect("release state");
+        newest_wins::retire_if_overtaken(
+            &self.f.state.release_event_store(),
+            &self.f.state.nats,
+            &state,
+            "grund-pakkelyst-dev",
+        )
+        .await
+        .expect("newest-wins check")
+    }
+
+    async fn state_of(
+        &self,
+        release_id: Uuid,
+    ) -> forest_server::services::release_event_store::ReleaseState {
+        self.f
+            .state
+            .release_event_store()
+            .get_release_state(&release_id)
+            .await
+            .expect("release state")
+    }
+
+    async fn release_status(&self, release_id: Uuid) -> String {
+        sqlx::query_scalar!(
+            "SELECT status FROM release_states WHERE release_id = $1",
+            release_id
+        )
+        .fetch_one(&self.f.db)
+        .await
+        .expect("release status")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_older_deploy_freed_from_a_backlog_never_lands_over_a_newer_one() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (older, older_deploy) = s.planned_and_deploying("parked-by-soak", "QUEUED").await;
+    let (newer, _) = s.planned_and_deploying("deployed-first", "SUCCEEDED").await;
+    let newer_slug = s.slug(newer).await;
+
+    assert!(s.retire_if_overtaken(older_deploy).await);
+    assert_eq!(s.release_status(older_deploy).await, "SUPERSEDED");
+
+    s.evaluate(older).await;
+    let deploy = s.stage(older, "deploy-dev").await;
+    assert_eq!(deploy["status"], "SUPERSEDED", "{deploy}");
+    assert!(
+        deploy["error_message"]
+            .as_str()
+            .is_some_and(|m| m.starts_with(&format!("superseded by release {newer_slug}"))),
+        "{deploy}"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_older_deploy_yields_to_a_newer_one_still_queued() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (_, older_deploy) = s.planned_and_deploying("older-queued", "QUEUED").await;
+    let (_, newer_deploy) = s.planned_and_deploying("newer-queued", "QUEUED").await;
+
+    assert!(
+        !s.retire_if_overtaken(newer_deploy).await,
+        "the newest deploys"
+    );
+    assert!(
+        s.retire_if_overtaken(older_deploy).await,
+        "the older yields to it"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_deploy_is_never_held_back_by_an_older_one_or_a_failed_newer_one()
+-> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (_, _) = s.planned_and_deploying("older-deployed", "SUCCEEDED").await;
+    let (_, current) = s.planned_and_deploying("current", "QUEUED").await;
+    let (_, _) = s.planned_and_deploying("newer-failed", "FAILED").await;
+
+    assert!(!s.retire_if_overtaken(current).await);
+    assert_eq!(s.release_status(current).await, "QUEUED");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deploy_waits_while_another_deploy_runs_on_the_same_stack() -> anyhow::Result<()> {
+    let s = Scene::new().await?;
+    let (_, running) = s.planned_and_deploying("deploying-now", "RUNNING").await;
+    let (_, next) = s.planned_and_deploying("next-in-line", "QUEUED").await;
+
+    assert!(
+        newest_wins::deploy_in_flight(&s.f.db, &s.state_of(next).await)
+            .await?
+            .is_some(),
+        "two deploys never run against one stack at once"
+    );
+    assert!(
+        newest_wins::deploy_in_flight(&s.f.db, &s.state_of(running).await)
+            .await?
+            .is_none()
+    );
+
+    sqlx::query("UPDATE release_states SET status = 'SUCCEEDED' WHERE release_id = $1")
+        .bind(running)
+        .execute(&s.f.db)
+        .await?;
+    assert!(
+        newest_wins::deploy_in_flight(&s.f.db, &s.state_of(next).await)
+            .await?
+            .is_none()
     );
     Ok(())
 }
