@@ -71,8 +71,10 @@ fn is_terminal_release(status: &str) -> bool {
     )
 }
 
+/// A generic destination saves a plan when its provider seals one; until it
+/// does, only plans still in flight hold.
 pub fn saves_plans(type_organisation: &str, type_name: &str) -> bool {
-    type_organisation == "forest" && type_name == "terraform"
+    type_organisation == "forest" && matches!(type_name, "terraform" | "generic")
 }
 
 fn is_approved(config: &StageConfig, state: &StageState) -> bool {
@@ -288,12 +290,26 @@ pub async fn load_candidates(
                       SELECT 1 FROM terraform_plans tp
                       WHERE tp.release_intent_id = ri.id AND tp.destination_id = $3
                         AND tp.created_at >= now() - make_interval(days => $4)
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM release_states sealed
+                      WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
+                        AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
+                        AND sealed.plan_output IS NOT NULL
+                        AND sealed.queued_at >= now() - make_interval(days => $4)
                   ) as "has_saved_plan!",
                   EXISTS (
                       SELECT 1 FROM terraform_plans tp
                       WHERE tp.release_intent_id = ri.id AND tp.destination_id = $3
                         AND tp.created_at >= now() - make_interval(days => $4)
                         AND tp.has_changes IS DISTINCT FROM false
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM release_states sealed
+                      WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
+                        AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
+                        AND sealed.plan_output IS NOT NULL
+                        AND sealed.queued_at >= now() - make_interval(days => $4)
                   ) as "saved_plan_changes!"
            FROM release_intents ri
            LEFT JOIN annotations a ON a.id = ri.annotation_id
@@ -306,6 +322,13 @@ pub async fn load_candidates(
                      SELECT 1 FROM terraform_plans tp
                      WHERE tp.release_intent_id = ri.id AND tp.destination_id = $3
                        AND tp.created_at >= now() - make_interval(days => $4)
+                 )
+                 OR EXISTS (
+                     SELECT 1 FROM release_states sealed
+                     WHERE sealed.release_intent_id = ri.id AND sealed.destination_id = $3
+                       AND sealed.mode = 'plan' AND sealed.status = 'SUCCEEDED'
+                       AND sealed.plan_output IS NOT NULL
+                       AND sealed.queued_at >= now() - make_interval(days => $4)
                  )
                  OR EXISTS (
                      SELECT 1 FROM release_states rs
@@ -1217,8 +1240,9 @@ mod tests {
     }
 
     #[test]
-    fn only_terraform_destinations_save_plans() {
+    fn terraform_and_generic_destinations_save_plans() {
         assert!(saves_plans("forest", "terraform"));
+        assert!(saves_plans("forest", "generic"));
         assert!(!saves_plans("forest", "kubernetes"));
         assert!(!saves_plans("acme", "terraform"));
     }

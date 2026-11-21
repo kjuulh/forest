@@ -62,6 +62,7 @@ fn async_stream(behaviour: String) -> impl Stream<Item = Result<ExecuteEvent, to
                 success: true,
                 error_message: String::new(),
                 plan_output: String::new(),
+                ..Default::default()
             })),
         })
     })

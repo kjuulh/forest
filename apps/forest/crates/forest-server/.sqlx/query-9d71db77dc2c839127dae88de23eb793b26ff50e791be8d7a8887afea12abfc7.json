@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT release_id, stage_id, status, error_message\n         FROM release_states\n         WHERE release_intent_id = $1",
+  "query": "SELECT release_id, stage_id, status, error_message, destination_id\n         FROM release_states\n         WHERE release_intent_id = $1",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "error_message"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "destination_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "destination_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -57,8 +68,9 @@
       false,
       true,
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "179271ee87ff0e81850d13f092d85f6c541374ceeb7faca7ac3e176f49b147b6"
+  "hash": "9d71db77dc2c839127dae88de23eb793b26ff50e791be8d7a8887afea12abfc7"
 }

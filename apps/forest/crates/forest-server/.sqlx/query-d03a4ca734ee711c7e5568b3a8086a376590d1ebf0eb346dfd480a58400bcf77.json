@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET status = 'SUCCEEDED' WHERE release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d03a4ca734ee711c7e5568b3a8086a376590d1ebf0eb346dfd480a58400bcf77"
+}

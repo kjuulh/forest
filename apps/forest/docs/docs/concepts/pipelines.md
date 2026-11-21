@@ -61,6 +61,13 @@ A plan that changes nothing ("No changes.") never holds the destination, nor doe
 
 Either way its saved plan file is deleted. Deploy stages, releases without a plan stage, and destination types that save no plan never wait for this. (Server behaviour after v0.3.18.)
 
+A `forest/generic@1` destination whose provider seals plans (for example the grund provider) is held the same way: its sealed plan counts as a saved plan that changes something, so a release plans only after an earlier release's deploy to that destination has finished. A provider can also report a deploy failure as a **stale plan**: the destination changed after the approved plan. Forest then doesn't fail the pipeline outright:
+
+- if a later release of the same project is still headed for that destination, the deploy stage is **superseded**, with the reason `superseded by release <slug>: <destination> changed after this release planned, and <slug> releases it next`, and the stages after it are superseded too;
+- otherwise the release plans again once: its plan stage runs afresh (and parks for approval again unless it auto-approves), and the deploy stage shows `re-planning: <destination> changed after the approved plan…` until it runs. If the destination moves again, the deploy fails.
+
+So in a burst of releases only the newest deploys, and the older ones say which release replaced them. (Gitea fork server, after dc877a6.)
+
 A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's terraform destinations, and its output starts with a `DESTROY PLAN` banner. It can never be auto-approved. Resources with `prevent_destroy` make it fail, which is the intended outcome for anything holding data.
 
 ## Starting a pipeline

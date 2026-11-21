@@ -16,6 +16,7 @@ use crate::services::release_pipeline::{
     StageStates, StageStatus, find_ready_stages, has_failed_dependency, has_superseded_dependency,
     init_stage_states, is_pipeline_complete,
 };
+use crate::services::stale_plan;
 
 pub struct IntentCoordinator {
     state: State,
@@ -141,7 +142,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         .unwrap_or_else(|| init_stage_states(&stages));
 
     let release_rows = sqlx::query!(
-        "SELECT release_id, stage_id, status, error_message
+        "SELECT release_id, stage_id, status, error_message, destination_id
          FROM release_states
          WHERE release_intent_id = $1",
         intent_id,
@@ -150,16 +151,29 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .await?;
 
     let mut releases_by_stage: HashMap<String, Vec<ReleaseRow>> = HashMap::new();
+    let mut stale_attempts: HashMap<String, usize> = HashMap::new();
     for row in &release_rows {
-        if let Some(ref stage_id) = row.stage_id {
-            releases_by_stage
-                .entry(stage_id.clone())
-                .or_default()
-                .push(ReleaseRow {
-                    status: row.status.clone(),
-                    error_message: row.error_message.clone(),
-                });
+        let Some(ref stage_id) = row.stage_id else {
+            continue;
+        };
+        if row.status == "FAILED" && stale_plan::is_stale(row.error_message.as_deref()) {
+            *stale_attempts.entry(stage_id.clone()).or_default() += 1;
         }
+        let current_attempt = stage_states
+            .get(stage_id)
+            .and_then(|s| s.release_ids.as_ref())
+            .is_none_or(|ids| ids.contains(&row.release_id.to_string()));
+        if !current_attempt {
+            continue;
+        }
+        releases_by_stage
+            .entry(stage_id.clone())
+            .or_default()
+            .push(ReleaseRow {
+                status: row.status.clone(),
+                error_message: row.error_message.clone(),
+                destination_id: row.destination_id,
+            });
     }
 
     let now = chrono::Utc::now();
@@ -202,6 +216,59 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
 
                 let mut updated = current.clone();
                 updated.completed_at = Some(now_str.clone());
+
+                let stale: Vec<&ReleaseRow> = releases
+                    .iter()
+                    .filter(|r| r.status != "SUCCEEDED")
+                    .collect();
+                if outcome_of(releases) == StageOutcome::Failed
+                    && stale
+                        .iter()
+                        .all(|r| stale_plan::is_stale(r.error_message.as_deref()))
+                {
+                    let destination_ids: Vec<Uuid> =
+                        stale.iter().map(|r| r.destination_id).collect();
+                    let destinations =
+                        stale_plan::destination_names(&mut tx, &destination_ids).await?;
+                    let newer = stale_plan::newer_release(
+                        &mut tx,
+                        intent_id,
+                        intent.project_id,
+                        &destination_ids,
+                    )
+                    .await?;
+                    let followup = stale_plan::decide(
+                        &destinations,
+                        newer.as_deref(),
+                        stale_attempts.get(stage_id).copied().unwrap_or(0),
+                        stale_plan::plan_stages_for(&stages, stage_id),
+                    );
+                    tracing::info!(%intent_id, stage_id, ?followup, "coordinator: deploy stage hit a stale plan");
+                    match followup {
+                        stale_plan::Followup::Supersede { reason } => {
+                            updated.status = StageStatus::Superseded;
+                            updated.error_message = Some(reason);
+                            stage_states.insert(stage_id.clone(), updated);
+                            changed = true;
+                            continue;
+                        }
+                        stale_plan::Followup::Replan { plan_stages, note } => {
+                            for plan_stage in plan_stages {
+                                stage_states.insert(plan_stage, StageState::pending());
+                            }
+                            stage_states.insert(
+                                stage_id.clone(),
+                                StageState {
+                                    error_message: Some(note),
+                                    ..StageState::pending()
+                                },
+                            );
+                            changed = true;
+                            continue;
+                        }
+                        stale_plan::Followup::Fail => {}
+                    }
+                }
 
                 match outcome_of(releases) {
                     StageOutcome::Succeeded => updated.status = StageStatus::Succeeded,
@@ -1101,6 +1168,7 @@ async fn resolve_stage_destinations(
 struct ReleaseRow {
     status: String,
     error_message: Option<String>,
+    destination_id: Uuid,
 }
 
 #[cfg(test)]

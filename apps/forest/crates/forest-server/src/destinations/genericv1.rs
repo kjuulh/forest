@@ -28,7 +28,7 @@ use std::{
 
 use anyhow::Context;
 use forest_grpc_interface::provider::{
-    DescribeRequest, DescribeResponse, Destination as ProviderDestination, ExecuteRequest,
+    DescribeRequest, DescribeResponse, Destination as ProviderDestination, ExecuteRequest, Outcome,
     Release as ProviderRelease, ReleaseMode,
     destination_provider_client::DestinationProviderClient, execute_event::Event,
 };
@@ -61,6 +61,27 @@ const PROVIDER_TOKEN: &str = "provider_token";
 
 /// `generic`'s own configuration. The provider's own fields are not knowable
 /// until there is a URL to ask, and come back from `Describe` at creation time.
+const STALE_PLAN_REASON: &str = "stale_plan";
+
+fn outcome_error(outcome: &Outcome) -> Option<String> {
+    if outcome.success {
+        return None;
+    }
+    let reason = if outcome.error_message.is_empty() {
+        "no reason given"
+    } else {
+        outcome.error_message.as_str()
+    };
+    if outcome.failure_reason == STALE_PLAN_REASON {
+        return Some(format!("{STALE_PLAN_PREFIX}{reason}"));
+    }
+    Some(format!("provider reported failure: {reason}"))
+}
+
+/// Prefix of a deploy failure the provider classified as a stale plan. The
+/// intent coordinator matches it to supersede or replan instead of failing.
+pub const STALE_PLAN_PREFIX: &str = "provider reported a stale plan: ";
+
 pub fn metadata_schema() -> Vec<forest_models::MetadataFieldSchema> {
     vec![
             forest_models::MetadataFieldSchema {
@@ -507,16 +528,23 @@ impl GenericV1Destination {
                 && state.approval_status == Some(ApprovalStatus::Approved),
             "generic provider deploy requires an approved plan"
         );
+        let stage_release_ids: Vec<uuid::Uuid> = state
+            .release_ids
+            .iter()
+            .flatten()
+            .filter_map(|id| id.parse().ok())
+            .collect();
         let (plan_id, output): (uuid::Uuid, String) = sqlx::query_as(
             "SELECT release_id, plan_output FROM release_states \
              WHERE release_intent_id = $1 AND destination_id = $2 AND artifact_id = $3 \
                AND stage_id = $4 AND mode = 'plan' AND status = 'SUCCEEDED' \
-               AND plan_output IS NOT NULL",
+               AND plan_output IS NOT NULL AND release_id = ANY($5)",
         )
         .bind(release.release_intent_id)
         .bind(release.destination_id)
         .bind(release.artifact)
         .bind(plan_stage)
+        .bind(&stage_release_ids)
         .fetch_one(db)
         .await
         .context("approved plan has no successful output for this destination and artifact")?;
@@ -691,15 +719,8 @@ impl GenericV1Destination {
             )
         })?;
 
-        if !outcome.success {
-            anyhow::bail!(
-                "provider reported failure: {}",
-                if outcome.error_message.is_empty() {
-                    "no reason given".to_string()
-                } else {
-                    outcome.error_message
-                },
-            );
+        if let Some(error) = outcome_error(&outcome) {
+            anyhow::bail!(error);
         }
 
         if mode == ReleaseMode::Plan {
@@ -867,6 +888,38 @@ mod tests {
         let out = f();
         unsafe { std::env::remove_var(ALLOWED_HOSTS_ENV) };
         out
+    }
+
+    #[test]
+    fn a_provider_classified_stale_plan_is_told_apart_from_other_failures() {
+        let stale = Outcome {
+            error_message: "approved stack version changed; request a new plan".into(),
+            failure_reason: "stale_plan".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            outcome_error(&stale).unwrap(),
+            format!("{STALE_PLAN_PREFIX}approved stack version changed; request a new plan")
+        );
+        let older_provider = Outcome {
+            failure_reason: String::new(),
+            ..stale.clone()
+        };
+        assert_eq!(
+            outcome_error(&older_provider).unwrap(),
+            "provider reported failure: approved stack version changed; request a new plan"
+        );
+        assert_eq!(
+            outcome_error(&Outcome::default()).unwrap(),
+            "provider reported failure: no reason given"
+        );
+        assert!(
+            outcome_error(&Outcome {
+                success: true,
+                ..Default::default()
+            })
+            .is_none()
+        );
     }
 
     #[test]

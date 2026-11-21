@@ -33,5 +33,6 @@ pub mod release_owner;
 pub mod release_pipeline;
 pub mod release_signals;
 pub mod release_token_registry;
+pub mod stale_plan;
 pub mod supersede;
 pub mod users;
