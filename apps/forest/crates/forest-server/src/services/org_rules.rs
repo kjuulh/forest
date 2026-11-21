@@ -141,7 +141,7 @@ impl OrgRuleSetRegistry {
     }
 
     pub async fn create(&self, input: OrgRuleSetInput) -> anyhow::Result<OrgRuleSetRecord> {
-        validate_rule_set_input(&input)?;
+        validate_rule_set_input(&input, &[])?;
 
         let selector = serde_json::to_value(&input.selector).context("serialize selector")?;
         let policies = serde_json::to_value(&input.policies).context("serialize policies")?;
@@ -178,7 +178,19 @@ impl OrgRuleSetRegistry {
     }
 
     pub async fn update(&self, input: OrgRuleSetInput) -> anyhow::Result<OrgRuleSetRecord> {
-        validate_rule_set_input(&input)?;
+        let accepted: Vec<StoredOrgPolicyRule> = sqlx::query_scalar::<_, Value>(
+            "SELECT policies FROM organisation_rule_sets WHERE organisation = $1 AND name = $2",
+        )
+        .bind(&input.organisation)
+        .bind(&input.name)
+        .fetch_optional(&self.db)
+        .await
+        .context("load the rule set's current policies")?
+        .map(serde_json::from_value)
+        .transpose()
+        .context("parse the rule set's current policies")?
+        .unwrap_or_default();
+        validate_rule_set_input(&input, &accepted)?;
 
         let selector = serde_json::to_value(&input.selector).context("serialize selector")?;
         let policies = serde_json::to_value(&input.policies).context("serialize policies")?;
@@ -902,7 +914,10 @@ fn desired_key(
     }
 }
 
-fn validate_rule_set_input(input: &OrgRuleSetInput) -> anyhow::Result<()> {
+fn validate_rule_set_input(
+    input: &OrgRuleSetInput,
+    accepted: &[StoredOrgPolicyRule],
+) -> anyhow::Result<()> {
     require_name("organisation", &input.organisation)?;
     require_name("rule set name", &input.name)?;
     validate_selector(&input.selector)?;
@@ -910,8 +925,13 @@ fn validate_rule_set_input(input: &OrgRuleSetInput) -> anyhow::Result<()> {
     validate_unique_names("policy", input.policies.iter().map(|r| r.name.as_str()))?;
     for rule in &input.policies {
         require_name("policy name", &rule.name)?;
-        validate_policy_config(&rule.policy_type, &rule.config)
-            .with_context(|| format!("invalid policy rule '{}'", rule.name))?;
+        let unchanged = accepted.iter().any(|a| {
+            a.name == rule.name && a.policy_type == rule.policy_type && a.config == rule.config
+        });
+        if !unchanged {
+            validate_policy_config(&rule.policy_type, &rule.config)
+                .with_context(|| format!("invalid policy rule '{}'", rule.name))?;
+        }
     }
 
     validate_unique_names("trigger", input.triggers.iter().map(|r| r.name.as_str()))?;
@@ -1094,6 +1114,49 @@ mod tests {
             project: name.to_string(),
             metadata,
         }
+    }
+
+    #[test]
+    fn an_update_that_leaves_an_accepted_rule_untouched_is_not_refused_for_it() {
+        let self_soak = StoredOrgPolicyRule {
+            name: "soak-dev".into(),
+            enabled: false,
+            policy_type: "soak_time".into(),
+            config: serde_json::json!({
+                "source_environment": "dev", "target_environment": "dev", "duration_seconds": 30
+            }),
+        };
+        let input = OrgRuleSetInput {
+            organisation: "kjuulh".into(),
+            name: "defaults".into(),
+            enabled: true,
+            selector: StoredProjectSelector {
+                name_regex: Some(".*".into()),
+                ..Default::default()
+            },
+            policies: vec![self_soak.clone()],
+            triggers: Vec::new(),
+            release_pipelines: Vec::new(),
+        };
+        assert!(
+            validate_rule_set_input(&input, &[]).is_err(),
+            "a new same-environment soak is refused"
+        );
+        assert!(
+            validate_rule_set_input(&input, std::slice::from_ref(&self_soak)).is_ok(),
+            "an unchanged rule already stored does not block other edits"
+        );
+        let renamed = OrgRuleSetInput {
+            policies: vec![StoredOrgPolicyRule {
+                name: "soak-dev-copy".into(),
+                ..self_soak.clone()
+            }],
+            ..input.clone()
+        };
+        assert!(
+            validate_rule_set_input(&renamed, std::slice::from_ref(&self_soak)).is_err(),
+            "a new rule copying a stored invalid config is still refused"
+        );
     }
 
     #[test]

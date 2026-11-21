@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ri.id, a.slug as \"slug?\",\n                  EXISTS (\n                      SELECT 1 FROM release_states rs\n                      WHERE rs.release_intent_id = ri.id\n                        AND rs.destination_id = $3\n                        AND rs.mode <> 'plan'\n                        AND rs.status = 'SUCCEEDED'\n                  ) as \"deployed!\",\n                  (\n                      SELECT rs.release_id FROM release_states rs\n                      WHERE rs.release_intent_id = ri.id\n                        AND rs.destination_id = $3\n                        AND rs.mode <> 'plan'\n                        AND rs.status = 'QUEUED'\n                      LIMIT 1\n                  ) as \"queued_deploy?\"\n           FROM release_intents ri\n           LEFT JOIN annotations a ON a.id = ri.annotation_id\n           WHERE ri.project_id = $1\n             AND ri.id <> $2\n             AND ri.created > (SELECT created FROM release_intents WHERE id = $2)\n             AND ($4::text IS NULL OR a.ref->>'commit_branch' = $4)\n             AND EXISTS (\n                 SELECT 1 FROM release_states rs\n                 WHERE rs.release_intent_id = ri.id\n                   AND rs.destination_id = $3\n                   AND rs.mode <> 'plan'\n                   AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING', 'SUCCEEDED')\n             )\n           ORDER BY 3 DESC, ri.created DESC\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_intents",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "annotations",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "deployed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "queued_deploy?",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ae550b9453c3b321b04464e219c7eafcadb3c005d716860fe529e9e2be1e9feb"
+}

@@ -235,19 +235,39 @@ impl SchedulerInner {
             &dest.destination_type.organisation,
             &dest.destination_type.name,
         ) {
-            match crate::services::newest_wins::retire_if_overtaken(
-                &self.release_event_store,
-                &self.nats,
-                &release_state,
-                &dest.name,
-            )
-            .await
+            let same_branch_only = match self
+                .policy_registry
+                .supersede_pending_for_environment(&release_state.project_id, &dest.environment)
+                .await
             {
-                Ok(true) => {
-                    tracing::info!(%release_id, destination = %dest.name, "deploy superseded: a newer release already deployed or queued for this destination");
+                Ok(policy) => policy.is_some_and(|(_, config)| config.same_branch_only),
+                Err(e) => {
+                    tracing::warn!(%release_id, "supersede_pending lookup failed; only a same-branch release may overtake: {e:#}");
+                    true
+                }
+            };
+            let overtaken = if same_branch_only && branch.is_none() {
+                Ok(crate::services::newest_wins::Overtaken::No)
+            } else {
+                crate::services::newest_wins::retire_if_overtaken(
+                    &self.release_event_store,
+                    &self.nats,
+                    &release_state,
+                    &dest.name,
+                    branch.as_deref().filter(|_| same_branch_only),
+                )
+                .await
+            };
+            match overtaken {
+                Ok(crate::services::newest_wins::Overtaken::Superseded) => {
+                    tracing::info!(%release_id, destination = %dest.name, "deploy superseded: a newer release is already deployed to this destination");
                     return Ok(());
                 }
-                Ok(false) => {}
+                Ok(crate::services::newest_wins::Overtaken::WaitsFor(newer)) => {
+                    tracing::info!(%release_id, destination = %dest.name, %newer, "deploy waits: newer release {newer} is queued or deploying to this destination");
+                    return Ok(());
+                }
+                Ok(crate::services::newest_wins::Overtaken::No) => {}
                 Err(e) => {
                     tracing::warn!(%release_id, "newest-wins check failed, leaving the deploy queued: {e:#}");
                     return Ok(());
@@ -262,6 +282,14 @@ impl SchedulerInner {
                 Ok(None) => {}
                 Ok(Some(running)) => {
                     tracing::info!(%release_id, destination = %dest.name, %running, "deploy waits: release {running} is still deploying to this destination");
+                    if let Err(e) = crate::services::newest_wins::move_to_back_of_sweep(
+                        &self.release_event_store.db,
+                        release_id,
+                    )
+                    .await
+                    {
+                        tracing::warn!(%release_id, "could not requeue the waiting deploy: {e:#}");
+                    }
                     return Ok(());
                 }
                 Err(e) => {
