@@ -38,7 +38,7 @@
     var disposed = false;
     var pageActive = true;
     var onScreen = true;
-    var mode = "active";
+    var mode = defaultMode();
     var camera = { x: 0, y: 0, zoom: 1 };
     var nodes = [];
     var selected = null;
@@ -50,6 +50,8 @@
     var suppressClick = false;
     var actions = [];
     var planText;
+    var planRequest = null;
+    var fetchedPlan = null;
     var resize = null;
     var intersection = null;
     var inspectorVisible = root.dataset.inspector === "true";
@@ -64,24 +66,38 @@
       target.addEventListener(event, handler, Object.assign({}, options, { signal: lifetime.signal }));
     }
 
+    function globalDesktop() {
+      return root.id === "release-environments" && !window.matchMedia("(max-width: 60rem)").matches;
+    }
+
+    function defaultMode() {
+      return globalDesktop() ? "fit" : "active";
+    }
+
+    function nodeKey(node) {
+      return node.dataset.nodeStableKey || node.dataset.nodeKey;
+    }
+
     function findNode(key) {
-      return nodes.find(function (node) { return node.dataset.nodeKey === key; });
+      return nodes.find(function (node) { return nodeKey(node) === key; });
     }
 
     function activeNode() {
-      return nodes.find(function (node) { return node.dataset.state === "running"; })
-        || nodes.find(function (node) { return node.dataset.state === "waiting"; })
-        || nodes.find(function (node) { return node.dataset.state === "next"; })
-        || nodes.find(function (node) { return node.dataset.state === "failed"; })
-        || nodes[0];
+      for (var state of ["running", "waiting", "queued", "next", "failed", "blocked"]) {
+        var node = nodes.find(function (candidate) { return candidate.dataset.state === state && candidate.dataset.nodeKind !== "environment"; })
+          || nodes.find(function (candidate) { return candidate.dataset.state === state; });
+        if (node) return node;
+      }
+      return nodes[0];
     }
 
     function detailLink(label, node) {
-      if (!root.dataset.detailUrl) return null;
-      var destination = new URL(root.dataset.detailUrl, location.href);
-      if (destination.origin !== location.origin) return null;
       var href = node && node.getAttribute("href");
-      if (href && href.charAt(0) === "#") destination.hash = href;
+      var target = root.dataset.detailUrl || (href && href.charAt(0) !== "#" ? href : "");
+      if (!target) return null;
+      var destination = new URL(target, location.href);
+      if (destination.origin !== location.origin) return null;
+      if (root.dataset.detailUrl && href && href.charAt(0) === "#") destination.hash = href;
       var link = document.createElement("a");
       link.href = destination.href;
       link.textContent = label;
@@ -129,21 +145,87 @@
       if (approvalLink) container.append(approvalLink);
     }
 
+    function stopPlan() {
+      if (planRequest) {
+        clearTimeout(planRequest.deadline);
+        planRequest.controller.abort();
+        planRequest = null;
+      }
+    }
+
+    function showPlan(panel, output) {
+      var pre = document.createElement("pre");
+      pre.textContent = output || "No plan output for this stage.";
+      panel.replaceChildren(pre);
+    }
+
+    function loadPlan(panel, template) {
+      var index = template.dataset.graphPlan;
+      var stage = nodes.find(function (node) { return node.dataset.planIndex === index; });
+      var key = JSON.stringify([root.dataset.releaseIntentId, template.dataset.planStage, stage && stage.dataset.state]);
+      if (fetchedPlan && fetchedPlan.key === key) {
+        if (planText !== key) showPlan(panel, fetchedPlan.output);
+        planText = key;
+        return;
+      }
+      if (planRequest && planRequest.key === key) return;
+      stopPlan();
+      fetchedPlan = null;
+      if (document.hidden) return;
+      var url = new URL(root.dataset.planOutputUrl + encodeURIComponent(template.dataset.planStage) + "/output", location.href);
+      if (url.origin !== location.origin) return;
+      url.searchParams.set("release_intent_id", root.dataset.releaseIntentId);
+      var pending = { key: key, controller: new AbortController(), timedOut: false, deadline: null };
+      pending.deadline = setTimeout(function () {
+        pending.timedOut = true;
+        pending.controller.abort();
+      }, 10000);
+      planRequest = pending;
+      panel.textContent = "Loading plan output…";
+      fetch(url.href, { credentials: "same-origin", cache: "no-store", redirect: "error", signal: pending.controller.signal })
+        .then(function (response) {
+          if (!response.ok) throw new Error("Plan request failed");
+          return response.json();
+        })
+        .then(function (body) {
+          if (!valid() || planRequest !== pending || tab !== "plan") return;
+          if (typeof body.plan_output !== "string") throw new Error("Plan output missing");
+          var terminal = ["SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED", "SKIPPED", "SUPERSEDED"].includes(String(body.status).toUpperCase());
+          fetchedPlan = { key: key, output: body.plan_output, terminal: terminal };
+          showPlan(panel, body.plan_output);
+          planText = key;
+        })
+        .catch(function () {
+          if (valid() && planRequest === pending && tab === "plan" && (!pending.controller.signal.aborted || pending.timedOut)) {
+            panel.textContent = "Plan output failed to load. Reopen Plan to try again.";
+            planText = undefined;
+          }
+        })
+        .finally(function () {
+          clearTimeout(pending.deadline);
+          if (planRequest === pending) planRequest = null;
+        });
+    }
+
     function renderPlan(node) {
+      var panel = root.querySelector('[data-graph-panel="plan"]');
+      if (!panel) return;
       var index = node ? node.dataset.planIndex : "";
       var template = index !== "" && root.querySelector('template[data-graph-plan="' + index + '"]');
-      var link = !template && overview && detailLink("View plan on release", node);
-      var output = template ? template.content.textContent : link ? link.href : null;
+      var embedded = template && template.content.textContent;
+      if (overview && template && template.dataset.planStage && root.dataset.planOutputUrl && root.dataset.releaseIntentId) {
+        if (tab === "plan") loadPlan(panel, template);
+        else stopPlan();
+        return;
+      }
+      stopPlan();
+      var link = !embedded && overview && detailLink("View plan on release", node);
+      var output = embedded || (link ? link.href : null);
       if (output === planText) return;
       planText = output;
-      var panel = root.querySelector('[data-graph-panel="plan"]');
-      if (template) panel.replaceChildren(template.content.cloneNode(true));
+      if (embedded) panel.replaceChildren(template.content.cloneNode(true));
       else if (link) panel.replaceChildren(link);
-      else {
-        var empty = document.createElement("p");
-        empty.textContent = overview ? "Open the release to view plan output." : "No plan output for this node.";
-        panel.replaceChildren(empty);
-      }
+      else panel.textContent = "No plan output for this node.";
     }
 
     function inspect(node, pin) {
@@ -159,7 +241,7 @@
         renderActions(null);
         return;
       }
-      selected = node.dataset.nodeKey;
+      selected = nodeKey(node);
       if (pin) {
         pinned = true;
         inspector.open = true;
@@ -178,7 +260,9 @@
       root.querySelector("[data-graph-inspector-state]").dataset.state = data.state;
       root.querySelector("[data-graph-selection-mode]").textContent = pinned ? "Pinned" : "Preview";
       root.querySelector('[data-graph-action="unpin"]').hidden = !pinned;
-      root.querySelector('[data-graph-action="view-stage"]').hidden = !targetFor(node) && !(overview && root.dataset.detailUrl);
+      var view = root.querySelector('[data-graph-action="view-stage"]');
+      view.hidden = !targetFor(node) && !(overview && detailLink("View details", node));
+      view.textContent = overview ? (root.dataset.detailUrl ? "View release" : "View details") : "View stage";
       nodes.forEach(function (candidate) {
         candidate.setAttribute("aria-pressed", String(pinned && candidate === node));
       });
@@ -202,6 +286,8 @@
     }
 
     function selectTab(value) {
+      if (value !== "plan") stopPlan();
+      else if (fetchedPlan && !fetchedPlan.terminal) fetchedPlan = null;
       if (!root.querySelector('[data-graph-tab="' + value + '"]')) value = "details";
       tab = value;
       root.querySelectorAll("[data-graph-tab]").forEach(function (button) {
@@ -212,6 +298,7 @@
       root.querySelectorAll("[data-graph-panel]").forEach(function (panel) {
         panel.hidden = panel.dataset.graphPanel !== tab;
       });
+      if (tab === "plan") renderPlan(findNode(selected));
       if (tab === "logs") mountLogs();
     }
 
@@ -230,15 +317,20 @@
     function bounds(list) {
       var boxes = list.map(function (node) {
         var card = node.querySelector(".release-graph-card");
-        return { x: Number(card.getAttribute("x")), y: Number(card.getAttribute("y")) };
+        return {
+          x: Number(card.getAttribute("x")),
+          y: Number(card.getAttribute("y")),
+          width: Number(card.getAttribute("width")),
+          height: Number(card.getAttribute("height"))
+        };
       });
       if (!boxes.length) return { x: 0, y: 0, width: Number(svg.dataset.graphWidth) || 272, height: Number(svg.dataset.graphHeight) || 168 };
       var left = Math.min.apply(null, boxes.map(function (box) { return box.x; }));
       var top = Math.min.apply(null, boxes.map(function (box) { return box.y; }));
       return {
         x: left, y: top,
-        width: Math.max.apply(null, boxes.map(function (box) { return box.x + 272; })) - left,
-        height: Math.max.apply(null, boxes.map(function (box) { return box.y + 172; })) - top
+        width: Math.max.apply(null, boxes.map(function (box) { return box.x + box.width; })) - left,
+        height: Math.max.apply(null, boxes.map(function (box) { return box.y + box.height; })) - top
       };
     }
 
@@ -246,11 +338,22 @@
       if (!svg || !viewport.clientWidth || !viewport.clientHeight) return;
       var list = nodes;
       var active = activeNode();
-      var readable = mode === "active";
-      if (readable && active) {
-        var neighborhood = new Set([active.dataset.nodeId]);
-        svg.querySelectorAll("[data-from][data-to]").forEach(function (edge) {
-          if (edge.dataset.from === active.dataset.nodeId || edge.dataset.to === active.dataset.nodeId) {
+      var wholeEnvironment = globalDesktop();
+      var readable = mode === "active" && active && (wholeEnvironment || ["running", "waiting", "queued", "next", "failed", "blocked"].includes(active.dataset.state));
+      if (readable) {
+        var focalId = active.dataset.nodeId;
+        var edges = svg.querySelectorAll("[data-from][data-to]");
+        if (wholeEnvironment && active.dataset.nodeKind !== "environment") {
+          var environments = new Set(nodes.filter(function (node) {
+            return node.dataset.nodeKind === "environment";
+          }).map(function (node) { return node.dataset.nodeId; }));
+          edges.forEach(function (edge) {
+            if (edge.dataset.to === active.dataset.nodeId && environments.has(edge.dataset.from)) focalId = edge.dataset.from;
+          });
+        }
+        var neighborhood = new Set([focalId]);
+        edges.forEach(function (edge) {
+          if (edge.dataset.from === focalId || edge.dataset.to === focalId) {
             neighborhood.add(edge.dataset.from);
             neighborhood.add(edge.dataset.to);
           }
@@ -261,12 +364,12 @@
         ? { x: 0, y: 0, width: Number(svg.dataset.graphWidth) || 272, height: Number(svg.dataset.graphHeight) || 168 }
         : bounds(list);
       var zoom = Math.min((viewport.clientWidth - 64) / box.width, (viewport.clientHeight - 80) / box.height, readable ? 1.2 : 1);
-      // Wide fan-outs must not shrink active work below a readable size.
-      if (readable && active && zoom < 0.65) {
+      // Only narrow canvases may crop a wide fan-out to keep active work readable.
+      if (readable && !wholeEnvironment && zoom < 0.65) {
         box = bounds([active]);
         zoom = Math.min((viewport.clientWidth - 48) / box.width, (viewport.clientHeight - 64) / box.height, 1);
       }
-      camera.zoom = Math.max(mode === "fit" ? 0.001 : 0.1, Math.min(2.5, zoom));
+      camera.zoom = Math.max(mode === "fit" || wholeEnvironment ? 0.001 : 0.1, Math.min(2.5, zoom));
       camera.x = box.x + box.width / 2 - viewport.clientWidth / camera.zoom / 2;
       camera.y = box.y + box.height / 2 - viewport.clientHeight / camera.zoom / 2;
       applyCamera();
@@ -290,13 +393,15 @@
       if (!valid() || !nextRoot || nextRoot.id !== root.id || !nextRoot.hasAttribute("data-release-graph")) return false;
       var nextSvg = nextRoot.querySelector(".release-graph-svg");
       if (!nextSvg) return false;
-      var sameRelease = root.dataset.releaseKey === nextRoot.dataset.releaseKey;
+      var sameRelease = root.dataset.releaseKey === nextRoot.dataset.releaseKey && root.dataset.releaseIntentId === nextRoot.dataset.releaseIntentId;
       var active = document.activeElement;
       var focusWithin = root.contains(active);
       var focusedSubmit = active && active.getAttribute("data-graph-submit");
       var focusedNode = active && active.closest("[data-node-id]");
-      var focusedKey = focusedNode && focusedNode.dataset.nodeKey;
+      var focusedKey = focusedNode && nodeKey(focusedNode);
       // The connected inspector owns log streams, focus and fullscreen state.
+      stopPlan();
+      if (!sameRelease || (fetchedPlan && !fetchedPlan.terminal)) fetchedPlan = null;
       svg.replaceWith(nextSvg);
       svg = nextSvg;
       nodes = Array.from(svg.querySelectorAll("[data-node-id]"));
@@ -304,7 +409,7 @@
       ["data-graph-count", "data-graph-release-context"].forEach(function (attribute) {
         root.querySelector("[" + attribute + "]").textContent = nextRoot.querySelector("[" + attribute + "]").textContent;
       });
-      ["releaseKey", "context", "compact", "poll", "detailUrl", "logsUrl", "live", "hasLogs"].forEach(function (key) {
+      ["releaseKey", "context", "compact", "poll", "detailUrl", "logsUrl", "planOutputUrl", "releaseIntentId", "live", "hasLogs"].forEach(function (key) {
         root.dataset[key] = nextRoot.dataset[key];
       });
       overview = root.dataset.context === "overview";
@@ -327,7 +432,7 @@
         pinned = false;
         tab = "details";
         planText = undefined;
-        mode = "active";
+        mode = defaultMode();
         var mountedLogs = root.querySelector('[data-graph-panel="logs"]');
         if (mountedLogs) mountedLogs.replaceChildren();
       }
@@ -337,7 +442,7 @@
       selectTab(tab);
       if (sameRelease && mode === "manual") applyCamera();
       else fit();
-      if (focusedKey && focusWithin) (findNode(focusedKey) || viewport).focus({ preventScroll: true });
+      if (focusedKey && focusWithin) (findNode(focusedKey) || remembered || activeNode() || viewport).focus({ preventScroll: true });
       else if (focusWithin && !active.isConnected) {
         var restored = focusedSubmit !== null && root.querySelector('[data-graph-submit="' + focusedSubmit + '"]');
         (restored || viewport).focus({ preventScroll: true });
@@ -367,6 +472,7 @@
           compactInspectorVisible = inspectorVisible;
           setInspector(true);
         } else setInspector(compactInspectorVisible);
+        root.dispatchEvent(new Event("release-graph:fullscreen", { bubbles: true }));
       }
       measure();
     }
@@ -415,11 +521,11 @@
     }
     listen(root, "focusin", function (event) {
       var node = event.target.closest("[data-node-id]");
-      if (node && !pinned && selected !== node.dataset.nodeKey) inspect(node, false);
+      if (node && !pinned && selected !== nodeKey(node)) inspect(node, false);
     });
     listen(root, "pointerover", function (event) {
       var node = event.target.closest("[data-node-id]");
-      if (node && !pinned && !drag && selected !== node.dataset.nodeKey) inspect(node, false);
+      if (node && !pinned && !drag && selected !== nodeKey(node)) inspect(node, false);
     });
     listen(root, "click", function (event) {
       var node = event.target.closest("[data-node-id]");
@@ -545,7 +651,7 @@
 
     function schedule() {
       clearTimeout(timer);
-      if (valid() && root.dataset.poll !== "false" && !request && pageActive && onScreen && !document.hidden && root.dataset.live === "true") timer = setTimeout(refresh, 5000);
+      if (valid() && root.dataset.poll !== "false" && !request && pageActive && onScreen && !document.hidden && root.dataset.live === "true") timer = setTimeout(refresh, 10000);
     }
 
     async function refresh() {
@@ -579,7 +685,7 @@
       } catch (error) {
         if (valid() && !document.hidden && !pending.signal.aborted) {
           status.dataset.error = "true";
-          status.textContent = "Live update failed. Showing the last received graph; retrying in 5 seconds.";
+          status.textContent = "Live update failed. Showing the last received graph; retrying in 10 seconds.";
         }
       } finally {
         if (request === pending) request = null;
@@ -590,6 +696,8 @@
     function destroy() {
       disposed = true;
       stop();
+      stopPlan();
+      fetchedPlan = null;
       lifetime.abort();
       if (resize) resize.disconnect();
       if (intersection) intersection.disconnect();
@@ -597,10 +705,18 @@
     }
 
     listen(document, "visibilitychange", function () {
-      if (document.hidden) stop();
-      else schedule();
+      if (document.hidden) {
+        stop();
+        stopPlan();
+      } else {
+        schedule();
+        if (tab === "plan") {
+          var box = root.getBoundingClientRect();
+          if (box.bottom > 0 && box.top < window.innerHeight) renderPlan(findNode(selected));
+        }
+      }
     });
-    listen(window, "pagehide", function () { pageActive = false; stop(); });
+    listen(window, "pagehide", function () { pageActive = false; stop(); stopPlan(); });
     listen(window, "pageshow", function () { pageActive = true; schedule(); });
     nodes = Array.from(root.querySelectorAll("[data-node-id]"));
     inspect(activeNode(), false);

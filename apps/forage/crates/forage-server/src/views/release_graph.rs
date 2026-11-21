@@ -1,7 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write;
 
-use forage_core::platform::{ArtifactDestination, PipelineRunStageState, ReleaseIntentState};
+use forage_core::platform::{
+    Artifact, ArtifactDestination, DeploymentStates, Environment, PipelineRunStageState,
+    ReleaseIntentState,
+};
 
 use super::release::PolicyCheck;
 
@@ -81,6 +84,7 @@ impl NodeState {
 pub struct ReleaseGraph {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    pub trunks: Vec<GraphTrunk>,
     pub width: usize,
     pub height: usize,
     pub live: bool,
@@ -89,11 +93,71 @@ pub struct ReleaseGraph {
 }
 
 pub struct GraphPlan {
+    pub stage_id: String,
     pub output: String,
+}
+
+pub struct GraphTrunk {
+    pub path: String,
+    pub state: NodeState,
+}
+
+#[derive(Clone, Copy)]
+struct EnvironmentOperation<'a> {
+    row: &'a forage_core::platform::DestinationState,
+    artifact: Option<&'a Artifact>,
+    project: Option<&'a str>,
+    state: NodeState,
+    summary: &'static str,
+    plan: bool,
+    deploy: bool,
+}
+
+impl EnvironmentOperation<'_> {
+    fn reference(&self) -> &str {
+        self.artifact
+            .map(|artifact| {
+                artifact
+                    .git_ref
+                    .as_ref()
+                    .and_then(|git| git.version.as_deref())
+                    .filter(|version| !version.trim().is_empty())
+                    .unwrap_or(&artifact.slug)
+            })
+            .unwrap_or_else(|| self.row.artifact_id.as_deref().unwrap_or("Unknown release"))
+    }
+
+    fn incoming(&self) -> bool {
+        matches!(
+            self.state,
+            NodeState::Running
+                | NodeState::Waiting
+                | NodeState::Queued
+                | NodeState::Next
+                | NodeState::Blocked
+        )
+    }
+
+    fn latest_at(&self) -> &str {
+        self.row
+            .completed_at
+            .as_deref()
+            .or(self.row.started_at.as_deref())
+            .or(self.row.queued_at.as_deref())
+            .unwrap_or("")
+    }
+}
+
+struct EnvironmentBand {
+    index: usize,
+    total: usize,
+    changing: usize,
+    first: Option<usize>,
 }
 
 pub struct GraphNode {
     pub id: String,
+    pub key: String,
     pub label: String,
     pub context: String,
     pub state: NodeState,
@@ -108,6 +172,12 @@ pub struct GraphNode {
     pub plan_index: Option<usize>,
     pub x: usize,
     pub y: usize,
+}
+
+impl GraphNode {
+    pub fn card_height(&self) -> usize {
+        if self.kind == "environment" { 104 } else { 168 }
+    }
 }
 
 pub struct GraphEdge {
@@ -210,6 +280,406 @@ fn elapsed(started: Option<&str>, completed: Option<&str>) -> Option<i64> {
 }
 
 impl ReleaseGraph {
+    /// Current environment state only; historical pipeline runs never determine these nodes.
+    pub fn environments<'a>(
+        org: &str,
+        environments: &[Environment],
+        current: &'a DeploymentStates,
+        artifacts: impl IntoIterator<Item = (&'a str, &'a Artifact)>,
+        intents: &[ReleaseIntentState],
+    ) -> Self {
+        use std::collections::BTreeMap;
+
+        let mut graph = Self::default();
+        let artifacts: HashMap<_, _> = artifacts
+            .into_iter()
+            .map(|(project, artifact)| (artifact.artifact_id.as_str(), (project, artifact)))
+            .collect();
+        let mut operation_by_release = HashMap::new();
+        for intent in intents {
+            let stages: HashMap<_, _> = intent
+                .stages
+                .iter()
+                .map(|stage| (stage.stage_id.as_str(), stage.stage_type.as_str()))
+                .collect();
+            for stage in &intent.stages {
+                for release_id in &stage.release_ids {
+                    operation_by_release.insert(
+                        release_id.as_str(),
+                        (intent, Some(stage.stage_type.as_str())),
+                    );
+                }
+            }
+            for step in &intent.steps {
+                let operation = step
+                    .stage_id
+                    .as_deref()
+                    .and_then(|id| stages.get(id).copied());
+                if operation.is_some() {
+                    operation_by_release.insert(step.release_id.as_str(), (intent, operation));
+                } else {
+                    operation_by_release
+                        .entry(step.release_id.as_str())
+                        .or_insert((intent, None));
+                }
+            }
+        }
+        let mut destinations: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (_, artifact) in artifacts.values() {
+            for destination in &artifact.destinations {
+                destinations
+                    .entry((destination.environment.as_str(), destination.name.as_str()))
+                    .or_default();
+            }
+        }
+        for destination in &current.destinations {
+            destinations
+                .entry((
+                    destination.environment.as_str(),
+                    destination.destination_name.as_str(),
+                ))
+                .or_default()
+                .push(destination);
+        }
+        let mut ordered_environments: Vec<_> = environments.iter().collect();
+        ordered_environments.sort_by_key(|environment| environment.sort_order);
+        let mut environment_nodes = HashMap::new();
+        for environment in ordered_environments
+            .iter()
+            .map(|environment| environment.name.as_str())
+            .chain(destinations.keys().map(|(environment, _)| *environment))
+        {
+            if environment_nodes.contains_key(environment) {
+                continue;
+            }
+            let index = graph.push(
+                if environment.is_empty() {
+                    "Unspecified environment".into()
+                } else {
+                    environment.into()
+                },
+                "Environment".into(),
+                NodeState::Unknown,
+                "No current destination state reported".into(),
+                String::new(),
+                format!("/orgs/{}/destinations", forage_ui::format::urlencode(org)),
+            );
+            graph.nodes[index].kind = "environment";
+            graph.nodes[index].environment = environment.into();
+            graph.nodes[index].key = format!("environment:{environment}");
+            environment_nodes.insert(
+                environment,
+                EnvironmentBand {
+                    index,
+                    total: 0,
+                    changing: 0,
+                    first: None,
+                },
+            );
+        }
+        let priority = |state| match state {
+            NodeState::Failed => 0,
+            NodeState::Blocked => 1,
+            NodeState::Running => 2,
+            NodeState::Waiting => 3,
+            NodeState::Queued => 4,
+            NodeState::Next => 5,
+            NodeState::Unknown => 6,
+            NodeState::Cancelled => 7,
+            NodeState::Superseded => 8,
+            NodeState::Skipped => 9,
+            NodeState::Done => 10,
+        };
+        let mut links = Vec::with_capacity(destinations.len());
+        for ((environment, name), rows) in destinations {
+            let mut primary: Option<EnvironmentOperation<'_>> = None;
+            let mut completed: Option<EnvironmentOperation<'_>> = None;
+            let mut incoming: Option<EnvironmentOperation<'_>> = None;
+            let mut incoming_count = 0;
+            let mut details = String::new();
+            for row in rows {
+                let execution = row
+                    .release_id
+                    .as_deref()
+                    .and_then(|id| operation_by_release.get(id))
+                    .filter(|(intent, _)| {
+                        row.artifact_id
+                            .as_deref()
+                            .is_none_or(|id| id == intent.artifact_id)
+                    });
+                let intent = execution.map(|(intent, _)| *intent);
+                let artifact_id = row
+                    .artifact_id
+                    .as_deref()
+                    .or_else(|| intent.map(|intent| intent.artifact_id.as_str()));
+                let artifact = artifact_id.and_then(|id| artifacts.get(id).copied());
+                let mut state = NodeState::parse(row.status.as_deref().unwrap_or(""));
+                if matches!(state, NodeState::Running | NodeState::Queued)
+                    && row
+                        .error_message
+                        .as_deref()
+                        .is_some_and(|reason| !reason.trim().is_empty())
+                {
+                    state = NodeState::Waiting;
+                }
+                let operation = execution.and_then(|(_, operation)| *operation);
+                let operation = EnvironmentOperation {
+                    row,
+                    artifact: artifact.map(|(_, artifact)| artifact),
+                    project: artifact
+                        .map(|(project, _)| project)
+                        .or_else(|| intent.map(|intent| intent.project.as_str())),
+                    state,
+                    plan: operation == Some("plan"),
+                    deploy: operation == Some("deploy"),
+                    summary: match operation {
+                        Some("plan") if state == NodeState::Done => "Plan complete · not deployed",
+                        Some("plan") => "Plan run · not deployed",
+                        Some("deploy") if state == NodeState::Done => "Deploy complete",
+                        Some("deploy") => "Deploy run",
+                        Some(_) => "Current operation",
+                        None => "Operation provenance unavailable",
+                    },
+                };
+                if primary
+                    .is_none_or(|previous| priority(operation.state) < priority(previous.state))
+                {
+                    primary = Some(operation);
+                }
+                if operation.state.terminal()
+                    && completed.is_none_or(|previous| operation.latest_at() > previous.latest_at())
+                {
+                    completed = Some(operation);
+                }
+                if operation.incoming() {
+                    incoming_count += 1;
+                    if incoming
+                        .is_none_or(|previous| priority(operation.state) < priority(previous.state))
+                    {
+                        incoming = Some(operation);
+                    }
+                }
+                graph.live |= !operation.state.terminal();
+                let _ = writeln!(
+                    details,
+                    "Execution: {} · {} · {}",
+                    operation
+                        .row
+                        .release_id
+                        .as_deref()
+                        .unwrap_or("Unknown execution"),
+                    operation.summary,
+                    operation.state.label()
+                );
+                if let Some(artifact) = operation.artifact {
+                    let _ = writeln!(
+                        details,
+                        "{} · {} · {}",
+                        operation.project.unwrap_or("Unknown project"),
+                        artifact.slug,
+                        artifact.context.title
+                    );
+                } else {
+                    let _ = writeln!(
+                        details,
+                        "Release provenance unavailable · {}",
+                        operation.reference()
+                    );
+                }
+                for (label, value) in [
+                    ("Queued", &operation.row.queued_at),
+                    ("Started", &operation.row.started_at),
+                    ("Completed", &operation.row.completed_at),
+                ] {
+                    if let Some(value) = value {
+                        let _ = writeln!(details, "{label}: {value}");
+                    }
+                }
+                if let Some(reason) = &operation.row.error_message {
+                    let _ = writeln!(details, "{reason}");
+                }
+                details.push('\n');
+            }
+            let summary = if let (Some(_), Some(completed)) = (incoming, completed) {
+                if completed.plan && completed.state == NodeState::Done {
+                    format!("Plan complete · not deployed: {}", completed.reference())
+                } else if completed.deploy && completed.state == NodeState::Done {
+                    format!(
+                        "Current: {} · {}",
+                        completed.reference(),
+                        completed.state.label()
+                    )
+                } else {
+                    format!(
+                        "Last op: {} · {}",
+                        completed.reference(),
+                        completed.state.label()
+                    )
+                }
+            } else {
+                primary
+                    .map(|operation| operation.summary.to_owned())
+                    .unwrap_or_else(|| "Operation provenance unavailable".into())
+            };
+            let mut preview = if let Some(incoming) = incoming {
+                format!(
+                    "Incoming: {} · {}",
+                    incoming.reference(),
+                    incoming.state.label()
+                )
+            } else {
+                primary
+                    .map(|operation| {
+                        operation
+                            .row
+                            .error_message
+                            .as_deref()
+                            .filter(|reason| !reason.trim().is_empty())
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "Release: {} · {}",
+                                    operation.project.unwrap_or("Unknown project"),
+                                    operation.reference()
+                                )
+                            })
+                    })
+                    .unwrap_or_else(|| "Release provenance unavailable".into())
+            };
+            if incoming_count > 1 {
+                let _ = write!(preview, " (+{})", incoming_count - 1);
+            }
+            let state = primary
+                .map(|operation| operation.state)
+                .unwrap_or(NodeState::Unknown);
+            let reason = primary
+                .map(|operation| operation.row.error_message.clone().unwrap_or_default())
+                .unwrap_or_else(|| "No current destination state reported".into());
+            let context = primary
+                .and_then(|operation| {
+                    operation
+                        .artifact
+                        .map(|artifact| (operation.project.unwrap_or("Unknown project"), artifact))
+                })
+                .map(|(project, artifact)| {
+                    format!("{project} · {} · {}", artifact.slug, artifact.context.title)
+                })
+                .unwrap_or_else(|| "Release provenance unavailable".into());
+            let href = primary
+                .and_then(|operation| operation.artifact.zip(operation.project))
+                .map(|(artifact, project)| {
+                    super::release::release_href(org, project, &artifact.slug)
+                })
+                .unwrap_or_else(|| {
+                    format!(
+                        "/orgs/{}/destinations/detail?name={}",
+                        forage_ui::format::urlencode(org),
+                        forage_ui::format::urlencode(name)
+                    )
+                });
+            let index = graph.push(name.into(), context, state, reason, details, href);
+            graph.nodes[index].key = format!("target:{}:{environment}{name}", environment.len());
+            graph.nodes[index].environment = environment.into();
+            graph.nodes[index].summary = summary;
+            graph.nodes[index].preview = preview;
+            if let Some(operation) = primary {
+                graph.nodes[index].timestamp = timestamp(
+                    operation.row.queued_at.as_deref(),
+                    operation.row.started_at.as_deref(),
+                    operation.row.completed_at.as_deref(),
+                );
+            }
+            let band = environment_nodes.get_mut(environment).unwrap();
+            if band.total == 0 || priority(state) < priority(graph.nodes[band.index].state) {
+                graph.nodes[band.index].state = state;
+            }
+            band.first.get_or_insert(index);
+            band.total += 1;
+            band.changing += usize::from(incoming_count > 0);
+            links.push((band.index, index));
+        }
+        for band in environment_nodes.values() {
+            if band.total > 0 {
+                graph.nodes[band.index].reason.clear();
+                graph.nodes[band.index].summary =
+                    format!("{} destinations · {} changing", band.total, band.changing);
+            }
+        }
+        graph.layout_environments(&links, &mut environment_nodes);
+        graph
+    }
+
+    fn layout_environments(
+        &mut self,
+        links: &[(usize, usize)],
+        bands: &mut HashMap<&str, EnvironmentBand>,
+    ) {
+        let mut top = 32;
+        for root in 0..bands.len() {
+            let band = bands
+                .get_mut(self.nodes[root].environment.as_str())
+                .unwrap();
+            let columns = band.total.clamp(1, 4);
+            let rows = band.total.max(1).div_ceil(4);
+            let width = columns * 336 - 64;
+            self.nodes[root].x = 32 + (width - 272) / 2;
+            self.nodes[root].y = top;
+            if let Some(first) = band.first {
+                for (offset, node) in self.nodes[first..first + band.total].iter_mut().enumerate() {
+                    node.x = 32 + offset % 4 * 336;
+                    node.y = top + 184 + offset / 4 * 232;
+                }
+                let center = (self.nodes[root].x + 136) as f64;
+                let first_bus = (top + 144) as f64;
+                let mut path = rounded_path(&[(center, (top + 104) as f64), (center, first_bus)]);
+                for row in 0..rows {
+                    let count = (band.total - row * 4).min(4);
+                    let right = (168 + (count - 1) * 336) as f64;
+                    let bus = (top + 144 + row * 232) as f64;
+                    if row == 0 {
+                        let _ = write!(path, " M 168.0 {bus:.1} L {right:.1} {bus:.1}");
+                    } else {
+                        path.push_str(&rounded_path(&[
+                            (168.0, first_bus),
+                            (16.0, first_bus),
+                            (16.0, bus),
+                            (right, bus),
+                        ]));
+                    }
+                }
+                self.trunks.push(GraphTrunk {
+                    path,
+                    state: self.nodes[root].state,
+                });
+            }
+            self.width = self.width.max(width + 64);
+            top += 184 + (rows - 1) * 232 + 168 + 80;
+        }
+        self.width = self.width.max(336);
+        self.height = top;
+        self.edges = links
+            .iter()
+            .map(|&(from, to)| {
+                let source = &self.nodes[from];
+                let target = &self.nodes[to];
+                let start_x = (target.x + 136) as f64;
+                let start_y = (target.y - 40) as f64;
+                let end_x = start_x;
+                let end_y = target.y as f64;
+                GraphEdge {
+                    from: source.id.clone(),
+                    to: target.id.clone(),
+                    path: rounded_path(&[(start_x, start_y), (end_x, end_y)]),
+                    state: target.state,
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                }
+            })
+            .collect();
+    }
+
     fn push(
         &mut self,
         label: String,
@@ -222,6 +692,7 @@ impl ReleaseGraph {
         let index = self.nodes.len();
         self.nodes.push(GraphNode {
             id: format!("graph-node-{index}"),
+            key: String::new(),
             label,
             context,
             state,
@@ -260,7 +731,7 @@ impl ReleaseGraph {
                 graph.nodes[index].environment = dest.environment.clone();
                 graph.nodes[index].summary = "Configured destination".into();
             }
-            graph.layout(&[], &[]);
+            graph.layout(&[], &[], true);
             return graph;
         };
         graph.has_logs = true;
@@ -348,7 +819,11 @@ impl ReleaseGraph {
                 stage.started_at.as_deref(),
                 stage.completed_at.as_deref(),
             );
-            let plan_index = plan_outputs.get(stage.stage_id.as_str()).map(|&output| {
+            let plan_index = (stage.stage_type == "plan").then(|| {
+                let output = plan_outputs
+                    .get(stage.stage_id.as_str())
+                    .copied()
+                    .unwrap_or_default();
                 let plan_index = graph.plans.len();
                 graph.nodes[index].preview = output
                     .lines()
@@ -359,6 +834,7 @@ impl ReleaseGraph {
                     .take(80)
                     .collect();
                 graph.plans.push(GraphPlan {
+                    stage_id: stage.stage_id.clone(),
                     output: output.to_owned(),
                 });
                 plan_index
@@ -630,7 +1106,7 @@ impl ReleaseGraph {
                 graph.nodes[index].summary = "Configured destination".into();
             }
         }
-        graph.layout(&links, &state_dependencies);
+        graph.layout(&links, &state_dependencies, true);
         graph
     }
 
@@ -668,7 +1144,12 @@ impl ReleaseGraph {
         }
     }
 
-    fn layout(&mut self, links: &[(usize, usize)], state_dependencies: &[(usize, usize)]) {
+    fn layout(
+        &mut self,
+        links: &[(usize, usize)],
+        state_dependencies: &[(usize, usize)],
+        infer_dependencies: bool,
+    ) {
         let mut outgoing = vec![Vec::new(); self.nodes.len()];
         let mut incoming = vec![0usize; self.nodes.len()];
         let mut predecessors = vec![Vec::new(); self.nodes.len()];
@@ -677,7 +1158,9 @@ impl ReleaseGraph {
             outgoing[from].push((to, edge));
             predecessors[to].push((from, edge));
             incoming[to] += 1;
-            dependencies[to].push(from);
+            if infer_dependencies {
+                dependencies[to].push(from);
+            }
         }
         for &(from, to) in state_dependencies {
             if !dependencies[to].contains(&from) {
@@ -771,7 +1254,9 @@ impl ReleaseGraph {
                     from: a.id.clone(),
                     to: b.id.clone(),
                     path,
-                    state: if a.state == NodeState::Done && b.state == NodeState::Done {
+                    state: if !infer_dependencies {
+                        b.state
+                    } else if a.state == NodeState::Done && b.state == NodeState::Done {
                         NodeState::Done
                     } else if a.state == NodeState::Running {
                         NodeState::Running

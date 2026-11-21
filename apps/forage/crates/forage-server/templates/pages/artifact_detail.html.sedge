@@ -40,7 +40,7 @@ props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_
       </div>
     </div>
 
-    <ReleaseGraph graph={graph} release={release} detail_url={release_href(org, project, &release.slug).as_str()} logs_url={logs_href(org, project, &release.slug).as_str()} />
+    <ReleaseGraph graph={graph} release={Some(release)} detail_url={release_href(org, project, &release.slug).as_str()} logs_url={logs_href(org, project, &release.slug).as_str()} />
 
     {if let Some(description) = &release.description {
       <div class="mb-8">

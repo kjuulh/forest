@@ -1,0 +1,3 @@
+use crate::views::components::ReleaseGraph;
+props crate::views::release::EnvironmentGraphFragmentPage { graph, context };
+<ReleaseGraph graph={graph} workspace_id="release-environments" heading="Environment status" context={context} overview={true} compact={true} show_plan={false} />

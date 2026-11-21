@@ -1,13 +1,13 @@
 # Spec 018: Release Pipeline Graph
 
-Status: implemented and verified locally; stacked fork reviews and deployment pending.
+Status: earlier implementation and cost regressions verified; revised readable overview browser proof and fork review pending.
 
 ## Problem
 
 An individual release already exposes stages, policies, destinations, logs and
 its specification. Those sections do not show dependency order or distinguish
-parallel destinations at a glance. The same full node editor is available on
-individual releases and both release overviews, alongside the existing charts.
+parallel destinations at a glance. Overviews need global environment/destination
+status, with a full pipeline available inside expanded active release entries.
 
 ## Behavioural contract
 
@@ -18,15 +18,30 @@ individual releases and both release overviews, alongside the existing charts.
   without replacing them or duplicating their mutation forms.
 - Completed, active and future nodes all remain in the graph. Active changes the
   camera, not the dataset; Fit exposes the entire dependency graph.
-- Project and organisation overviews use the identical server-rendered graph for
-  the latest release per project. Existing compact flow charts and timelines remain.
-  Overview graphs follow canonical timeline refresh, without extra polling loops.
-- Timeline JSON adds stage `depends_on`, optional destination `stage_id` provenance
-  and optional `graph_html` for the latest release per project. Older clients ignore
-  these additive fields. No RPC, forest-server or database schema changes are needed.
-- Overview graph projection fetches existing plan outputs and current policies,
-  bounded to four concurrent release projections. It uses the same graph builder
-  and component as details, including plan previews and policy nodes.
+- Project and organisation overviews show one global high-resolution environment/
+  destination workspace. Environment lanes place a compact environment card above
+  rows of destination cards, with at most four destinations per row and shared
+  orthogonal connectors. Cards and connectors do not cross card bounds.
+- Each physical destination has one card per `(environment, name)`, retaining
+  current completed and incoming operations together rather than rendering a card
+  per operation. Additional pending operations are counted; the inspector retains
+  every operation's provenance, state, reason and timing. A newer completion
+  timestamp never hides queued work. Plan completion is not deployment success,
+  and missing operation provenance remains explicit.
+- The overview contains no pipeline stage nodes or inferred environment promotion
+  dependencies. Logical edges still connect each environment to its destinations.
+- Expanding an active timeline entry lazily loads that release's full pipeline
+  workspace. Collapsed or initially inactive entries make no graph request.
+  An opened pipeline gets its final update and remains inspectable until collapse.
+- Original timelines and stage disclosures remain. The lower-resolution overview
+  flow and per-project top-level pipeline viewers are removed.
+- Timeline JSON adds optional top-level `graph_html` only with `include_graph=true`.
+  The global projection uses already-fetched state and adds zero upstream RPCs.
+- The authenticated lazy fragment evaluates policies only for the requested latest
+  intent. Neither overview response fetches nor embeds plan output. The inspector
+  fetches one plan only when Plan is opened; stale requests are aborted.
+- Existing additive stage `depends_on` and optional destination `stage_id` fields
+  remain compatible. No RPC, forest-server or database schema changes are needed.
 - The latest release intent supplies stages and their explicit `depends_on`
   edges. Independent branches are not joined by incidental display order.
 - Intent steps identify destination execution by `stage_id`, not only by
@@ -58,10 +73,11 @@ already succeeded. Visual fan-out through completed children does not erase
 the unfinished aggregate dependency. A passed policy likewise does not bypass
 an outstanding plan approval.
 
-The graph's `data-live` flag is true while execution or an outstanding gate
-remains unfinished, and false when the graph is terminal. Existing live-page
-refresh updates the server-rendered graph without a full-page reload. Running
-emphasis respects reduced-motion preferences.
+The graph's `data-live` flag marks unfinished execution. Details poll every ten
+seconds only while visible, on-screen and unfinished. Canonical overview refreshes
+coalesce events, never overlap, and start at most once per ten seconds while the
+document is visible. Only expanded visible pipelines refresh their lazy fragment.
+Running emphasis respects reduced-motion preferences.
 
 ### Markup, access and security
 
@@ -69,31 +85,40 @@ emphasis respects reduced-motion preferences.
   ARIA and marker identifiers by project and artifact. Each exposes `data-live`.
 - Nodes have lowercase `data-state` and logical `data-node-id="graph-node-N"`.
   DOM IDs are instance-prefixed; user-supplied labels never become SVG identifiers.
+- Overview destination cards expose a stable `data-node-stable-key` for the
+  physical target, independent of release identity, state and timestamps.
+  Selection and focus use this key across refreshes; other nodes retain their
+  existing selection identity.
 - Edges expose `data-from` and `data-to` referencing the logical node identifiers.
 - SVG nodes remain keyboard-accessible anchors with existing stage, destination
   or policy targets as a progressive-enhancement fallback. Enhanced selection
   opens the inspector rather than relying on bottom-of-page jump links.
 - Cards show their kind, environment, stage or destination label, state,
   destination summary, duration and available timing directly on the canvas.
-  Plan output previews and scheduling, approval or failure reasons are visible
-  in cards, not available only through hover or focus.
-- The inspector provides Details, Plan and Logs controls. It shows the selected
-  node's full context and fetched plan output; logs are available when the
-  release has logs. One escaped inert template holds each plan's complete
-  output, shared by its stage and destination nodes rather than duplicated in
-  every card.
+  Scheduling, approval and failure reasons are visible directly in cards; details
+  can also display their already-fetched plan previews.
+- Pipeline inspectors provide Details, Plan and Logs controls. Overview Plan text
+  loads on demand from the existing same-origin endpoint into `textContent`.
+  Only the current fetched plan is retained. Empty metadata templates identify
+  plan stages without carrying their output. The global workspace has no Plan/Logs.
 - Detail approval and rejection submit the existing authenticated forms with their
   original CSRF fields. Overview approval controls link to that release's real
   approval section; no duplicate forms or action endpoints are introduced.
-- Active automatically frames current work as canvas space changes; Fit frames
-  the whole graph. Fullscreen expands the workspace. Manual zoom and pan support
-  exploration; live refresh preserves selection, camera and mounted logs.
+- Desktop global overviews initially Fit the entire workspace; Active frames the
+  active environment and its destination neighborhood, not a single card.
+  Pipeline workspaces retain their current-work framing. Camera bounds use each
+  rendered card's actual dimensions, including compact environment cards.
+- Fullscreen expands the workspace. Manual zoom and pan support exploration;
+  live refresh preserves selection, camera and mounted logs. Narrow screens
+  retain readable navigation without document overflow.
 - A legend and textual states explain the visual emphasis. Labels, reasons and
   plan output are escaped HTML, including hostile markup and quotes.
 - The page uses no inline scripts, styles or event handlers. Behaviour and
   styling come from same-origin static assets under the existing CSP.
 - A layered dependency layout supports multiple destinations, light and dark
-  presentation, and narrow-screen access to both canvas and inspector.
+  presentation, and narrow-screen access to both canvas and inspector. The global
+  workspace has more horizontal and vertical room without widening the timeline
+  or changing the pipeline viewport.
 
 ## Verification mapping
 
@@ -108,19 +133,25 @@ release routes through the existing mock platform boundary. It covers:
 - environment and duration in visible cards, visible wait and policy reasons,
   and one shared escaped plan-output template;
 - configured destinations and escaped hostile text;
-- above-fold placement without dropping existing detail content, full overview/detail
-  node projection equivalence and independent DOM identifiers across projects;
+- above-fold detail placement, global environment/destination projection, full
+  detail/lazy-fragment equivalence, and operation provenance within target cards;
+- one target card retaining completed and queued records with stable identity;
+- actual rendered card bounds across two environments and more than four targets,
+  including wrapped rows and retained logical environment-to-target edges;
 - unfinished and terminal `data-live` flags;
 - safe graph identifiers, keyboard fallback targets, inspector and auto-fit
   controls, and reuse of the original authenticated forms without duplication;
 - strict report-only CSP and absence of inline executable/style markup.
+- opt-in projection with zero extra RPCs, lazy per-intent policy evaluation without
+  plan output, authorization before upstream work and cross-project slug isolation;
 
 Browser interaction, automatic fitting on resize, pan and zoom, fullscreen,
 inspector plan/log rendering, form submission and selection retention through
 live refresh are integration gates, not established by these HTTP route tests.
-The diagrams.net v3 suite is design intent, not evidence of a functioning
-browser implementation. Screenshot capture uses headless Chrome over CDP with
-its profile under the workspace `.workspace-cache/`, not Playwright.
+The diagrams.net suites, including the v6 readable overview, are design intent,
+not evidence of a functioning browser implementation. Screenshot capture uses
+headless Chrome over CDP with its profile under the workspace
+`.workspace-cache/`, not Playwright.
 
 ## Deliberately not done
 
@@ -131,38 +162,27 @@ consume the same graph component; overview HTML travels in the timeline JSON.
 
 ## Verification status
 
-Verified 2026-11-21 against the real Forage test router with representative
-release data and the strict CSP promoted from report-only to enforcing:
+- 65 release-route checks passed, covering state/provenance, opt-in cost,
+  authorization, hostile strings, merged completed/incoming target cards, stable
+  target identity and non-overlapping eight-target wrapped environment lanes.
+- 101 frontend tests passed across API compatibility, visibility-aware prefetch,
+  ten-second scheduling, lazy graph lifecycle and lane state. Bundle, CSS and
+  controller syntax checks passed.
+- Chrome/CDP: the readable global overview rendered nine nodes, all inside its
+  canvas with no overlapping cards. Desktop defaults to Fit; Active framed the
+  entire prod environment. An expanded active entry rendered twenty pipeline
+  nodes and fetched the selected plan on demand. Light/dark desktop and 390px
+  mobile screenshots were captured without document overflow.
+- Earlier shared-editor browser checks covered native pan/zoom, fullscreen,
+  Plan/Logs, original approval submission, strict graph CSP, inert hostile
+  strings and inspection retention across live updates. Deterministic lifecycle
+  tests establish hidden-tab pausing; CDP did not establish a real hidden tab.
 
-- release-render route checks passed, including the corrected aggregate-lock
-  regression; state, multi-destination and hostile-input coverage is in
-  `release_graph_tests.rs`;
-- headless Chrome over CDP rendered the new graph widgets in light/dark desktop
-  and a 390px mobile viewport under the enforcing strict CSP, without document
-  overflow; the legacy timeline's existing inline positioning is unchanged;
-- Plan showed the fetched output, Logs mounted the existing log viewer, and
-  inspector approval submitted the original CSRF-protected form (204);
-- Fit, Active, fullscreen entry/exit, native pointer pan, wheel zoom, keyboard
-  selection and View stage all changed the actual browser surface;
-- server-driven waiting → running → done updates retained the document, root,
-  inspector, mounted logs, pinned selection and manual camera; terminal state
-  stopped live updates;
-- running animation was present normally and absent under reduced motion.
-- shared full viewers rendered in both overviews alongside the retained compact
-  flow charts and timeline cards, including two projects with the same release slug;
-- automatic cameras followed live execution changes; policy-only context changes
-  refreshed cards without requiring a stage transition;
-- hostile title, destination/policy labels, failure reasons and plan output passed
-  the actual timeline JSON render regression. Chrome mounted the hostile title
-  and failure reason as text, with zero injected image/script/event-handler nodes.
+Editable design sources: workspace `notes/design/release-pipeline-v3.drawio`
+(card/editor fidelity), `notes/design/release-pipeline-v5-environments.drawio`
+(global status and expanded pipeline placement), and
+`notes/design/release-pipeline-v6-readable-overview.drawio` (readable environment
+lanes and current/incoming target cards), opened in diagrams.net.
 
-Final screenshots: workspace `notes/full-details-light-desktop.png`,
-`notes/full-overview-light-desktop.png`, `notes/full-overview-dark-mobile.png`,
-`notes/full-overview-editor-light.png` and `notes/full-overview-hostile-inert.png`.
-Editable design source: `notes/design/release-pipeline-v3.drawio`; the shared
-viewer reuses its full node workspace with a compact initial viewport.
-These artifacts are outside the repository. The temporary browser harness was
-removed after verification; no test-only route or deployment shortcut ships.
-
-Not established: the deployed origin, live backend data and production
-approval side effects. The local browser's release data was a fixture.
+No deployed-origin verification or real approval side effects are established.
+Browser release data is a representative fixture, not production.
