@@ -187,6 +187,11 @@ svg {
   font-weight: 600;
 }
 
+.release-detail-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .release-graph {
   width: 100%;
   margin-bottom: calc(var(--spacing) * 8);
@@ -211,6 +216,9 @@ svg {
 .release-graph-heading-context { flex-wrap: wrap; min-width: 0; flex: 1; }
 .release-graph-heading h2 { color: var(--color-gray-900); font-size: var(--text-sm); font-weight: 650; white-space: nowrap; }
 .release-graph-heading-context > span { font-size: var(--text-xs); color: var(--color-gray-600); overflow-wrap: anywhere; }
+.release-graph[data-context="detail"] [data-graph-release-context] { display: none; }
+.release-graph[data-context="detail"]:fullscreen [data-graph-release-context],
+.release-graph[data-context="detail"][data-fullscreen="true"] [data-graph-release-context] { display: inline; }
 .release-graph-count { font-size: var(--text-xs); color: var(--color-gray-600); white-space: nowrap; }
 .release-graph-live { color: var(--color-blue-700); font-size: var(--text-xs); white-space: nowrap; }
 .release-graph-live > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

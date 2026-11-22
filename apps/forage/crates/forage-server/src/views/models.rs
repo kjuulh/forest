@@ -52,7 +52,8 @@ pub struct ProjectReleasesPage {
     pub username: String,
     pub role: String,
     pub prefetch_js: String,
-    pub graph_js: String,
+    pub show_graph: bool,
+    pub graph_js: Option<String>,
 }
 
 pub fn settings_href(org: &str, project: &str, section: &str) -> String {

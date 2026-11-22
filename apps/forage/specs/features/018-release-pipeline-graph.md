@@ -1,42 +1,44 @@
 # Spec 018: Release Pipeline Graph
 
-Status: earlier implementation and cost regressions verified; revised readable overview browser proof and fork review pending.
+Status: shared workspace deployed and verified on dev/prod; optional Graph-tab navigation and compact header verified in the browser, awaiting fork rollout.
 
 ## Problem
 
 An individual release already exposes stages, policies, destinations, logs and
 its specification. Those sections do not show dependency order or distinguish
-parallel destinations at a glance. Overviews need global environment/destination
-status, with a full pipeline available inside expanded active release entries.
+parallel destinations at a glance. Release lists must remain timeline-first;
+the larger project workspace belongs in an optional Graph tab.
 
 ## Behavioural contract
 
 ### Placement and source of truth
 
-- A compact full-width node workspace sits above the existing release-detail
-  content. Its canvas, toolbar and expandable inspector supplement those sections
-  without replacing them or duplicating their mutation forms.
+- A full-width node workspace sits above the existing release-detail content.
+  Compact breadcrumbs/title/metadata and a non-duplicating graph toolbar leave
+  more room for the canvas while preserving every original detail section/form.
 - Completed, active and future nodes all remain in the graph. Active changes the
   camera, not the dataset; Fit exposes the entire dependency graph.
-- Project and organisation overviews show one global high-resolution environment/
-  destination workspace. Environment lanes place a compact environment card above
-  rows of destination cards, with at most four destinations per row and shared
-  orthogonal connectors. Cards and connectors do not cross card bounds.
+- Project navigation exposes a **Graph** tab beside **Releases**. Only that
+  opt-in page shows the high-resolution environment/destination workspace and
+  expanded-active pipeline viewers. Default project Releases and all-project
+  overviews show the original timeline/disclosures without graph requests.
+- Environment lanes place a compact environment card above rows of destinations,
+  wrapping after four targets with shared orthogonal connectors and no crossings.
 - Each physical destination has one card per `(environment, name)`, retaining
   current completed and incoming operations together rather than rendering a card
   per operation. Additional pending operations are counted; the inspector retains
   every operation's provenance, state, reason and timing. A newer completion
   timestamp never hides queued work. Plan completion is not deployment success,
   and missing operation provenance remains explicit.
-- The overview contains no pipeline stage nodes or inferred environment promotion
-  dependencies. Logical edges still connect each environment to its destinations.
-- Expanding an active timeline entry lazily loads that release's full pipeline
-  workspace. Collapsed or initially inactive entries make no graph request.
-  An opened pipeline gets its final update and remains inspectable until collapse.
+- The Graph tab's environment view contains no pipeline stage nodes or inferred
+  promotion dependencies. Logical edges connect environments to destinations.
+- On the Graph tab, expanding an active entry lazily loads its full pipeline.
+  Collapsed or initially inactive entries make no graph request. An opened
+  pipeline keeps its final update until collapse.
 - Original timelines and stage disclosures remain. The lower-resolution overview
   flow and per-project top-level pipeline viewers are removed.
-- Timeline JSON adds optional top-level `graph_html` only with `include_graph=true`.
-  The global projection uses already-fetched state and adds zero upstream RPCs.
+- Timeline JSON adds optional top-level `graph_html` only with `include_graph=true`;
+  only the project Graph page opts in. The projection adds zero upstream RPCs.
 - The authenticated lazy fragment evaluates policies only for the requested latest
   intent. Neither overview response fetches nor embeds plan output. The inspector
   fetches one plan only when Plan is opened; stale requests are aborted.
@@ -162,9 +164,9 @@ consume the same graph component; overview HTML travels in the timeline JSON.
 
 ## Verification status
 
-- 65 release-route checks passed, covering state/provenance, opt-in cost,
-  authorization, hostile strings, merged completed/incoming target cards, stable
-  target identity and non-overlapping eight-target wrapped environment lanes.
+- 66 release-route checks and two org-release checks passed, covering the new
+  Graph-route session/membership boundary, state/provenance, opt-in cost,
+  hostile strings, stable target identity and non-overlapping wrapped lanes.
 - 101 frontend tests passed across API compatibility, visibility-aware prefetch,
   ten-second scheduling, lazy graph lifecycle and lane state. Bundle, CSS and
   controller syntax checks passed.
@@ -177,12 +179,24 @@ consume the same graph component; overview HTML travels in the timeline JSON.
   Plan/Logs, original approval submission, strict graph CSP, inert hostile
   strings and inspection retention across live updates. Deterministic lifecycle
   tests establish hidden-tab pausing; CDP did not establish a real hidden tab.
+- Navigation proof: all-project and default project Releases render zero graphs
+  and fetch timeline JSON without the graph flag. Native Graph/Releases clicks
+  and browser Back switch view-specific preserved elements correctly. Graph
+  mode rendered eight environment nodes and an expanded sixteen-node pipeline;
+  its Plan tab loaded output on demand.
+- Detail graph began at 232px with a 32px toolbar in the desktop fixture.
+  Duplicate context is hidden normally and restored in native fullscreen.
+  Detail, Releases and Graph views had no document overflow at 390px.
 
 Editable design sources: workspace `notes/design/release-pipeline-v3.drawio`
 (card/editor fidelity), `notes/design/release-pipeline-v5-environments.drawio`
-(global status and expanded pipeline placement), and
+(global status and expanded pipeline placement),
 `notes/design/release-pipeline-v6-readable-overview.drawio` (readable environment
-lanes and current/incoming target cards), opened in diagrams.net.
+lanes), and `notes/design/release-pipeline-v7-navigation.drawio` (opt-in Graph tab
+and compact detail header), opened in diagrams.net.
 
-No deployed-origin verification or real approval side effects are established.
-Browser release data is a representative fixture, not production.
+The shared renderer was verified against actual dev/prod revision `a2e01b20`:
+production showed nineteen global nodes without painted-card collisions, real
+Plan output as inert text, and an authenticated lazy fragment with no embedded
+plan text. No production release-action forms were submitted. This navigation
+revision still awaits its own pinned review and rollout.

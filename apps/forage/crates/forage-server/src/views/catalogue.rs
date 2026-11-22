@@ -213,7 +213,6 @@ pub struct OrgReleasesPage {
     pub chrome: Chrome,
     pub org: String,
     pub prefetch_js: String,
-    pub graph_js: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
