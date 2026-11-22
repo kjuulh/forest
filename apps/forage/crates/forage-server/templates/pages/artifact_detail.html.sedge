@@ -8,22 +8,25 @@ use crate::views::components::ReleaseGraph;
 props crate::views::release::ReleasePage { chrome, org, project, csrf_token, is_admin, release, summary, environments, has_pipeline, stages, release_intent_id, policies, destinations, configured_destinations, has_release_intents, spec, health, graph, graph_js };
 
 <Shell chrome={chrome}>
-  <section class="app-container pt-12 pb-12">
-    <div class="mb-8">
-      <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+  <section class="app-container pt-6 pb-12">
+    <div class="mb-4">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500 mb-2">
         <a href={project_href(org, project)} class="hover:text-gray-700">{project}</a>
         <span class="text-gray-300">/</span>
         <a href="{project_href(org, project)}/releases" class="hover:text-gray-700">Releases</a>
+        <span class="text-gray-300">/</span>
+        <span class="text-xs font-mono text-gray-400 break-all">{release.slug}</span>
       </div>
-      <div class="flex items-center gap-3">
-        <ReleaseStatusDot status={*summary} />
-        <h1 class="text-2xl font-bold" title={release.full_title}>{release.heading}</h1>
-        {if let Some(version) = &release.version {
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-green-100 text-green-800">{version}</span>
-        }}
+      <div class="flex items-start gap-3">
+        <span class="shrink-0 pt-2"><ReleaseStatusDot status={*summary} /></span>
+        <div class="release-detail-title flex-1">
+          <h1 class="inline text-2xl font-bold" title={release.full_title} aria-label={release.full_title}>{release.heading}</h1>
+          {if let Some(version) = &release.version {
+            <span class="inline-flex items-center align-middle ml-2 px-2.5 py-0.5 rounded text-sm font-medium bg-green-100 text-green-800">{version}</span>
+          }}
+        </div>
       </div>
-      <p class="text-sm font-mono text-gray-400 mt-1">{release.slug}</p>
-      <div class="flex flex-wrap items-center gap-2 mt-3">
+      <div class="flex flex-wrap items-center gap-2 mt-2">
         {if let Some(branch) = &release.branch {
           <OutlineChip tone={Tone::Blue} icon="branch">{branch}</OutlineChip>
         }}

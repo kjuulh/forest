@@ -78,22 +78,22 @@ How to read `release show`:
 
 `forest project releases` renders a plan stage as `deploy(<env>)`; trust `release show` for stage types. Neither command shows the image or SHA running in the service.
 
-In the fork's Forage UI after v0.3.18, individual releases have a high-resolution
-**Release pipeline** workspace below the header. Overviews have one global
-**Environment status** workspace with readable environment lanes: a compact
-environment card sits above rows of destination cards, wrapping after four
-destinations. Shared connectors retain logical environment-to-destination edges.
-Each physical target has one card, not one per operation. Expanding an active
-timeline entry lazily loads its pipeline. Collapsed or initially inactive entries
-make no pipeline graph request. Original timelines and stage disclosures remain;
-there is no lower-resolution graph.
+In the fork's Forage UI, individual releases keep a high-resolution **Release
+pipeline** workspace under a compact header. Default **Releases** and the
+all-project overview remain timeline-first, with no node graph request. Open a
+project's **Graph** tab beside Releases for its optional **Environment status**
+workspace: compact environment cards above destination rows, wrapping after four
+targets with shared connectors. Each physical target has one current/incoming
+card, not one per operation. On this tab, expanding an active entry lazily loads
+its pipeline. Collapsed or initially inactive entries request no pipeline graph.
+Original timelines and stage disclosures remain; no lower-resolution replacement.
 Pipeline nodes separate stages, destination runs, approvals and policies. Their
 camera focuses active work without filtering completed or future nodes away.
-Desktop global overviews start with **Fit** for the whole workspace; **Active**
+Desktop environment workspaces start with **Fit** for the whole graph; **Active**
 frames the active environment and its destinations. Fullscreen expands the
 workspace. Drag to pan, scroll to zoom, or use F/A. Select a node to pin inspection.
-Overview Plan text loads only when Plan opens. The global view has no Plan/Logs.
-Detail approval controls reuse existing forms and CSRF fields; overview controls
+Graph-tab Plan text loads only when Plan opens. The environment view has no Plan/Logs.
+Detail approval controls reuse existing forms and CSRF fields; Graph-tab controls
 link to the release. Details poll every ten seconds while unfinished and visible.
 Canonical overview requests start at most once per ten seconds while visible;
 only expanded visible pipeline fragments refresh. Pinned/manual inspection survives.
@@ -104,9 +104,9 @@ follows the physical target across operation changes. A successful plan is not
 deployed; missing provenance is explicit. None of these views proves the image
 serving.
 
-Final readability browser verification of the revised lanes and current/incoming
-cards is pending. Earlier workspace checks do not prove the revised layout's
-framing, wrapped-card readability or mobile overflow behavior.
+The shared renderer and real Plan output were verified on dev/prod at
+`a2e01b20`; optional navigation and compact-header proof is tracked separately in
+Forage spec 018. Neither UI state nor a diagram proves the serving image.
 
 ## Proving a deployment
 

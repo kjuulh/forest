@@ -235,14 +235,12 @@ async fn the_release_page_renders_without_inline_script_or_handlers() {
 #[tokio::test]
 async fn the_header_shows_the_first_line_and_keeps_the_whole_message_as_its_title() {
     let html = page(behaviour()).await;
-    assert!(
-        html.contains(
-            r#"title="feat: ledger
-
-Longer body">feat: ledger…</h1>"#
-        ),
-        "{html}"
-    );
+    let heading = regex::Regex::new(r"(?s)<h1\b(?P<attributes>[^>]*)>(?P<label>.*?)</h1>")
+        .unwrap()
+        .captures(&html)
+        .expect("release page has a heading");
+    assert!(heading["attributes"].contains("title=\"feat: ledger\n\nLonger body\""));
+    assert_eq!(&heading["label"], "feat: ledger…");
     assert!(html.contains(">v3.1.0</span>"));
     assert!(html.contains("01234567</span>") && !html.contains("0123456789"));
     assert!(

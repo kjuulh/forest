@@ -71,6 +71,7 @@ pub enum Tab {
     ProjectOverview,
     ProjectComponents,
     ProjectReleases,
+    ProjectGraph,
     ProjectSettings,
 }
 
@@ -108,6 +109,7 @@ impl Viewer {
                         Tab::ProjectComponents,
                     ),
                     tab("Releases", format!("{base}/releases"), Tab::ProjectReleases),
+                    tab("Graph", format!("{base}/graph"), Tab::ProjectGraph),
                     tab("Settings", format!("{base}/settings"), Tab::ProjectSettings),
                 ]
             }

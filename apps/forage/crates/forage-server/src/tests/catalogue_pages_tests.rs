@@ -331,10 +331,6 @@ async fn the_org_releases_page_primes_the_timeline_and_loads_the_island() {
         "the releases page no longer primes the timeline: {html}"
     );
     assert!(
-        html.contains(r#"<release-timeline id="rt-testorg" sedx-preserve org="testorg"></release-timeline>"#),
-        "{html}"
-    );
-    assert!(
         html.contains("/static/js/components/forage-components.js?v="),
         "{html}"
     );
@@ -348,7 +344,6 @@ fn the_timeline_url_cannot_break_out_of_its_attribute() {
         chrome: Default::default(),
         org: "evil\"><script>alert(1)</script>".into(),
         prefetch_js: "/static/js/timeline-prefetch.js".into(),
-        graph_js: "/static/js/release-graph.js".into(),
     };
     let html = crate::views::pages::releases::render(&page);
     assert!(!html.contains("<script>alert(1)</script>"), "{html}");

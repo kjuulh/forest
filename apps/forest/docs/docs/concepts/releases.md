@@ -85,14 +85,15 @@ The wait stream includes:
 
 ### Release pipeline diagram
 
-In the fork's Forage UI after v0.3.18, an individual release's **Release pipeline**
-workspace sits below its header. Overviews instead show one **Environment status**
-workspace with an environment card above each lane's destination cards. Rows wrap
-after four destinations; shared connectors keep the lanes separate. Each
-destination has one card showing current and incoming context, not a card per
-operation. Expanding an active timeline entry loads its full pipeline in place.
-Original timelines and stage disclosures remain; there is no separate
-lower-resolution graph.
+In the fork's Forage UI, an individual release's **Release pipeline** workspace
+sits below a compact context header. Default project **Releases** and the
+all-project overview remain timeline-first, with no large graph or graph fetch.
+Open the project's **Graph** tab beside Releases for its optional **Environment
+status** workspace. Environment lanes wrap after four destination cards; shared
+connectors keep the lanes separate. Each physical destination has one card with
+current and incoming context. On this tab, expanding an active entry lazily
+loads its full pipeline. Original timelines and stage disclosures remain;
+there is no lower-resolution replacement.
 
 The server lays out dependency columns, with separate nodes for each stage's
 destination runs, plan approvals and current policy evaluations. Plan and
@@ -103,14 +104,14 @@ waiting, blocked, failed and terminal states.
 Within a pipeline, completed, active and future nodes all remain visible.
 
 The pipeline camera automatically focuses current work; **Fit** shows the entire
-graph. Desktop environment overviews start with **Fit**; **Active** frames an
+graph. Desktop environment workspaces start with **Fit**; **Active** frames an
 active environment and its destinations. Drag or middle-drag to pan, scroll to
 zoom, or expand to fullscreen. Cards include environment, execution progress,
 duration and waiting/failure context. Select a node to pin its inspector.
 Pipeline details also show available plan previews.
 
-An overview pipeline fetches plan output only when its inspector's **Plan** tab
-opens; the global workspace has no plan/log controls. Collapsed and initially
+An expanded Graph-tab pipeline fetches output only when its inspector's **Plan**
+tab opens; the environment workspace has no plan/log controls. Collapsed and initially
 inactive entries make no pipeline graph request.
 Detail approval controls submit the existing CSRF-protected forms; overview
 controls link to the release. Keyboard users can Tab to nodes, press Enter to
@@ -120,7 +121,7 @@ refreshes coalesce at most once per ten seconds while visible; only expanded
 visible pipelines fetch their graph. Both preserve manual views and pinned
 inspection. Running emphasis respects reduced motion.
 
-Each overview destination card keeps current completed operations alongside
+Each Graph-tab destination card keeps current completed operations alongside
 incoming changes, with a pending count when several are queued. Its inspector
 retains each operation's provenance, state, reason and timing. A newer completion
 does not hide queued work, and pinned selection follows the physical target
@@ -128,9 +129,9 @@ across operation changes. Plan completion is not deployment success; missing
 operation provenance is labelled. Configured destinations without current state
 are unknown, not deployed.
 
-Final browser verification of the revised readable environment lanes and
-current/incoming cards is pending. Earlier workspace browser checks do not
-establish readability, framing or mobile overflow behavior for this revision.
+The shared renderer and real Plan output were browser-verified on dev and
+production at revision `a2e01b20`. The subsequent opt-in navigation and compact
+header revision has separate checks recorded in Forage spec 018.
 
 ## Combined Command
 

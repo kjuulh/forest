@@ -30,6 +30,7 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/releases",
             get(project_releases),
         )
+        .route("/orgs/{org}/projects/{project}/graph", get(project_graph))
         .route(
             "/orgs/{org}/projects/{project}/deployments",
             get(deployments_to_releases_redirect),
@@ -906,6 +907,29 @@ async fn project_releases(
     session: Session,
     Path((org, project)): Path<(String, String)>,
 ) -> Result<Response, Response> {
+    project_releases_page(state, session, org, project, ProjectReleasesMode::Timeline).await
+}
+
+async fn project_graph(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, project)): Path<(String, String)>,
+) -> Result<Response, Response> {
+    project_releases_page(state, session, org, project, ProjectReleasesMode::Graph).await
+}
+
+enum ProjectReleasesMode {
+    Timeline,
+    Graph,
+}
+
+async fn project_releases_page(
+    state: AppState,
+    session: Session,
+    org: String,
+    project: String,
+    mode: ProjectReleasesMode,
+) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
     let current_org = require_org_membership(&state, orgs, &org)?;
     let current_role = current_org.role.clone();
@@ -927,17 +951,21 @@ async fn project_releases(
             .await,
     );
 
+    let (label, tab, show_graph) = match mode {
+        ProjectReleasesMode::Timeline => ("Releases", forage_ui::chrome::Tab::ProjectReleases, false),
+        ProjectReleasesMode::Graph => ("Graph", forage_ui::chrome::Tab::ProjectGraph, true),
+    };
     let page = crate::views::models::ProjectReleasesPage {
         chrome: crate::views::chrome::signed_in(
             &state,
             &session,
             crate::views::chrome::Page {
-                title: format!("Releases - {project} - {org} - Forest"),
-                description: format!("Releases performed for {project} in {org}"),
+                title: format!("{label} - {project} - {org} - Forest"),
+                description: format!("{label} for {project} in {org}"),
                 org: Some(&org),
                 project: Some(&project),
                 projects,
-                tab: forage_ui::chrome::Tab::ProjectReleases,
+                tab,
             },
         ),
         org: org.clone(),
@@ -946,7 +974,8 @@ async fn project_releases(
         username: session.user.username.clone(),
         role: current_role,
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
-        graph_js: state.templates.asset_href("js/release-graph.js"),
+        show_graph,
+        graph_js: show_graph.then(|| state.templates.asset_href("js/release-graph.js")),
     };
     let html = crate::views::pages::project_releases::render(&page);
 
@@ -2582,7 +2611,6 @@ async fn releases_page(
         ),
         org: org.clone(),
         prefetch_js: state.templates.asset_href("js/timeline-prefetch.js"),
-        graph_js: state.templates.asset_href("js/release-graph.js"),
     };
     let html = crate::views::pages::releases::render(&page);
 
